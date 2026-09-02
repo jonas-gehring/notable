@@ -1,0 +1,14 @@
+.shipstudio/
+
+# Xcode / xcodegen output
+Notable.xcodeproj/
+Generated/
+build/
+DerivedData/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Local signing configuration (Team ID)
+Signing/Local.xcconfig

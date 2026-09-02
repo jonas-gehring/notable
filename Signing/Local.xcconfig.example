@@ -1,0 +1,12 @@
+// Copy this file to Signing/Local.xcconfig and fill in your Apple Team ID.
+// Local.xcconfig is gitignored; this example is not.
+//
+// Find your Team ID in Xcode ▸ Settings ▸ Accounts, or read it out of an
+// existing identity:
+//
+//     security find-identity -v -p codesigning
+//     -> "Developer ID Application: Your Name (TEAMID1234)"
+//
+// A team is required because the app signs with a stable "Developer ID
+// Application" identity (see project.yml — TCC grants depend on it).
+DEVELOPMENT_TEAM = TEAMID1234

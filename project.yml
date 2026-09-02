@@ -1,0 +1,214 @@
+name: Notable
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.4"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.4"
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio
+    from: 0.15.0
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    # `from` is up-to-next-major: [0.9.0, 1.0.0) — resolves to the latest 0.x
+    # (currently 0.18.0). 1.0.0 is the "argmax-oss-swift" graduation rename;
+    # staying < 1.0.0 keeps the pre-1.0 WhisperKit API
+    # (transcribe(audioArray:) -> [TranscriptionResult]).
+    from: 0.9.0
+schemes:
+  Notable:
+    build:
+      targets:
+        Notable: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - NotableTests
+targets:
+  NotableTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/NotableTests
+      # Standalone test bundle (no app host): compile the units under test directly.
+      - path: Sources/Notable/Dictation/TranscriptionEngine.swift
+      - path: Sources/Notable/Dictation/ParakeetTranscriber.swift
+      - path: Sources/Notable/Dictation/EnglishStreamingTranscriber.swift
+      - path: Sources/Notable/Dictation/WhisperTranscriber.swift
+      - path: Sources/Notable/Dictation/TextPolisher.swift
+      # Rebuilds paragraphs/lists after tidy() flattened them (issue #1).
+      - path: Sources/Notable/Dictation/ParagraphFormatter.swift
+      # Spoken shorthands expanding to arbitrary text (issue #4) — deliberately
+      # separate from PersonalDictionary, and never fuzzy-matched.
+      - path: Sources/Notable/Dictation/SmartReplace.swift
+      - path: Sources/Notable/Dictation/IncrementalDictation.swift
+      - path: Sources/Notable/Dictation/PTTStateMachine.swift
+      # Where the dictation HUD sits (issue #3). Pure frame arithmetic — the
+      # AppKit panel around it stays out of the test target.
+      - path: Sources/Notable/Dictation/NotchGeometry.swift
+      # The panel itself, for the one invariant the whole paste mechanic rests
+      # on: it must never become key.
+      - path: Sources/Notable/Dictation/DictationOverlay.swift
+      - path: Sources/Notable/Dictation/Paster.swift
+      - path: Sources/Notable/Dictation/DictationHistory.swift
+      # LLM improvement on request (issue #1 Stufe 2). The guardrails before the
+      # paste and the CLI-only wiring are the whole point of testing this.
+      - path: Sources/Notable/Dictation/DictationEnhancer.swift
+      # Which of the two dictation hotkeys fired — pure, because the tap callback
+      # it was extracted from cannot be tested.
+      - path: Sources/Notable/Dictation/HotkeyRouting.swift
+      - path: Sources/Notable/Dictation/HotkeySpec.swift
+      # Which languages the detector may choose between (Spec 11) — it sits in
+      # the polishing core path, so it is tested rather than trusted.
+      - path: Sources/Notable/Dictation/SpokenLanguages.swift
+      # When a stand-in model carries dictation and when it may be swapped
+      # (Spec 10). Pure — the models themselves stay out of the test target.
+      - path: Sources/Notable/Dictation/BootstrapPolicy.swift
+      # Pausing/muting playback during a dictation (Spec 08 B). The "only undo
+      # your own doing" rule is the part worth a test.
+      - path: Sources/Notable/Dictation/MediaInterrupter.swift
+      - path: Sources/Notable/Dictation/AppCategory.swift
+      - path: Sources/Notable/Dictation/WordDiff.swift
+      - path: Sources/Notable/Stats/UsageMetrics.swift
+      - path: Sources/Notable/Meeting/ChatPrompt.swift
+      - path: Sources/Notable/Storage/RecordingStore.swift
+      - path: Sources/Notable/Storage/MarkdownProjector.swift
+      # Retention rules (issue #2). The planner is pure; the runner is the only
+      # thing that deletes, and it is what the "statistics must not shrink"
+      # tests are aimed at.
+      - path: Sources/Notable/Storage/RetentionPolicy.swift
+      - path: Sources/Notable/Summarization/SummarizationProvider.swift
+      - path: Sources/Notable/Summarization/SummaryParser.swift
+      - path: Sources/Notable/Summarization/AnthropicAPIProvider.swift
+      - path: Sources/Notable/Summarization/ClaudeCodeCLIProvider.swift
+      # Gemini/Codex as described CLIs over the shared runner. The forgiving
+      # output parser is the part worth testing — these tools reshape their
+      # output between releases.
+      - path: Sources/Notable/Summarization/AgentCLIProvider.swift
+      - path: Sources/Notable/Support/CLIProcessRunner.swift
+      - path: Sources/Notable/Summarization/SummarizationService.swift
+      # Books what a provider round-trip spent; SpeakerNameResolver calls it.
+      - path: Sources/Notable/Summarization/UsageRecorder.swift
+      - path: Sources/Notable/Support/KeychainStore.swift
+      - path: Sources/Notable/Support/ClaudeCodeCLILocator.swift
+      - path: Sources/Notable/Support/PCMDownsampler.swift
+      - path: Sources/Notable/Meeting/MeetingPipeline.swift
+      - path: Sources/Notable/Meeting/MeetingDetector.swift
+      # MeetingDetector references MeetingIdentityKey; the store + identity mapping
+      # are pure, so the unit target compiles them directly (panel/coordinator are
+      # @MainActor UI and stay out of the test target).
+      - path: Sources/Notable/Meeting/MeetingConsent.swift
+      # Per-process audio signal behind the call start/end detection (Spec 09).
+      # The snapshot type is pure; only the CoreAudio fetch touches hardware.
+      - path: Sources/Notable/Meeting/AudioProcessMonitor.swift
+      - path: Sources/Notable/Meeting/SpoolStore.swift
+      # Pure core of the live meeting notes (timestamps, storable text). The
+      # controller/window around it is @MainActor UI and stays out.
+      - path: Sources/Notable/Meeting/LiveNotes.swift
+      - path: Sources/Notable/Meeting/NotesMarkdown.swift
+      - path: Sources/Notable/Meeting/NotesRichText.swift
+      # The controller too: its debounced spool autosave is a concurrency contract
+      # (main-actor buffer, off-main write) that only a running test can check.
+      - path: Sources/Notable/Meeting/LiveNotesController.swift
+      - path: Sources/Notable/Meeting/SpeakerNameResolver.swift
+      # Judges whether a captured track carried audio at all — the shape every
+      # meeting-capture regression has taken so far.
+      - path: Sources/Notable/Meeting/TrackSilence.swift
+      - path: Sources/Notable/Update/UpdateChecker.swift
+      - path: Sources/Notable/Update/UpdateInstaller.swift
+    dependencies:
+      - package: FluidAudio
+      - package: WhisperKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+  Notable:
+    type: application
+    platform: macOS
+    # DEVELOPMENT_TEAM lives here, not in this file: Developer ID signing requires
+    # a team, and the team is per-developer. Copy Signing/Local.xcconfig.example to
+    # Signing/Local.xcconfig (gitignored) and fill in your Apple Team ID.
+    configFiles:
+      Debug: Signing/Local.xcconfig
+      Release: Signing/Local.xcconfig
+    sources:
+      - Sources/Notable
+      - path: Resources
+        buildPhase: resources
+    dependencies:
+      - package: FluidAudio
+      - package: WhisperKit
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: Notable
+        CFBundleIconFile: AppIcon
+        # User-facing semver + monotonic build counter. Bound to the build
+        # settings below so scripts/release.sh is the single writer of both.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Menu-bar app, no Dock presence by default.
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "Notable nutzt das Mikrofon für Diktat und Meeting-Aufnahmen. Audio verlässt das Gerät nicht."
+        NSCalendarsFullAccessUsageDescription: "Notable liest den Kalender, um Aufnahmen dem passenden Termin zuzuordnen."
+        NSAudioCaptureUsageDescription: "Notable zeichnet System-Audio auf, um die anderen Meeting-Teilnehmer zu transkribieren. Audio verlässt das Gerät nicht."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.jonasgehring.notable
+        # Versioning — MARKETING_VERSION (CFBundleShortVersionString) is the only
+        # human-chosen value; CURRENT_PROJECT_VERSION (CFBundleVersion) is the
+        # monotonic build counter. scripts/release.sh is the single writer of both.
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "79"
+        # Signed with a stable "Developer ID Application" cert (NOT
+        # ad-hoc, NOT "Apple Development"): a stable identity keeps the designated
+        # requirement constant so TCC grants persist across rebuilds, AND Developer
+        # ID + hardened runtime is the combination Apple's notary service accepts —
+        # so `scripts/release.sh` can notarize + staple and the download opens on
+        # any Mac without a Gatekeeper warning. The CGEvent taps / synthesized
+        # paste really are TCC-gated only, but the *hardware* resources are not:
+        # under hardened runtime tccd refuses microphone and calendar outright —
+        # no prompt, and AVAudioEngine then taps pure digital silence — unless
+        # the entitlements below are present. They are load-bearing; a build
+        # without them looks healthy and transcribes nothing but silence.
+        # No sandbox (Developer ID, not Mac App Store).
+        # --timestamp is required for notarization.
+        #
+        # DO NOT change CODE_SIGN_IDENTITY casually. TCC binds every grant to the
+        # designated requirement of the app that received it, so a new identity
+        # silently voids the existing grants — and System Settings still shows
+        # Notable with the checkbox ON, so it looks like a code bug, not a missing
+        # right. Nothing is logged, by tccd or by us. Symptom when it bit us
+        # (2026-08-29, the "-" → Apple Development → Developer ID move landing in
+        # /Applications): the fn hotkey did nothing, because AXIsProcessTrusted()
+        # and IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) (PermissionsManager
+        # .swift:175/:182) returned denied and HotkeyMonitor's two CGEventTaps
+        # never installed. Unchecking and rechecking the box does NOT fix it; the
+        # stale entry has to go:
+        #     tccutil reset Accessibility de.jonasgehring.notable
+        #     tccutil reset ListenEvent   de.jonasgehring.notable
+        #     tccutil reset PostEvent     de.jonasgehring.notable
+        # then relaunch and re-grant once. That cleared seven stale entries per
+        # service — one per past ad-hoc code hash plus the two named identities.
+        CODE_SIGN_ENTITLEMENTS: Signing/Notable.entitlements
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        CODE_SIGN_STYLE: Manual
+        OTHER_CODE_SIGN_FLAGS: "--timestamp"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+        COMBINE_HIDPI_IMAGES: YES
+      configs:
+        Release:
+          # `xcodebuild build` (what scripts/release.sh runs — not `archive`)
+          # injects com.apple.security.get-task-allow from the SDK's base
+          # entitlements regardless of configuration. Only `archive` strips it,
+          # and the notary service REJECTS any bundle that requests it. Keep
+          # this NO or notarization fails after the whole build+zip round trip.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO

@@ -16,7 +16,8 @@
 #      requirement), not ad-hoc — an ad-hoc DR shows "cdhash" and would reset
 #      every TCC grant on this Mac.
 #   5. Zips the .app, NOTARIZES it (xcrun notarytool --wait, keychain profile
-#      "notable-notary" or $NOTARY_PROFILE), STAPLES the ticket, and re-zips —
+#      from ~/.config/notarize/profile or $NOTARY_PROFILE), STAPLES the ticket,
+#      and re-zips —
 #      so the download opens on any Mac with no Gatekeeper warning. Needs a
 #      "Developer ID Application" signature (project.yml) + stored credentials.
 #      Set SKIP_NOTARIZE=1 to produce an un-notarized zip instead.
@@ -111,13 +112,26 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 if [ "${SKIP_NOTARIZE:-0}" = "1" ]; then
   echo "==> SKIP_NOTARIZE=1 — skipping notarization (zip is NOT notarized)"
 else
-  if ! echo "$DR" | grep -q "Developer ID Application"; then
+  # Read the AUTHORITY line, not the designated requirement: the DR never spells
+  # the certificate name out, it encodes it as OIDs (field.1.2.840.113635.100.6.1.13),
+  # so grepping $DR for "Developer ID Application" rejects every valid app.
+  if ! codesign -d --verbose=2 "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:'; then
     echo "App is not Developer ID signed — notarization would be rejected." >&2
     echo "Set CODE_SIGN_IDENTITY: \"Developer ID Application\" + ENABLE_HARDENED_RUNTIME: YES in project.yml," >&2
     echo "or re-run with SKIP_NOTARIZE=1 for an un-notarized build." >&2
     exit 1
   fi
-  NOTARY_PROFILE="${NOTARY_PROFILE:-notable-notary}"
+  # The profile NAME lives in ONE place, so renaming it is a one-line change:
+  # $NOTARY_PROFILE, else ~/.config/notarize/profile, else the fallback below.
+  # notarytool has neither a rename nor a delete, and it keeps the credentials in
+  # the data-protection keychain, which `security` cannot even enumerate — so a
+  # "rename" is always: store-credentials under the new name, then point this file
+  # at it. The old profile stays behind, unreachable and harmless.
+  PROFILE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/notarize/profile"
+  if [ -z "${NOTARY_PROFILE:-}" ] && [ -r "$PROFILE_FILE" ]; then
+    NOTARY_PROFILE="$(tr -d '[:space:]' < "$PROFILE_FILE")"
+  fi
+  NOTARY_PROFILE="${NOTARY_PROFILE:-app-notary}"
   if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
     echo "No notarytool credentials for profile '$NOTARY_PROFILE'. Create them once with:" >&2
     echo "  xcrun notarytool store-credentials \"$NOTARY_PROFILE\" --apple-id <id> --team-id <your-team-id> --password <app-specific-pw>" >&2

@@ -28,6 +28,10 @@ final class UpdateInstaller: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .idle
+    /// 0…1 while downloading, `nil` when the server sends no `Content-Length`.
+    /// A ten-megabyte download on a slow line is long enough that "Wird geladen…"
+    /// alone is indistinguishable from a hang.
+    @Published private(set) var downloadProgress: Double?
 
     private let session: URLSession
 
@@ -51,9 +55,11 @@ final class UpdateInstaller: ObservableObject {
 
         do {
             phase = .downloading
+            downloadProgress = nil
             let zip = try await download(info.downloadURL)
             defer { try? FileManager.default.removeItem(at: zip) }
 
+            downloadProgress = nil
             phase = .unpacking
             let newApp = try unpack(zip, expectedName: (bundlePath as NSString).lastPathComponent)
 
@@ -63,6 +69,7 @@ final class UpdateInstaller: ObservableObject {
             // The script is now waiting on our PID. Quit so it can replace us.
             NSApp.terminate(nil)
         } catch {
+            downloadProgress = nil
             phase = .failed(error.localizedDescription)
         }
     }
@@ -74,7 +81,13 @@ final class UpdateInstaller: ObservableObject {
         request.setValue("Notable-UpdateInstaller", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 120
 
-        let (tempFile, response) = try await session.download(for: request)
+        // The async `download(for:delegate:)` takes a *per-task* delegate, which is
+        // the only way to see byte counts without giving up async/await or building
+        // a second URLSession just for this.
+        let progress = DownloadProgressDelegate { [weak self] fraction in
+            Task { @MainActor in self?.downloadProgress = fraction }
+        }
+        let (tempFile, response) = try await session.download(for: request, delegate: progress)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw InstallError.download("Download fehlgeschlagen (HTTP \(code)).")
@@ -128,6 +141,29 @@ final class UpdateInstaller: ObservableObject {
         try process.run()
         process.waitUntilExit()
         return process.terminationStatus
+    }
+
+    /// Reports `totalBytesWritten / totalBytesExpectedToWrite` for one download.
+    /// `didFinishDownloadingTo` is required by the protocol but never used here —
+    /// the async API takes the file itself.
+    private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelegate, Sendable {
+        private let onProgress: @Sendable (Double?) -> Void
+
+        init(onProgress: @escaping @Sendable (Double?) -> Void) {
+            self.onProgress = onProgress
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                        totalBytesExpectedToWrite totalBytesExpectedToWrite: Int64) {
+            // -1 means the server did not say how big it is; a made-up bar would be
+            // worse than none, so pass nil and let the UI fall back to plain text.
+            guard totalBytesExpectedToWrite > 0 else { return onProgress(nil) }
+            onProgress(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite))
+        }
+
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didFinishDownloadingTo location: URL) {}
     }
 
     enum InstallError: LocalizedError {

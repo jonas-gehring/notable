@@ -84,7 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // dictation silently captures nothing (mic stays "notDetermined").
         container.permissions.requestMicrophoneIfNeeded()
 
-        // Throttled (once per 24h); silent on network/rate-limit errors.
+        // Throttled (once per 24h); silent on network/rate-limit errors. A find is
+        // announced once per version — the menu shows it only to whoever opens the
+        // menu, which is not a way to learn that an update exists.
+        container.updateChecker.onUpdateFound = { version in
+            NotificationCenterService.shared.postUpdateAvailable(version: version)
+        }
         Task { await container.updateChecker.checkOnLaunch() }
 
         // The native menu can't refresh history on open (its items are NSMenuItems),
@@ -448,7 +453,13 @@ struct MenuContentView: View {
     private func updateItems(_ update: UpdateInfo) -> some View {
         switch updateInstaller.phase {
         case .downloading:
-            Text("Update wird geladen…")
+            // A menu item cannot host a progress bar, but it can carry the number,
+            // and the number is the part that distinguishes "slow" from "stuck".
+            if let fraction = updateInstaller.downloadProgress {
+                Text("Update wird geladen — \(Int(fraction * 100)) %")
+            } else {
+                Text("Update wird geladen…")
+            }
         case .unpacking:
             Text("Update wird entpackt…")
         case .installing:
@@ -461,6 +472,9 @@ struct MenuContentView: View {
         case .idle:
             Button("Update \(update.versionString) installieren") {
                 Task { await updateInstaller.installAndRelaunch(update) }
+            }
+            Button("Version \(update.versionString) überspringen") {
+                updateChecker.skip(update)
             }
         }
     }

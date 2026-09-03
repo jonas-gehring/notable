@@ -151,6 +151,18 @@ final class NotificationCenterService: NSObject {
         post(id: id, content: content)
     }
 
+    /// A found update is otherwise only visible to whoever happens to open the
+    /// menu. No category and no action: tapping it opens Notable, and the install
+    /// button is one click away there — an "install now" action in a notification
+    /// would replace the running app from a place the user cannot see what is
+    /// being replaced.
+    func postUpdateAvailable(version: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Update verfügbar"
+        content.body = "Notable \(version) steht bereit — im Menü oder in den Einstellungen installieren."
+        post(id: "update.available.\(version)", content: content)
+    }
+
     func withdraw(id: String) {
         if pendingConsentID == id { pendingConsentID = nil }
         let center = UNUserNotificationCenter.current()

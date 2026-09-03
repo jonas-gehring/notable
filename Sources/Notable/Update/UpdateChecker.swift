@@ -166,11 +166,25 @@ final class UpdateChecker: ObservableObject {
     /// Human-readable last-error, for the Settings row. Cleared on success.
     @Published private(set) var lastError: String?
 
+    /// Called once per newly-found version by `checkOnLaunch`. A closure rather
+    /// than a direct call into `NotificationCenterService`: the checker is a
+    /// network+parsing unit that the test bundle compiles on its own, and reaching
+    /// for the notification singleton from here would drag the whole UserNotifications
+    /// stack in behind it. The app wires this up in `AppDelegate`.
+    var onUpdateFound: ((String) -> Void)?
+
     private let currentVersion: SemanticVersion
     private let session: URLSession
     private let defaults: UserDefaults
 
     private static let lastCheckKey = "updateLastCheckAt"
+    /// The version the user asked not to be reminded about again.
+    static let skippedVersionKey = "updateSkippedVersion"
+    /// Whether the launch check runs at all. Defaults to on (see `automaticChecks`).
+    static let automaticChecksKey = "updateAutomaticChecks"
+    /// The last version we already posted a notification for — so a found update
+    /// is announced once, not on every launch until it is installed.
+    private static let notifiedVersionKey = "updateNotifiedVersion"
     /// On-launch checks run at most once per this interval.
     private static let launchThrottle: TimeInterval = 24 * 60 * 60
 
@@ -191,12 +205,38 @@ final class UpdateChecker: ObservableObject {
         }
     }
 
-    /// Called at launch. Skips if we already checked within the throttle window.
+    /// Whether the launch check is allowed to run. Absent means on: an updater
+    /// that has to be switched on is one nobody switches on.
+    var automaticChecks: Bool {
+        get { defaults.object(forKey: Self.automaticChecksKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Self.automaticChecksKey) }
+    }
+
+    /// Called at launch. Skips if switched off, or if we already checked within
+    /// the throttle window. Announces a find once, because the menu only shows it
+    /// to whoever happens to open the menu.
     func checkOnLaunch() async {
+        guard automaticChecks else { return }
         if let last = lastChecked, Date().timeIntervalSince(last) < Self.launchThrottle {
             return
         }
         await check()
+        guard let found = available else { return }
+        guard defaults.string(forKey: Self.notifiedVersionKey) != found.versionString else { return }
+        defaults.set(found.versionString, forKey: Self.notifiedVersionKey)
+        onUpdateFound?(found.versionString)
+    }
+
+    /// Stop offering this version. Deliberately per-version rather than a blanket
+    /// mute: skipping 1.2.0 must not hide 1.3.0.
+    func skip(_ info: UpdateInfo) {
+        defaults.set(info.versionString, forKey: Self.skippedVersionKey)
+        available = nil
+    }
+
+    /// True once the user skipped exactly this version.
+    private func isSkipped(_ info: UpdateInfo) -> Bool {
+        defaults.string(forKey: Self.skippedVersionKey) == info.versionString
     }
 
     /// Manual check (Settings button / menu). Always hits the network.
@@ -226,7 +266,7 @@ final class UpdateChecker: ObservableObject {
             switch http.statusCode {
             case 200:
                 let info = try UpdateResolver.updateInfo(fromJSON: data, current: currentVersion)
-                available = info
+                available = info.flatMap { isSkipped($0) ? nil : $0 }
                 lastError = nil
             case 404:
                 // No releases published yet — not an error, just nothing to offer.

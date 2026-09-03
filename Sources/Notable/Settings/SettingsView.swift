@@ -176,10 +176,16 @@ struct GeneralSettingsView: View {
                     Text(update.versionString).foregroundStyle(Theme.accent)
                 }
                 if !update.notes.isEmpty {
-                    Text(update.notes)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(6)
+                    // Scrolls rather than truncates: cutting the notes at six lines
+                    // hid exactly the part that says what changed.
+                    ScrollView {
+                        Text(ReleaseNotes.attributed(update.notes))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 160)
                 }
                 installRow(update)
             } else {
@@ -201,18 +207,37 @@ struct GeneralSettingsView: View {
                     Text(error).font(.callout).foregroundStyle(.red)
                 }
             }
+            Toggle("Beim Start automatisch nach Updates suchen", isOn: automaticChecks)
         } header: {
             Text("Updates")
         } footer: {
-            Text("Prüft GitHub-Releases. „Installieren“ lädt die neue Version, ersetzt Notable in /Applications und startet neu.")
+            Text("Prüft GitHub-Releases, höchstens einmal am Tag. „Installieren“ lädt die neue Version, ersetzt Notable in /Applications und startet neu.")
         }
+    }
+
+    /// `UpdateChecker.automaticChecks` reads and writes UserDefaults directly, so
+    /// the binding goes through the object rather than a second `@AppStorage` that
+    /// could drift out of sync with it.
+    private var automaticChecks: Binding<Bool> {
+        Binding(
+            get: { updateChecker.automaticChecks },
+            set: { updateChecker.automaticChecks = $0 }
+        )
     }
 
     @ViewBuilder
     private func installRow(_ update: UpdateInfo) -> some View {
         switch updateInstaller.phase {
         case .downloading:
-            statusRow("Wird geladen…")
+            if let fraction = updateInstaller.downloadProgress {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: fraction)
+                    Text("Wird geladen — \(Int(fraction * 100)) %")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                statusRow("Wird geladen…")
+            }
         case .unpacking:
             statusRow("Wird entpackt…")
         case .installing:
@@ -221,10 +246,15 @@ struct GeneralSettingsView: View {
             Text("Fehlgeschlagen: \(message)").font(.callout).foregroundStyle(.red)
             Button("Erneut versuchen") { Task { await updateInstaller.installAndRelaunch(update) } }
         case .idle:
-            Button("Installieren & neu starten") {
-                Task { await updateInstaller.installAndRelaunch(update) }
+            HStack {
+                Button("Installieren & neu starten") {
+                    Task { await updateInstaller.installAndRelaunch(update) }
+                }
+                .buttonStyle(.borderedProminent)
+                // Per-version, not a blanket mute: whoever does not want *this*
+                // build should still hear about the next one.
+                Button("Diese Version überspringen") { updateChecker.skip(update) }
             }
-            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -756,7 +786,7 @@ struct PermissionsSettingsView: View {
                     Button("Notable neu starten") { Self.relaunch() }
                 }
             } footer: {
-                Text("Bildschirmaufnahme & Eingabeüberwachung werden erst nach Neustart grün. Häkchen bleiben über Updates erhalten.")
+                Text("Eingabeüberwachung und Bedienungshilfen werden erst nach einem Neustart grün. Die Systemaudio-Aufnahme lässt sich nicht auslesen — macOS fragt sie beim ersten Mitschnitt ab. Häkchen bleiben über Updates erhalten.")
             }
         }
         .formStyle(.grouped)

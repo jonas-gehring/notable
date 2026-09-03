@@ -75,6 +75,9 @@ targets:
       - path: Sources/Notable/Dictation/AppCategory.swift
       - path: Sources/Notable/Dictation/WordDiff.swift
       - path: Sources/Notable/Stats/UsageMetrics.swift
+      # Block-level cleanup of GitHub release bodies before the inline Markdown
+      # parser sees them. Pure, and the input is written by someone else.
+      - path: Sources/Notable/Update/ReleaseNotes.swift
       - path: Sources/Notable/Meeting/ChatPrompt.swift
       - path: Sources/Notable/Storage/RecordingStore.swift
       - path: Sources/Notable/Storage/MarkdownProjector.swift

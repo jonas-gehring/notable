@@ -18,6 +18,20 @@ struct OnboardingView: View {
 
     enum Page: Int, CaseIterable {
         case welcome, microphone, hotkey, firstDictation, meetings, provider, done
+
+        /// Names the dots in the footer, so jumping straight to a page is a
+        /// choice rather than a guess.
+        var title: String {
+            switch self {
+            case .welcome: "Willkommen"
+            case .microphone: "Mikrofon"
+            case .hotkey: "Hotkey & Einfügen"
+            case .firstDictation: "Erstes Diktat"
+            case .meetings: "Meetings"
+            case .provider: "Zusammenfassung"
+            case .done: "Fertig"
+            }
+        }
     }
 
     private var page: Page { Page(rawValue: pageRaw) ?? .welcome }
@@ -45,7 +59,7 @@ struct OnboardingView: View {
             pageBody(
                 icon: "waveform",
                 title: "Willkommen bei Notable",
-                text: "Diktiere per Hotkey in jedes Textfeld und lass Meetings automatisch mitschreiben — alles lokal auf deinem Mac. Nur der Text von Meetings verlässt zum Zusammenfassen das Gerät, nie Audio.")
+                text: "Diktiere per Hotkey in jedes Textfeld und lass Meetings automatisch mitschreiben — die Erkennung läuft auf deinem Mac. **Audio verlässt das Gerät nie**; zum Zusammenfassen geht ausschließlich der Text eines Meetings hinaus. Jede Meeting-Notiz landet als Markdown-Datei in einem Ordner, den du aussuchst — auch ohne Notable lesbar.")
         case .microphone:
             permissionPage(
                 .microphone,
@@ -66,22 +80,23 @@ struct OnboardingView: View {
         case .meetings:
             VStack(alignment: .leading, spacing: 16) {
                 pageHeader(icon: "person.2.wave.2", title: "Meetings (optional)")
-                Text("Notable erkennt Calls und schreibt mit. Für den System-Ton der anderen braucht macOS die Bildschirmaufnahme-Berechtigung (es wird kein Bild aufgenommen). Der Kalender ordnet Aufnahmen dem Termin zu — beides optional.")
+                Text("Notable erkennt Calls und schreibt mit. Für den Ton der anderen verlangt macOS das Recht **Systemaudio-Aufnahme** — ein eigenes Recht, nicht die Bildschirmaufnahme; ein Bild wird nie aufgezeichnet. Der Kalender ordnet Aufnahmen dem Termin zu, die Mitteilung stellt vor jedem Mitschnitt die Rückfrage. Alles drei optional.")
                     .foregroundStyle(Theme.textSubtle)
-                permissionRow(.screenRecording)
+                permissionRow(.systemAudio)
                 permissionRow(.calendar)
+                permissionRow(.notifications)
             }
         case .provider:
             pageBody(
                 icon: "text.justify.left",
                 title: "Zusammenfassung",
-                text: "Meeting-Notizen werden von Claude zusammengefasst — per Anthropic-API-Key oder deinem Claude-Max-Login der Claude Code CLI. Das kannst du auch später einrichten; Diktat funktioniert ohne.",
+                text: "Meeting-Transkripte werden zu einer Notiz zusammengefasst — wahlweise über die Anthropic-API (Schlüssel im Schlüsselbund) oder über eine lokal installierte CLI: Claude Code, Gemini CLI oder Codex CLI. Lässt sich auch später einrichten; **Diktat funktioniert ohne**.",
                 action: ("Einstellungen öffnen…", { openSettings() }))
         case .done:
             pageBody(
                 icon: "checkmark.circle.fill",
                 title: "Alles bereit",
-                text: "Notable lebt in der Menüleiste — dort findest du Meeting-Aufnahme, Notizen, Statistik und Einstellungen. Viel Spaß!")
+                text: "Notable lebt in der Menüleiste — dort findest du Meeting-Aufnahme, Notizen, Statistik und Einstellungen. Die Notizen liegen als Markdown in **Dokumente/Notable**; den Ordner kannst du in den Einstellungen umlegen. Die LLM-Verbesserung für Diktate bleibt aus, bis du sie dort einschaltest.")
         }
     }
 
@@ -177,11 +192,19 @@ struct OnboardingView: View {
                 Button("Zurück") { pageRaw = max(0, pageRaw - 1) }
             }
             Spacer()
+            // The dots were decoration. Every page here is skippable and none
+            // depends on the one before it, so there is no reason to make
+            // someone click "Weiter" five times to reach the page they want.
             HStack(spacing: 5) {
                 ForEach(Page.allCases, id: \.rawValue) { p in
-                    Circle()
-                        .fill(p == page ? Theme.accent : Theme.textMuted.opacity(0.4))
-                        .frame(width: 6, height: 6)
+                    Button { pageRaw = p.rawValue } label: {
+                        Circle()
+                            .fill(p == page ? Theme.accent : Theme.textMuted.opacity(0.4))
+                            .frame(width: 6, height: 6)
+                    }
+                    .buttonStyle(.plain)
+                    .help(p.title)
+                    .accessibilityLabel(p.title)
                 }
             }
             Spacer()
@@ -189,6 +212,11 @@ struct OnboardingView: View {
                 Button("Fertig") { finish() }
                     .keyboardShortcut(.defaultAction)
             } else {
+                // The header comment claimed this was "skippable everywhere" long
+                // before there was a way to skip. Someone who already knows the
+                // app — or is reinstalling it — should not have to page through
+                // permissions they granted years ago.
+                Button("Überspringen") { finish() }
                 Button("Weiter") { pageRaw = min(Page.allCases.count - 1, pageRaw + 1) }
                     .keyboardShortcut(.defaultAction)
             }

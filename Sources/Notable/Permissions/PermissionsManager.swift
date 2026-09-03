@@ -1,6 +1,5 @@
 import ApplicationServices
 import AVFoundation
-import CoreGraphics
 import EventKit
 import Foundation
 import IOKit.hid
@@ -16,12 +15,17 @@ final class PermissionsManager: ObservableObject {
         case granted
         case denied
         case notDetermined
+        /// macOS exposes no preflight for this right, so any lamp we drew would
+        /// be a guess. Saying "not readable" is worse-looking and more honest
+        /// than a green check that means nothing — see `Kind.systemAudio`.
+        case unreadable
 
         var label: String {
             switch self {
             case .granted: "Erteilt"
             case .denied: "Verweigert"
             case .notDetermined: "Noch nicht angefragt"
+            case .unreadable: "Nicht auslesbar — macOS fragt beim ersten Mitschnitt"
             }
         }
 
@@ -30,6 +34,7 @@ final class PermissionsManager: ObservableObject {
             case .granted: "checkmark.circle.fill"
             case .denied: "xmark.circle.fill"
             case .notDetermined: "questionmark.circle"
+            case .unreadable: "questionmark.circle"
             }
         }
 
@@ -38,13 +43,14 @@ final class PermissionsManager: ObservableObject {
             case .granted: .green
             case .denied: .red
             case .notDetermined: .secondary
+            case .unreadable: .secondary
             }
         }
     }
 
     enum Kind: String, CaseIterable, Identifiable {
         case microphone
-        case screenRecording
+        case systemAudio
         case inputMonitoring
         case accessibility
         case calendar
@@ -55,7 +61,7 @@ final class PermissionsManager: ObservableObject {
         var name: String {
             switch self {
             case .microphone: "Mikrofon"
-            case .screenRecording: "Bildschirmaufnahme"
+            case .systemAudio: "Systemaudio-Aufnahme"
             case .inputMonitoring: "Eingabeüberwachung"
             case .accessibility: "Bedienungshilfen"
             case .calendar: "Kalender"
@@ -67,8 +73,8 @@ final class PermissionsManager: ObservableObject {
             switch self {
             case .microphone:
                 "Diktat und Meeting-Aufnahme."
-            case .screenRecording:
-                "System-Audio der anderen Meeting-Teilnehmer. macOS verlangt dafür die Bildschirmaufnahme-Berechtigung — es wird kein Bild aufgezeichnet."
+            case .systemAudio:
+                "Der Ton der anderen Meeting-Teilnehmer. Ein eigenes Recht, *nicht* die Bildschirmaufnahme — Notable zeichnet kein Bild auf und fragt die Bildschirmaufnahme nie an."
             case .inputMonitoring:
                 "Der globale Push-to-talk-Hotkey."
             case .accessibility:
@@ -84,7 +90,7 @@ final class PermissionsManager: ObservableObject {
         var settingsPane: String {
             switch self {
             case .microphone: "Privacy_Microphone"
-            case .screenRecording: "Privacy_ScreenCapture"
+            case .systemAudio: "Privacy_AudioCapture"
             case .inputMonitoring: "Privacy_ListenEvent"
             case .accessibility: "Privacy_Accessibility"
             case .calendar: "Privacy_Calendars"
@@ -168,9 +174,16 @@ final class PermissionsManager: ObservableObject {
             case .notDetermined: .notDetermined
             default: .denied
             }
-        case .screenRecording:
-            // Preflight does not prompt; it only reports the current TCC state.
-            CGPreflightScreenCaptureAccess() ? .granted : .denied
+        case .systemAudio:
+            // There is no preflight for `kTCCServiceAudioCapture`. The obvious
+            // substitutes are both wrong: `CGPreflightScreenCaptureAccess()`
+            // answers about a different right the app never requests, and
+            // creating a process tap to see whether it works answers nothing —
+            // measured, an unsigned binary with no grant at all still gets a tap
+            // and a valid stream format back. macOS raises the prompt on the
+            // first real capture; until a recording has proven otherwise, the
+            // honest answer here is that we do not know.
+            .unreadable
         case .inputMonitoring:
             switch IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) {
             case kIOHIDAccessTypeGranted: .granted

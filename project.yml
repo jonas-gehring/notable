@@ -183,8 +183,8 @@ targets:
         # The counter is the commit count plus a fixed offset: the history was
         # squashed once after build 79 shipped, so the bare count would now hand out
         # numbers below builds that already exist (see scripts/release.sh).
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "103"
+        MARKETING_VERSION: "1.0.1"
+        CURRENT_PROJECT_VERSION: "111"
         # Signed with a stable "Developer ID Application" cert (NOT
         # ad-hoc, NOT "Apple Development"): a stable identity keeps the designated
         # requirement constant so TCC grants persist across rebuilds, AND Developer

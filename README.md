@@ -2,7 +2,8 @@
 
 **Local-first dictation and meeting transcription for macOS.** Hold a key, speak, let
 go — polished text appears in whatever field you were typing in. Or let Notable sit in
-on a call and hand you a diarized, summarized note afterwards.
+on a call and hand you a diarized, summarized note afterwards — as a Markdown file in a
+folder you own.
 
 <p align="center">
   <img src="docs/images/dictation.gif" width="640" alt="The dictation overlay: a small dark capsule showing a live waveform, then “Transkribiere…”">
@@ -39,6 +40,21 @@ speakers separated, matched to the calendar event, filed as a Markdown note.
   note verbatim and inform the summary
 - **Speaker naming** from the calendar attendees
 - **Summary, chat with the transcript, and local full-text search**
+
+## File over app
+
+Every meeting becomes a Markdown file in a folder **you** choose — plain text with YAML
+frontmatter, one file per note. There is no database to export from and no proprietary
+format to be locked into. Notable is not sandboxed, so that folder can be an Obsidian
+vault, a git repository, a synced folder, or whatever you already use.
+
+The notes outlive the app. Automatic cleanup only ever touches Notable's own audio spool;
+it never deletes a note. Uninstall Notable and every note is still sitting there, readable
+in any editor on any machine.
+
+One direction, stated plainly: Notable *writes* those files, it does not read your edits
+back. Its own database stays the source for search, chat and re-rendering a note — so
+treat the Markdown as the copy that is yours, not as a second input.
 
 ## What leaves the device
 

@@ -28,7 +28,8 @@ Loslassen nur noch der Rest zu tun ist.
 - Aufnahme-Anzeige an der Notch, als Pille unter der Menüleiste, unten mittig — oder aus
 
 **Meetings.** Mikrofon und System-Audio getrennt aufgezeichnet (CoreAudio Process Tap),
-Sprecher getrennt, dem Kalendertermin zugeordnet, als Markdown-Notiz abgelegt.
+Sprecher getrennt, dem Kalendertermin zugeordnet, als Markdown-Notiz in einem Ordner
+abgelegt, der dir gehört.
 
 - Automatische Erkennung von Zoom, Teams, FaceTime, Webex, Slack und Browser-Calls —
   aufgezeichnet wird erst nach ausdrücklicher Bestätigung
@@ -36,6 +37,23 @@ Sprecher getrennt, dem Kalendertermin zugeordnet, als Markdown-Notiz abgelegt.
   wörtlich in die Notiz übernommen und in die Zusammenfassung eingewoben werden
 - Sprecher-Benennung aus den Kalender-Teilnehmern
 - Zusammenfassung, Chat mit dem Transkript und lokale Volltextsuche
+
+## File over app
+
+Jedes Meeting wird eine Markdown-Datei in einem Ordner, den **du** aussuchst — reiner Text
+mit YAML-Frontmatter, eine Datei pro Notiz. Es gibt keine Datenbank, aus der man erst
+exportieren müsste, und kein eigenes Format, in dem etwas festsitzt. Notable läuft ohne
+Sandkasten, der Ordner darf also ein Obsidian-Vault sein, ein Git-Repository, ein
+synchronisierter Ordner — was immer du ohnehin benutzt.
+
+Die Notizen überleben die App. Das automatische Aufräumen fasst ausschließlich Notables
+eigenen Audio-Spool an und löscht nie eine Notiz. Wirf Notable weg, und jede Notiz liegt
+weiter da, lesbar in jedem Editor auf jedem Rechner.
+
+Eine Richtung, klar gesagt: Notable *schreibt* diese Dateien, es liest deine Änderungen
+daran nicht zurück. Für Suche, Chat und das Neu-Erzeugen einer Notiz bleibt die eigene
+Datenbank die Quelle — die Markdown-Datei ist das Exemplar, das dir gehört, nicht ein
+zweiter Eingang.
 
 ## Was das Gerät verlässt
 

@@ -12,6 +12,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    # Makes the compiler write out every localizable string it saw (.stringsdata).
+    # That is the only ground truth for the keys of interpolated strings, whose
+    # format specifiers (%@ vs %lld) cannot be read off the source text.
+    SWIFT_EMIT_LOC_STRINGS: YES
     MACOSX_DEPLOYMENT_TARGET: "14.4"
 packages:
   FluidAudio:

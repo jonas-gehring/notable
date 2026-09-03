@@ -94,8 +94,8 @@ final class AudioRecorder: @unchecked Sendable {
             throw NSError(
                 domain: "Notable.AudioRecorder", code: errorCode,
                 userInfo: [NSLocalizedDescriptionKey: errorCode == 1
-                    ? "Kein Aufnahmegerät verfügbar."
-                    : "Kein Aufnahmegerät nach Gerätewechsel."]
+                    ? String(localized: "Kein Aufnahmegerät verfügbar.")
+                    : String(localized: "Kein Aufnahmegerät nach Gerätewechsel.")]
             )
         }
 

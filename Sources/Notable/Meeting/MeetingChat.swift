@@ -172,8 +172,8 @@ struct MeetingChatView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(controller.isReady
-                ? "Frag alles über dieses Meeting."
-                : "Für dieses Meeting gibt es kein Transkript.")
+                ? String(localized: "Frag alles über dieses Meeting.")
+                : String(localized: "Für dieses Meeting gibt es kein Transkript."))
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textSubtle)
             if controller.isReady {

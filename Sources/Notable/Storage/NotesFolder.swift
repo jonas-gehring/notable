@@ -31,8 +31,8 @@ final class NotesFolderManager: ObservableObject {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.directoryURL = folderURL
-        panel.prompt = "Ordner wählen"
-        panel.message = "Ordner für Meeting-Notizen (Markdown)"
+        panel.prompt = String(localized: "Ordner wählen")
+        panel.message = String(localized: "Ordner für Meeting-Notizen (Markdown)")
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         folderURL = url

@@ -55,6 +55,11 @@ final class LocalizationTests: XCTestCase {
             "\\b(?:\(calls))\\(\\s*\"((?:[^\"\\\\]|\\\\.)+)\"",
             "\\.help\\(\\s*\"((?:[^\"\\\\]|\\\\.)+)\"",
             "\\.navigationTitle\\(\\s*\"((?:[^\"\\\\]|\\\\.)+)\"",
+            // Not a SwiftUI view: the form every string outside a view body uses —
+            // status messages, error text, enum labels. Leaving this out is how the
+            // first pass left a hundred German strings behind, each of them
+            // untranslatable no matter what the table said.
+            "String\\(localized:\\s*\"((?:[^\"\\\\]|\\\\.)+)\"",
         ].compactMap { try? NSRegularExpression(pattern: $0) }
 
         let sources = repoRoot.appendingPathComponent("Sources/Notable")

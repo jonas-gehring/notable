@@ -116,12 +116,13 @@ enum SummarizationProviderID: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var label: String {
-        switch self {
+        let key: String.LocalizationValue = switch self {
         case .anthropicAPI: "Anthropic API (empfohlen)"
         case .claudeCodeCLI: "Anthropic Claude Code CLI (Abo)"
         case .geminiCLI: "Google Gemini CLI (Abo)"
         case .codexCLI: "OpenAI Codex CLI (Abo)"
         }
+        return String(localized: key)
     }
 
     /// The subscription CLIs. These are the only providers the **dictation**

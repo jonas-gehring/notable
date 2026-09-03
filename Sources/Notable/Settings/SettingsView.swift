@@ -12,7 +12,7 @@ struct SettingsView: View {
         var id: String { rawValue }
 
         var label: String {
-            switch self {
+            let key: String.LocalizationValue = switch self {
             case .general: "Allgemein"
             case .dictation: "Diktat"
             case .meetings: "Meetings"
@@ -21,6 +21,7 @@ struct SettingsView: View {
             case .storage: "Speicherplatz"
             case .permissions: "Berechtigungen"
             }
+            return String(localized: key)
         }
 
         var icon: String {
@@ -315,7 +316,7 @@ struct GeneralSettingsView: View {
     }
 
     private var lastCheckedLabel: String {
-        guard let date = updateChecker.lastChecked else { return "Noch nicht geprüft" }
+        guard let date = updateChecker.lastChecked else { return String(localized: "Noch nicht geprüft") }
         return "Zuletzt: " + date.formatted(date: .abbreviated, time: .shortened)
     }
 }
@@ -420,7 +421,7 @@ struct DictationSettingsView: View {
                 Toggle("Töne bei Aufnahme-Start und -Ende", isOn: $dictationSounds)
                 Stepper(value: $dictationIdleTimeout, in: 0...30, step: 5) {
                     Text(dictationIdleTimeout == 0
-                        ? "Freihändig bei Stille beenden: aus"
+                        ? String(localized: "Freihändig bei Stille beenden: aus")
                         : "Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden")
                 }
             } header: {
@@ -508,7 +509,7 @@ struct DictationSettingsView: View {
             if let latency = dictation.lastLatencyMillis {
                 Section("Leistung") {
                     LabeledContent(
-                        "Letzte Latenz (Loslassen → Einfügen)",
+                        String(localized: "Letzte Latenz (Loslassen → Einfügen)"),
                         value: String(format: "%d ms bei %.1f s Audio", latency, dictation.lastAudioSeconds ?? 0)
                     )
                 }
@@ -575,7 +576,7 @@ struct MeetingsSettingsView: View {
         guard useDictationEngine else { return "Parakeet v3" }
         switch ASREngineID(rawValue: engineRaw) ?? .parakeetV3 {
         case .parakeetV3: return "Parakeet v3"
-        case .unifiedEnglish: return "Parakeet v3 (Unified ist nur fürs Diktat)"
+        case .unifiedEnglish: return String(localized: "Parakeet v3 (Unified ist nur fürs Diktat)")
         case .whisper: return "Whisper"
         }
     }
@@ -649,7 +650,7 @@ struct MeetingsSettingsView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "Skript wählen, das nach jedem fertigen Meeting läuft"
+        panel.message = String(localized: "Skript wählen, das nach jedem fertigen Meeting läuft")
         if panel.runModal() == .OK, let url = panel.url {
             meetingHookPath = url.path
         }
@@ -749,7 +750,7 @@ struct SummarizationSettingsView: View {
                                 apiKeyInput = ""
                                 keyTestResult = nil
                             } else {
-                                keyTestResult = "Schlüsselbund-Zugriff fehlgeschlagen — Key nicht gesichert."
+                                keyTestResult = String(localized: "Schlüsselbund-Zugriff fehlgeschlagen — Key nicht gesichert.")
                             }
                         }
                         .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -769,7 +770,7 @@ struct SummarizationSettingsView: View {
                     if apiKeyStored {
                         HStack {
                             Button("Verbindung testen") {
-                                keyTestResult = "Prüfe…"
+                                keyTestResult = String(localized: "Prüfe…")
                                 Task { keyTestResult = await AnthropicAPIProvider.validateKey() }
                             }
                             if let keyTestResult {

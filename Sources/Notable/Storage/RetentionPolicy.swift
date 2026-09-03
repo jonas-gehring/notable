@@ -107,7 +107,7 @@ enum RetentionPlanner {
         var text: String {
             switch self {
             case .tooOld(let days): return "älter als \(days) Tage"
-            case .overBudget: return "über dem Speicherbudget"
+            case .overBudget: return String(localized: "über dem Speicherbudget")
             }
         }
     }

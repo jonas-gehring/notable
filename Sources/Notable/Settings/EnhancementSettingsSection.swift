@@ -5,8 +5,8 @@ import SwiftUI
 /// This section carries the sentence that the one-time consent dialog was
 /// supposed to carry, and it carries it permanently rather than once: switching
 /// this on is the consent, and it can be revoked here at any time. The wording
-/// is deliberately blunt — the Claude Code CLI is a locally started process that
-/// sends text to Anthropic; only the billing is local.
+/// is deliberately blunt — the chosen CLI is a locally started process that sends
+/// the text to its vendor; only the billing is local.
 struct EnhancementSettingsSection: View {
     @AppStorage(EnhancementSettings.enabledKey) private var enabled = false
     @AppStorage(EnhancementSettings.hotkeyKey) private var hotkeyRaw = ""
@@ -16,7 +16,7 @@ struct EnhancementSettingsSection: View {
 
     @State private var customProfiles: [EnhancementProfile] = EnhancementProfile.custom()
     @State private var editing: EnhancementProfile?
-    @State private var cliStatus = "wird geprüft…"
+    @State private var cliStatus = String(localized: "wird geprüft…")
     @State private var testResult: String?
 
     let onHotkeyChange: () -> Void
@@ -128,7 +128,7 @@ struct EnhancementSettingsSection: View {
         testResult = nil
         Task {
             cliStatus = switch await DictationEnhancer.provider(named: providerRaw).availability() {
-            case .available: "gefunden und einsatzbereit"
+            case .available: String(localized: "gefunden und einsatzbereit")
             case .unavailable(let reason): reason
             }
         }
@@ -141,7 +141,7 @@ struct EnhancementSettingsSection: View {
     /// invocation for the other two is documented, not proven. This is how you
     /// find that out in ten seconds instead of during a dictation.
     private func runTest() {
-        testResult = "läuft…"
+        testResult = String(localized: "läuft…")
         Task {
             let provider = DictationEnhancer.provider(named: providerRaw)
             do {

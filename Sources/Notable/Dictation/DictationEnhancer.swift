@@ -217,12 +217,13 @@ struct DictationEnhancer: Sendable {
                     text: text,
                     didEnhance: false,
                     usage: completion.usage,
-                    failure: "Verbesserung verworfen — Originaltext eingefügt."
+                    failure: String(localized: "Verbesserung verworfen — Originaltext eingefügt.")
                 )
             }
             return Result(text: accepted, didEnhance: true, usage: completion.usage)
         } catch is DeadlineExceeded {
-            return Result(text: text, didEnhance: false, failure: "Verbesserung dauerte zu lange — Originaltext eingefügt.")
+            return Result(text: text, didEnhance: false,
+                      failure: String(localized: "Verbesserung dauerte zu lange — Originaltext eingefügt."))
         } catch {
             return Result(text: text, didEnhance: false, failure: "Verbesserung fehlgeschlagen: \(error.localizedDescription)")
         }

@@ -22,10 +22,10 @@ struct StorageSettingsView: View {
     @State private var lastResult: RetentionRunner.Result?
     @State private var isWorking = false
 
-    private static let ages: [(Int, String)] = [
+    private static let ages: [(Int, LocalizedStringKey)] = [
         (0, "Aus"), (7, "7 Tage"), (30, "30 Tage"), (90, "90 Tage"), (365, "1 Jahr"),
     ]
-    private static let budgets: [(Int, String)] = [
+    private static let budgets: [(Int, LocalizedStringKey)] = [
         (0, "Aus"), (5, "5 GB"), (10, "10 GB"), (20, "20 GB"), (50, "50 GB"),
     ]
 
@@ -114,7 +114,7 @@ struct StorageSettingsView: View {
     }
 
     @ViewBuilder
-    private func usageRow(_ title: String, _ value: (count: Int, bytes: Int64)?) -> some View {
+    private func usageRow(_ title: LocalizedStringKey, _ value: (count: Int, bytes: Int64)?) -> some View {
         LabeledContent(title) {
             if let value {
                 Text("\(byteText(value.bytes)) · \(value.count) Sitzungen")
@@ -124,7 +124,8 @@ struct StorageSettingsView: View {
         }
     }
 
-    private func picker(_ title: String, _ binding: Binding<Int>, _ options: [(Int, String)]) -> some View {
+    private func picker(_ title: LocalizedStringKey, _ binding: Binding<Int>,
+                        _ options: [(Int, LocalizedStringKey)]) -> some View {
         Picker(title, selection: binding) {
             ForEach(options, id: \.0) { value, label in
                 Text(label).tag(value)

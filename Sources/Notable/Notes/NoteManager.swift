@@ -225,7 +225,7 @@ final class NoteManager: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .emptyTitle: "Der Titel darf nicht leer sein."
-            case .invalidFolderName: "Ungültiger Ordnername."
+            case .invalidFolderName: String(localized: "Ungültiger Ordnername.")
             case .reservedFolderName: "„Inbox“ ist reserviert."
             case .notFound: "Notiz nicht gefunden."
             }

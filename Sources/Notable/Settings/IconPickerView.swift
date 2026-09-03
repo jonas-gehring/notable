@@ -42,7 +42,7 @@ struct MenuBarIcon: Identifiable, Hashable {
         MenuBarIcon(symbol: "wave.3.right", label: "Schallwellen"),
         MenuBarIcon(symbol: "mic.and.signal.meter", label: "Mikro + Pegel"),
         MenuBarIcon(symbol: "mic.square", label: "Mikro (Quadrat)"),
-        MenuBarIcon(symbol: "headphones", label: "Kopfhörer"),
+        MenuBarIcon(symbol: "headphones", label: String(localized: "Kopfhörer")),
         MenuBarIcon(symbol: "speaker.wave.2", label: "Lautsprecher"),
         MenuBarIcon(symbol: "character.bubble", label: "Zeichen-Blase"),
         MenuBarIcon(symbol: "bubble.left.and.bubble.right", label: "Dialog"),

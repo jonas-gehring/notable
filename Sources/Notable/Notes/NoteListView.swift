@@ -237,7 +237,7 @@ struct NoteListView: View {
 
     private func revealInFinder(_ note: RecordingStore.Recording) {
         guard let path = note.markdownPath else {
-            errorMessage = "Für diese Notiz ist keine Datei hinterlegt."
+            errorMessage = String(localized: "Für diese Notiz ist keine Datei hinterlegt.")
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])

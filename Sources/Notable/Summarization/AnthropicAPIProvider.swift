@@ -12,7 +12,7 @@ struct AnthropicAPIProvider: SummarizationProvider {
 
     func availability() async -> ProviderAvailability {
         if KeychainStore.read(account: KeychainStore.anthropicAPIKeyAccount) == nil {
-            return .unavailable(reason: "Kein API-Key im Schlüsselbund (Einstellungen → Zusammenfassung).")
+            return .unavailable(reason: String(localized: "Kein API-Key im Schlüsselbund (Einstellungen → Zusammenfassung)."))
         }
         return .available
     }
@@ -37,7 +37,7 @@ struct AnthropicAPIProvider: SummarizationProvider {
     /// policy, and `stop_reason` checks live in exactly one place.
     private func requestText(system: String, user: String, maxTokens: Int) async throws -> (text: String, usage: SummarizationUsage?) {
         guard let apiKey = KeychainStore.read(account: KeychainStore.anthropicAPIKeyAccount) else {
-            throw SummarizationError.notConfigured("Kein API-Key im Schlüsselbund.")
+            throw SummarizationError.notConfigured(String(localized: "Kein API-Key im Schlüsselbund."))
         }
 
         let body = MessagesRequest(
@@ -155,8 +155,8 @@ struct AnthropicAPIProvider: SummarizationProvider {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { return "Keine HTTP-Antwort." }
             switch http.statusCode {
-            case 200: return "Verbindung ok — Key gültig."
-            case 401: return "Key ungültig (401)."
+            case 200: return String(localized: "Verbindung ok — Key gültig.")
+            case 401: return String(localized: "Key ungültig (401).")
             default: return "Unerwartete Antwort: HTTP \(http.statusCode)."
             }
         } catch {

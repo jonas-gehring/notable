@@ -246,7 +246,7 @@ final class UpdateChecker: ObservableObject {
         defer { isChecking = false }
 
         guard let url = URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest") else {
-            lastError = "Ungültige Repository-URL."
+            lastError = String(localized: "Ungültige Repository-URL.")
             return
         }
         var request = URLRequest(url: url)
@@ -280,7 +280,7 @@ final class UpdateChecker: ObservableObject {
                 available = nil
                 lastError = nil
             case 403:
-                lastError = "GitHub-Anfragelimit erreicht. Später erneut versuchen."
+                lastError = String(localized: "GitHub-Anfragelimit erreicht. Später erneut versuchen.")
             default:
                 lastError = "Update-Prüfung fehlgeschlagen (HTTP \(http.statusCode))."
             }

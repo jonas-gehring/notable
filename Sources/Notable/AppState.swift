@@ -19,7 +19,7 @@ final class AppState: ObservableObject {
         var label: String {
             switch self {
             case .idle: "Bereit"
-            case .recording: "Aufnahme läuft…"
+            case .recording: String(localized: "Aufnahme läuft…")
             case .transcribing: "Transkribiere…"
             }
         }

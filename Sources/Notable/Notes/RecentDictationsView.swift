@@ -58,7 +58,7 @@ struct RecentDictationsView: View {
                     loaded ? "Keine Diktate" : "Wird geladen…",
                     systemImage: "mic",
                     description: Text(loaded
-                        ? "Im gewählten Zeitraum wurde nicht diktiert."
+                        ? String(localized: "Im gewählten Zeitraum wurde nicht diktiert.")
                         : "")
                 )
             } else {

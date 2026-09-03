@@ -61,9 +61,9 @@ final class MeetingController: ObservableObject {
                 guard let self, self.state.isRecording else { return }
                 do {
                     try self.micRecorder.resume()
-                    self.statusMessage = "Audiogerät gewechselt — Aufnahme fortgesetzt."
+                    self.statusMessage = String(localized: "Audiogerät gewechselt — Aufnahme fortgesetzt.")
                 } catch {
-                    self.statusMessage = "Audiogerät gewechselt — Mikrofonspur ab hier unvollständig."
+                    self.statusMessage = String(localized: "Audiogerät gewechselt — Mikrofonspur ab hier unvollständig.")
                 }
             }
         }
@@ -76,7 +76,7 @@ final class MeetingController: ObservableObject {
                 // systemTapActive stays true on purpose: stop() must still
                 // drain the spool, or the audio captured before the switch
                 // would be thrown away too.
-                self.statusMessage = "System-Audio nach Gerätewechsel verloren — ab hier nur Mikrofon: \(error.localizedDescription)"
+                self.statusMessage = String(localized: "System-Audio nach Gerätewechsel verloren — ab hier nur Mikrofon: \(error.localizedDescription)")
             }
         }
     }
@@ -96,7 +96,7 @@ final class MeetingController: ObservableObject {
         // A warning from start() (no system audio, mic failure) outranks the
         // "recording" confirmation — never overwrite it.
         if state.isRecording, statusMessage == nil {
-            statusMessage = "Meeting erkannt (\(source)) — Aufnahme läuft."
+            statusMessage = String(localized: "Meeting erkannt (\(source)) — Aufnahme läuft.")
         }
     }
 
@@ -156,7 +156,7 @@ final class MeetingController: ObservableObject {
             let echoCancellation = UserDefaults.standard.object(forKey: "meetingEchoCancellation") as? Bool ?? false
             try micRecorder.start(spoolingTo: currentSpool?.micURL, voiceProcessing: echoCancellation)
             if echoCancellation, let reason = micRecorder.voiceProcessingError {
-                warnings.append("ohne Echo-Unterdrückung (\(reason)) — bei Lautsprecher-Ton kann die Gegenseite doppelt im Transkript landen")
+                warnings.append(String(localized: "ohne Echo-Unterdrückung (\(reason)) — bei Lautsprecher-Ton kann die Gegenseite doppelt im Transkript landen"))
             }
         } catch {
             statusMessage = "Meeting-Start fehlgeschlagen: \(error.localizedDescription)"
@@ -177,7 +177,7 @@ final class MeetingController: ObservableObject {
         }
 
         if !warnings.isEmpty {
-            statusMessage = "Aufnahme läuft eingeschränkt: " + warnings.joined(separator: "; ") + "."
+            statusMessage = String(localized: "Aufnahme läuft eingeschränkt: ") + warnings.joined(separator: "; ") + "."
         }
         state = .recording(since: startedAt)
         startMicWatchdog()
@@ -299,11 +299,11 @@ final class MeetingController: ObservableObject {
                         + (note.summaryError.map { "Notiz gespeichert, aber ohne Zusammenfassung: \($0)" }
                             ?? "Notiz gespeichert: \(note.url.lastPathComponent)")
                     if let captureWarning = note.captureWarning {
-                        notifyReady(title: "Aufnahme unvollständig",
+                        notifyReady(title: String(localized: "Aufnahme unvollständig"),
                                     body: captureWarning, noteURL: note.url)
                     } else if let summaryError = note.summaryError {
                         notifyReady(title: "Notiz gespeichert — ohne Zusammenfassung",
-                                    body: "\(summaryError) — im Menü erneut versuchen.",
+                                    body: String(localized: "\(summaryError) — im Menü erneut versuchen."),
                                     noteURL: note.url)
                     } else {
                         notifyReady(title: "Zusammenfassung fertig",
@@ -324,7 +324,7 @@ final class MeetingController: ObservableObject {
                         + "Kein Sprachinhalt erkannt — Rohaufnahme unter spool-failed gesichert. "
                         + "Systemaudio-Berechtigung und Mikrofon (Echo-Unterdrückung) prüfen."
                     notifyReady(title: "Kein Sprachinhalt erkannt",
-                                body: "Rohaufnahme gesichert. Systemaudio-Berechtigung und Mikrofon prüfen.",
+                                body: String(localized: "Rohaufnahme gesichert. Systemaudio-Berechtigung und Mikrofon prüfen."),
                                 noteURL: nil)
                 }
             } catch {
@@ -468,7 +468,7 @@ final class MeetingController: ObservableObject {
                     try? MarkdownProjector.render(note).write(to: url, atomically: true, encoding: .utf8)
                 }
                 summaryRetry = nil
-                statusMessage = "Zusammenfassung ergänzt: \(payload.fileURL.lastPathComponent)"
+                statusMessage = String(localized: "Zusammenfassung ergänzt: \(payload.fileURL.lastPathComponent)")
             } catch {
                 statusMessage = "Zusammenfassung weiterhin fehlgeschlagen: \(error.localizedDescription)"
             }

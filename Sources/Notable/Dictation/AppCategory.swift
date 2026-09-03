@@ -15,13 +15,14 @@ enum AppCategory: String, Sendable, CaseIterable {
 
     /// Human-readable German label (for Settings, previews).
     var label: String {
-        switch self {
-        case .chat: return "Chat"
-        case .mail: return "E-Mail"
-        case .code: return "Code"
-        case .prose: return "Text/Prosa"
-        case .unknown: return "Unbekannt"
+        let key: String.LocalizationValue = switch self {
+        case .chat: "Chat"
+        case .mail: "E-Mail"
+        case .code: "Code"
+        case .prose: "Text/Prosa"
+        case .unknown: "Unbekannt"
         }
+        return String(localized: key)
     }
 
     /// Built-in bundle-id → category table (Spec 03 §3).

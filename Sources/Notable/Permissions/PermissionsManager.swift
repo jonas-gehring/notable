@@ -21,12 +21,16 @@ final class PermissionsManager: ObservableObject {
         case unreadable
 
         var label: String {
-            switch self {
+            // Wrapped once around the switch rather than per case: the literals
+            // stay readable as a table, and there is one place where a new case
+            // can forget to be translatable.
+            let key: String.LocalizationValue = switch self {
             case .granted: "Erteilt"
             case .denied: "Verweigert"
             case .notDetermined: "Noch nicht angefragt"
             case .unreadable: "Nicht auslesbar — macOS fragt beim ersten Mitschnitt"
             }
+            return String(localized: key)
         }
 
         var symbolName: String {
@@ -59,7 +63,7 @@ final class PermissionsManager: ObservableObject {
         var id: String { rawValue }
 
         var name: String {
-            switch self {
+            let key: String.LocalizationValue = switch self {
             case .microphone: "Mikrofon"
             case .systemAudio: "Systemaudio-Aufnahme"
             case .inputMonitoring: "Eingabeüberwachung"
@@ -67,10 +71,11 @@ final class PermissionsManager: ObservableObject {
             case .calendar: "Kalender"
             case .notifications: "Mitteilungen"
             }
+            return String(localized: key)
         }
 
         var purpose: String {
-            switch self {
+            let key: String.LocalizationValue = switch self {
             case .microphone:
                 "Diktat und Meeting-Aufnahme."
             case .systemAudio:
@@ -84,6 +89,7 @@ final class PermissionsManager: ObservableObject {
             case .notifications:
                 "Die Nachfrage »Diesen Call aufzeichnen?« und die Meldung, wenn die Notiz fertig ist. Ohne sie erscheint stattdessen ein kleines Fenster oben rechts."
             }
+            return String(localized: key)
         }
 
         /// Anchor of the matching pane in System Settings → Privacy & Security.

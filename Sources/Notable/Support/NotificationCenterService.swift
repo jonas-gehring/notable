@@ -55,8 +55,8 @@ final class NotificationCenterService: NSObject {
             identifier: Category.meetingConsent.rawValue,
             actions: [
                 UNNotificationAction(identifier: Action.record.rawValue, title: "Aufnehmen", options: []),
-                UNNotificationAction(identifier: Action.remember.rawValue, title: "Immer für diese App", options: []),
-                UNNotificationAction(identifier: Action.later.rawValue, title: "Später", options: []),
+                UNNotificationAction(identifier: Action.remember.rawValue, title: String(localized: "Immer für diese App"), options: []),
+                UNNotificationAction(identifier: Action.later.rawValue, title: String(localized: "Später"), options: []),
             ],
             intentIdentifiers: [],
             options: [.customDismissAction]
@@ -67,7 +67,7 @@ final class NotificationCenterService: NSObject {
             identifier: Category.meetingConsent.rawValue + ".once",
             actions: [
                 UNNotificationAction(identifier: Action.record.rawValue, title: "Aufnehmen", options: []),
-                UNNotificationAction(identifier: Action.later.rawValue, title: "Später", options: []),
+                UNNotificationAction(identifier: Action.later.rawValue, title: String(localized: "Später"), options: []),
             ],
             intentIdentifiers: [],
             options: [.customDismissAction]
@@ -158,7 +158,7 @@ final class NotificationCenterService: NSObject {
     /// being replaced.
     func postUpdateAvailable(version: String) {
         let content = UNMutableNotificationContent()
-        content.title = "Update verfügbar"
+        content.title = String(localized: "Update verfügbar")
         content.body = "Notable \(version) steht bereit — im Menü oder in den Einstellungen installieren."
         post(id: "update.available.\(version)", content: content)
     }

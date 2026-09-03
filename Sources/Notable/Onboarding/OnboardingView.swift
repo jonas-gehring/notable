@@ -22,7 +22,7 @@ struct OnboardingView: View {
         /// Names the dots in the footer, so jumping straight to a page is a
         /// choice rather than a guess.
         var title: String {
-            switch self {
+            let key: String.LocalizationValue = switch self {
             case .welcome: "Willkommen"
             case .microphone: "Mikrofon"
             case .hotkey: "Hotkey & Einfügen"
@@ -31,6 +31,7 @@ struct OnboardingView: View {
             case .provider: "Zusammenfassung"
             case .done: "Fertig"
             }
+            return String(localized: key)
         }
     }
 
@@ -134,18 +135,18 @@ struct OnboardingView: View {
 
     // MARK: Building blocks
 
-    private func pageBody(icon: String, title: String, text: String,
-                          action: (String, () -> Void)? = nil) -> some View {
+    private func pageBody(icon: String, title: LocalizedStringKey, text: LocalizedStringKey,
+                          action: (LocalizedStringKey, () -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             pageHeader(icon: icon, title: title)
-            Text(.init(text)).foregroundStyle(Theme.textSubtle)
+            Text(text).foregroundStyle(Theme.textSubtle)
             if let action {
                 Button(action.0) { action.1() }
             }
         }
     }
 
-    private func pageHeader(icon: String, title: String) -> some View {
+    private func pageHeader(icon: String, title: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 30))
@@ -156,7 +157,8 @@ struct OnboardingView: View {
         }
     }
 
-    private func permissionPage(_ kind: PermissionsManager.Kind, title: String, text: String) -> some View {
+    private func permissionPage(_ kind: PermissionsManager.Kind,
+                                title: LocalizedStringKey, text: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             pageHeader(icon: "mic", title: title)
             Text(text).foregroundStyle(Theme.textSubtle)

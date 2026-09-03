@@ -59,7 +59,7 @@ struct LiveNotesView: View {
                     .lineLimit(1)
                 Text(notes.isActive
                      ? "Notizen kommen als „Eigene Notizen“ in die Notiz und in die Zusammenfassung."
-                     : "Notizen gehören zu einer laufenden Aufnahme.")
+                     : String(localized: "Notizen gehören zu einer laufenden Aufnahme."))
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textSubtle)
                     .lineLimit(2)
@@ -86,10 +86,10 @@ struct LiveNotesView: View {
     private var formatBar: some View {
         HStack(spacing: 4) {
             formatButton("textformat.size.larger", .title, "Titel (⌘⌥1)")
-            formatButton("textformat.size", .heading, "Überschrift (⌘⌥2)")
-            formatButton("textformat.size.smaller", .subheading, "Unterüberschrift (⌘⌥3)")
+            formatButton("textformat.size", .heading, String(localized: "Überschrift (⌘⌥2)"))
+            formatButton("textformat.size.smaller", .subheading, String(localized: "Unterüberschrift (⌘⌥3)"))
             Divider().frame(height: 14)
-            formatButton("list.bullet", .bullet, "Aufzählung (⌘⌥4)")
+            formatButton("list.bullet", .bullet, String(localized: "Aufzählung (⌘⌥4)"))
             formatButton("list.number", .numbered, "Nummerierte Liste (⌘⌥5)")
             formatButton("checklist", .checkbox(done: false), "Checkliste (⌘⌥6)")
             Spacer(minLength: 0)

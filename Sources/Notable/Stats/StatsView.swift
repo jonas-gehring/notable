@@ -301,7 +301,7 @@ struct StatsView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 12)], spacing: 12) {
             StatTile(
                 icon: "text.word.spacing",
-                caption: "Wörter diktiert",
+                caption: String(localized: "Wörter diktiert"),
                 value: Self.integer(model.periodTotals.dictationWords),
                 delta: UsageMetrics.delta(
                     current: Double(model.periodTotals.dictationWords),
@@ -356,8 +356,8 @@ struct StatsView: View {
 
     private var wordsChart: some View {
         BucketChart(
-            title: "Diktierte Wörter",
-            unitLabel: "Wörter",
+            title: String(localized: "Diktierte Wörter"),
+            unitLabel: String(localized: "Wörter"),
             buckets: model.series,
             granularity: granularity,
             tint: Theme.chartPrimary,
@@ -451,10 +451,10 @@ private extension Granularity {
     /// What a delta compares against, spelled out so the chip is never ambiguous.
     var baselineLabel: String {
         switch self {
-        case .day: "ggü. gestern"
-        case .week: "ggü. Vorwoche"
-        case .month: "ggü. Vormonat"
-        case .year: "ggü. Vorjahr"
+        case .day: String(localized: "ggü. gestern")
+        case .week: String(localized: "ggü. Vorwoche")
+        case .month: String(localized: "ggü. Vormonat")
+        case .year: String(localized: "ggü. Vorjahr")
         }
     }
 

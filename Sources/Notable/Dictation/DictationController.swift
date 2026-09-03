@@ -11,11 +11,12 @@ final class DictationController: ObservableObject {
         case failed(String)
 
         var label: String {
-            switch self {
+            let key: String.LocalizationValue = switch self {
             case .loading: "ASR-Modell wird geladen…"
             case .ready: "ASR-Modell bereit"
             case .failed(let message): "ASR-Modell fehlgeschlagen: \(message)"
             }
+            return String(localized: key)
         }
     }
 
@@ -125,7 +126,7 @@ final class DictationController: ObservableObject {
             Task { @MainActor in
                 guard let self, self.appState.captureState == .recording else { return }
                 self.cancelRecording()
-                self.overlay.flashError("Audiogerät hat gewechselt — Aufnahme abgebrochen.")
+                self.overlay.flashError(String(localized: "Audiogerät hat gewechselt — Aufnahme abgebrochen."))
             }
         }
 
@@ -150,7 +151,7 @@ final class DictationController: ObservableObject {
     /// Applies a changed hotkey setting immediately.
     func hotkeyChanged() {
         // A running recording would never see its keyUp on the new key.
-        discardActiveRecording(reason: "Hotkey geändert — laufendes Diktat verworfen.")
+        discardActiveRecording(reason: String(localized: "Hotkey geändert — laufendes Diktat verworfen."))
         hotkey.stop()
         hotkey.spec = HotkeySpec.current
         hotkey.enhanceSpec = EnhancementSettings.hotkey()

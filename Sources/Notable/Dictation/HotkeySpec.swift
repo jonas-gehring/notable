@@ -19,13 +19,14 @@ enum HotkeySpec: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 
     var label: String {
-        switch self {
+        let key: String.LocalizationValue = switch self {
         case .rightOption: "Rechte Wahltaste (⌥)"
         case .leftOption: "Linke Wahltaste (⌥)"
         case .rightCommand: "Rechte Befehlstaste (⌘)"
         case .rightControl: "Rechte Ctrl-Taste (⌃)"
         case .fnGlobe: "Fn/Globus-Taste (🌐)"
         }
+        return String(localized: key)
     }
 
     var keyCode: Int64 {

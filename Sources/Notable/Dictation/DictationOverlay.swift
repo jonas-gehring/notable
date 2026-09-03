@@ -292,10 +292,10 @@ private struct DictationOverlayView: View {
 
     private var accessibilityText: String {
         switch model.state {
-        case .recording: model.locked ? "Aufnahme fixiert" : "Aufnahme läuft"
+        case .recording: model.locked ? String(localized: "Aufnahme fixiert") : String(localized: "Aufnahme läuft")
         case .transcribing: "Transkribiere"
         case .enhancing: "Verbessere"
-        case .loadingModel: "Modell lädt"
+        case .loadingModel: String(localized: "Modell lädt")
         case .error(let message): message
         case .notice(let message): message
         }
@@ -422,7 +422,7 @@ struct NotchOverlayView: View {
             return model.locked ? "Fixiert — Esc verwirft" : "Aufnahme… (Esc verwirft)"
         case .transcribing: return "Transkribiere…"
         case .enhancing: return "Verbessere…"
-        case .loadingModel: return "Modell lädt…"
+        case .loadingModel: return String(localized: "Modell lädt…")
         case .error(let message): return message
         case .notice(let message): return message
         }

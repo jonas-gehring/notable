@@ -60,7 +60,12 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
 fi
 
 # ----- 1. bump versions in project.yml ------------------------------------
-BUILD_NUM="$(git rev-list --count HEAD)"
+# The commit count is monotonic only as long as the history is. Notable's history
+# was squashed once, after build 79 had already shipped, so the raw count restarted
+# at 1 — a release cut from it would carry a *lower* CFBundleVersion than the copy it
+# replaces. The offset puts every future build above everything that ever existed and
+# keeps the number monotonic from here on. Raise it, never lower it.
+BUILD_NUM="$(( 100 + $(git rev-list --count HEAD) ))"
 echo "==> Bumping to MARKETING_VERSION=$VERSION, CURRENT_PROJECT_VERSION=$BUILD_NUM"
 /usr/bin/sed -i '' -E \
   -e "s/^([[:space:]]*MARKETING_VERSION:).*/\1 \"$VERSION\"/" \

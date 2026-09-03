@@ -165,6 +165,9 @@ targets:
         # Versioning — MARKETING_VERSION (CFBundleShortVersionString) is the only
         # human-chosen value; CURRENT_PROJECT_VERSION (CFBundleVersion) is the
         # monotonic build counter. scripts/release.sh is the single writer of both.
+        # The counter is the commit count plus a fixed offset: the history was
+        # squashed once after build 79 shipped, so the bare count would now hand out
+        # numbers below builds that already exist (see scripts/release.sh).
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "79"
         # Signed with a stable "Developer ID Application" cert (NOT

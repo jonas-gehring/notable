@@ -13,7 +13,7 @@ folder you own.
 segmentation and diarization all run on the Neural Engine. The only thing that ever goes
 out is text, and only at the points named below.
 
-> Auf Deutsch: [README.de.md](README.de.md) · the app's interface is German.
+> Auf Deutsch: [README.de.md](README.de.md)
 
 ## Dictation
 
@@ -88,7 +88,8 @@ making it.
 ## Requirements
 
 macOS 14.4 or later, Apple Silicon. Process taps only — there is no ScreenCaptureKit
-fallback. Speech models are downloaded on first launch and cached; a cold cache is carried
+fallback. The interface speaks English and German and follows your system language;
+you can pin either one in Settings → General. Speech models are downloaded on first launch and cached; a cold cache is carried
 by Whisper Tiny until the real model has arrived, and the app says so while it is.
 
 ## Build and install

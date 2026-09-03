@@ -67,15 +67,35 @@ Dazu die Nachzügler: Vorschalt-Modell und unterbrechungsfreier Modellwechsel (S
 Modell-Ergonomie am Picker und Sprachprofil (Spec 11), Medien pausieren (Spec 08 B), sowie
 Gemini CLI und Codex CLI als zusätzliche Anbieter.
 
+## Stufe 4 — Veröffentlichung, Onboarding, Zweisprachigkeit
+
+Das Repository ist öffentlich, `v1.0.0` ist geschnitten (Developer-ID-signiert, **nicht**
+notarisiert — die Release-Notes sagen das und nennen beide Auswege). Damit funktioniert
+auch der Auto-Update-Pfad zum ersten Mal wirklich.
+
+- **Onboarding fragte die falsche Berechtigung ab.** Der Meeting-Tap braucht
+  „Systemaudio-Aufnahme"; geprüft und verlinkt wurde die Bildschirmaufnahme. Details und
+  warum der Status bewusst als *nicht auslesbar* angezeigt wird, stehen in `CLAUDE.md`
+  unter `Permissions/`. Dazu: Überspringen-Knopf, klickbare Seitenpunkte, die
+  Mitteilungen-Berechtigung wird erfragt, und die Provider-Seite warb nicht mehr mit
+  einem Abo-Namen, den es so nicht mehr gibt.
+- **Update-Pfad**: Release-Notes werden gerendert statt roh angezeigt (`ReleaseNotes` —
+  Blockebene selbst, Inline-Ebene dem Parser, weil beide Bordmittel allein falsch sind),
+  Download mit Prozentanzeige, eine gefundene Version wird einmal gemeldet statt nur im
+  Menü zu warten, einzelne Versionen lassen sich überspringen, die Automatik abschalten.
+- **Zweisprachig (de/en) mit Umschalter.** Die deutschen Literale sind die Schlüssel;
+  `en.lproj` übersetzt sie. Die beiden Fallen — nur `LocalizedStringKey` wird
+  nachgeschlagen, und interpolierte Schlüssel tragen `%lld` statt `%@` — stehen in
+  `CLAUDE.md`. `LocalizationTests` ist der Wächter, weil eine fehlende Übersetzung
+  nichts meldet, sondern einfach deutsch bleibt.
+
 ## Offen
 
-- **Ein Release schneiden.** Es gibt derzeit **keins**: das alte wurde zusammen mit der
-  alten Historie entfernt. Der komplette Auto-Update-Pfad ist gebaut — Prüfung beim Start
-  (24 h gedrosselt), „Nach Updates suchen" in den Einstellungen und im Menü, Download,
-  Austausch des laufenden Bundles, Neustart — und findet bis zum ersten Release nichts.
-  Solange das Repository privat ist, findet er auch danach nichts: GitHub antwortet auf
-  eine unauthentifizierte Anfrage an ein privates Repository mit 404, was von „noch nichts
-  veröffentlicht" nicht zu unterscheiden ist (`UpdateChecker`, Fall 404).
+- **Notarisierung nachholen.** `v1.0.0` ist signiert, aber ohne Apple-Ticket: Gatekeeper
+  blockiert den ersten Start einer heruntergeladenen Kopie, und der Nutzer muss einmal
+  durch die Systemeinstellungen. `scripts/release.sh` kann notarisieren, sobald ein
+  `notarytool`-Schlüsselbundprofil existiert; das Asset lässt sich im bestehenden Release
+  austauschen, ohne Tag oder Version anzufassen.
 - **Echter Call-Test gegen die 0-Segment-Aufnahme.** Echte Calls können null
   Transkript-Segmente liefern, während eine Solo-Aufnahme funktioniert; Hauptverdächtiger
   ist die Echo-Unterdrückung (VPIO) auf dem Mikrofon im Konflikt mit der Meeting-App. Der

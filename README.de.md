@@ -13,6 +13,9 @@ ausschließlich Text, und auch das nur an den Stellen, die unten benannt sind.
 
 > In English: [README.md](README.md)
 
+Die Oberfläche gibt es auf Deutsch und Englisch; sie folgt der Systemsprache und
+lässt sich in den Einstellungen fest auf eine der beiden stellen.
+
 ## Zwei Modi, ein Kern
 
 **Diktat.** Hotkey halten, sprechen, loslassen — der polierte Text landet im fokussierten

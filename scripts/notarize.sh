@@ -23,6 +23,12 @@
 #
 set -euo pipefail
 
+# NOTE: never `producer | grep -q` under `set -o pipefail`. `grep -q` exits the
+# moment it matches, the producer then gets SIGPIPE on its next write, and the
+# pipeline reports 141 — so the check fails *precisely when it succeeds*. That
+# cost one release: a correctly Developer-ID-signed app was rejected as unsigned.
+# Capture first, match against the variable with a herestring.
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
@@ -87,16 +93,18 @@ codesign --verify --deep --strict "$APP"
 # certificate kind as OIDs (field.1.2.840.113635.100.6.1.13) and never contains
 # the string "Developer ID Application", so grepping it rejects valid apps.
 INFO="$(codesign -d --verbose=2 "$APP" 2>&1 || true)"
-echo "$INFO" | grep -E '^(Authority=Developer ID|TeamIdentifier=|Timestamp=)' | sed 's/^/    /'
-if ! echo "$INFO" | grep -q '^Authority=Developer ID Application:'; then
+# Display only — `|| true` because under `set -e` + pipefail a grep that finds
+# nothing would abort the script before the real checks below ever run.
+grep -E '^(Authority=Developer ID|TeamIdentifier=|Timestamp=)' <<<"$INFO" | sed 's/^/    /' || true
+if ! grep -q '^Authority=Developer ID Application:' <<<"$INFO"; then
   echo "App is not Developer ID signed — notarization would be rejected." >&2
   echo "Set CODE_SIGN_IDENTITY: \"Developer ID Application\" + ENABLE_HARDENED_RUNTIME: YES in project.yml." >&2
   exit 1
 fi
 # Hardened runtime and a secure timestamp are the other two hard requirements;
 # Apple checks them only after the upload and the queue wait.
-echo "$INFO" | grep -q 'flags=.*runtime' || { echo "Hardened runtime is off — notarization would be rejected." >&2; exit 1; }
-echo "$INFO" | grep -q '^Timestamp=' || { echo "Signature has no secure timestamp — notarization would be rejected." >&2; exit 1; }
+grep -q 'flags=.*runtime' <<<"$INFO" || { echo "Hardened runtime is off — notarization would be rejected." >&2; exit 1; }
+grep -q '^Timestamp=' <<<"$INFO" || { echo "Signature has no secure timestamp — notarization would be rejected." >&2; exit 1; }
 
 # ----- 3. submit ----------------------------------------------------------
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist" 2>/dev/null || echo unknown)"

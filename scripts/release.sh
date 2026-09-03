@@ -29,6 +29,12 @@
 #
 set -euo pipefail
 
+# NOTE: never `producer | grep -q` under `set -o pipefail`. `grep -q` exits the
+# moment it matches, the producer then gets SIGPIPE on its next write, and the
+# pipeline reports 141 — so the check fails *precisely when it succeeds*. That
+# cost one release: a correctly Developer-ID-signed app was rejected as unsigned.
+# Capture first, match against the variable with a herestring.
+
 # ----- args ---------------------------------------------------------------
 VERSION="${1:?usage: release.sh <marketing-version, e.g. 1.0.0> [--publish]}"
 PUBLISH=0
@@ -91,7 +97,7 @@ echo "==> Verifying certificate-based signature (stable designated requirement)"
 codesign --verify --deep --strict "$APP"
 DR="$(codesign -d -r- "$APP" 2>&1 || true)"
 echo "    designated requirement: $DR"
-if echo "$DR" | grep -q "cdhash"; then
+if grep -q "cdhash" <<<"$DR"; then
   echo "App is ad-hoc signed (DR contains cdhash) — TCC grants would reset on every build." >&2
   echo "Set a stable CODE_SIGN_IDENTITY in project.yml and rebuild." >&2
   exit 1
@@ -115,7 +121,8 @@ else
   # Read the AUTHORITY line, not the designated requirement: the DR never spells
   # the certificate name out, it encodes it as OIDs (field.1.2.840.113635.100.6.1.13),
   # so grepping $DR for "Developer ID Application" rejects every valid app.
-  if ! codesign -d --verbose=2 "$APP" 2>&1 | grep -q '^Authority=Developer ID Application:'; then
+  AUTHORITY_INFO="$(codesign -d --verbose=2 "$APP" 2>&1 || true)"
+  if ! grep -q '^Authority=Developer ID Application:' <<<"$AUTHORITY_INFO"; then
     echo "App is not Developer ID signed — notarization would be rejected." >&2
     echo "Set CODE_SIGN_IDENTITY: \"Developer ID Application\" + ENABLE_HARDENED_RUNTIME: YES in project.yml," >&2
     echo "or re-run with SKIP_NOTARIZE=1 for an un-notarized build." >&2

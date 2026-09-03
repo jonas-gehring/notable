@@ -21,6 +21,12 @@
 #   SKIP_NOTARIZE=1         build and package, but do not notarize (case B output)
 set -euo pipefail
 
+# NOTE: never `producer | grep -q` under `set -o pipefail`. `grep -q` exits the
+# moment it matches, the producer then gets SIGPIPE on its next write, and the
+# pipeline reports 141 — so the check fails *precisely when it succeeds*. That
+# cost one release: a correctly Developer-ID-signed app was rejected as unsigned.
+# Capture first, match against the variable with a herestring.
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
@@ -56,7 +62,8 @@ mkdir -p "$DIST"
 # the SPM package targets, and those have no DEVELOPMENT_TEAM — the build then
 # dies with "Signing for swift-transformers_Hub requires a development team".
 # So: build first, then read the identity back off the product.
-if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
+IDENTITIES="$(security find-identity -v -p codesigning 2>&1 || true)"
+if ! grep -q "Developer ID Application" <<<"$IDENTITIES"; then
   echo "No \"Developer ID Application\" identity in the keychain — project.yml asks for" >&2
   echo "one, so the build will fail. Install the certificate or change project.yml." >&2
   exit 1
@@ -88,7 +95,7 @@ fi
 INFO="$(codesign -d --verbose=2 "$APP" 2>&1 || true)"
 IDENTITY="$(echo "$INFO" | sed -n 's/^Authority=\(.*\)/\1/p' | head -1)"
 echo "==> Signed as: ${IDENTITY:-(unsigned)}"
-if ! echo "$INFO" | grep -q '^Authority=Developer ID Application:'; then
+if ! grep -q '^Authority=Developer ID Application:' <<<"$INFO"; then
   DISTRIBUTABLE=0
 fi
 

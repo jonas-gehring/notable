@@ -1,0 +1,9 @@
+/* Notable — English. The permission prompts macOS shows before it asks.
+   Keyed by the Info.plist key, not by the German text. */
+
+"CFBundleDisplayName" = "Notable";
+"CFBundleName" = "Notable";
+
+"NSMicrophoneUsageDescription" = "Notable uses the microphone for dictation and meeting recordings. Audio never leaves the device.";
+"NSCalendarsFullAccessUsageDescription" = "Notable reads your calendar to match recordings to the right event.";
+"NSAudioCaptureUsageDescription" = "Notable records system audio to transcribe the other meeting participants. Audio never leaves the device.";

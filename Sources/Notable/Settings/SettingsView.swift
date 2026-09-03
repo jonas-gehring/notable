@@ -113,9 +113,30 @@ struct GeneralSettingsView: View {
     @EnvironmentObject private var updateInstaller: UpdateInstaller
     @State private var launchAtLogin = false
     @State private var loginItemError: String?
+    @AppStorage(AppLanguage.storageKey) private var languageRaw = AppLanguage.system.rawValue
+    @State private var showRelaunchHint = false
 
     var body: some View {
         Form {
+            Section {
+                Picker("Sprache", selection: languageBinding) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.label).tag(language)
+                    }
+                }
+                if showRelaunchHint {
+                    HStack {
+                        Text("Wirkt nach einem Neustart von Notable.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Jetzt neu starten") { relaunch() }
+                    }
+                }
+            } footer: {
+                Text("„Systemsprache“ folgt der Sprachreihenfolge in den Systemeinstellungen; kennt Notable die Sprache nicht, zeigt es English.")
+            }
+
             Section {
                 LabeledContent("Notizen-Ordner") {
                     HStack {
@@ -165,6 +186,30 @@ struct GeneralSettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
+        }
+    }
+
+    /// Writing the choice is not enough — the bundle resolves its string tables
+    /// once per process, so a switch only becomes visible after a relaunch. The
+    /// hint appears the moment the picker changes and says so, instead of leaving
+    /// the user to wonder why nothing happened.
+    private var languageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { AppLanguage(rawValue: languageRaw) ?? .system },
+            set: { language in
+                guard language.rawValue != languageRaw else { return }
+                AppLanguage.apply(language)
+                languageRaw = language.rawValue
+                showRelaunchHint = true
+            }
+        )
+    }
+
+    private func relaunch() {
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
         }
     }
 

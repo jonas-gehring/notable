@@ -3,6 +3,12 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     macOS: "14.4"
+  # The German text in the source is the localization *key*, not a translation —
+  # Notable was written in German. The development language is nonetheless `en`,
+  # because it decides what a system in a language Notable does not speak falls
+  # back to: English, not German. See Sources/Notable/Support/AppLanguage.swift.
+  developmentLanguage: en
+  knownRegions: [en, de, Base]
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -78,6 +84,8 @@ targets:
       # Block-level cleanup of GitHub release bodies before the inline Markdown
       # parser sees them. Pure, and the input is written by someone else.
       - path: Sources/Notable/Update/ReleaseNotes.swift
+      # Which language the interface is drawn in, and what "system" falls back to.
+      - path: Sources/Notable/Support/AppLanguage.swift
       - path: Sources/Notable/Meeting/ChatPrompt.swift
       - path: Sources/Notable/Storage/RecordingStore.swift
       - path: Sources/Notable/Storage/MarkdownProjector.swift

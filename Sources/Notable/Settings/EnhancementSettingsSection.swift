@@ -97,9 +97,10 @@ struct EnhancementSettingsSection: View {
             auslöst: über die zweite Taste oder „Letztes Diktat verbessern\u{201C} im Menü. \
             Ein normales Diktat bleibt unverändert schnell und offline.
 
-            Wohin der Text dann geht, ohne Beschönigung: an Anthropic, über den lokal \
-            gestarteten Prozess `claude -p`. Lokal ist daran nur die Abrechnung \
-            (Abo-Kontingent statt Rechnung pro Token) — der Text selbst geht ins Netz. \
+            Wohin der Text dann geht, ohne Beschönigung: an den Anbieter der oben \
+            gewählten CLI — Anthropic, Google oder OpenAI. Lokal ist daran nur, dass \
+            der Prozess auf deinem Rechner startet, und die Abrechnung (Abo-Kontingent \
+            statt Rechnung pro Token) — der Text selbst geht ins Netz. \
             Der bezahlte API-Schlüssel wird dafür nie benutzt, auch nicht, wenn er für \
             Meetings eingestellt ist. Jeder Lauf wird in der Statistik gezählt, damit \
             nachzählbar bleibt, wie oft das passiert ist.

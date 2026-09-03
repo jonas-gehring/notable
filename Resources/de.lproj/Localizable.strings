@@ -1,0 +1,12 @@
+/* Deutsch ist die Schlüsselsprache: die Zeichenketten im Quelltext SIND der
+   deutsche Text. Diese Datei ist deshalb absichtlich fast leer — ein Schlüssel,
+   für den hier nichts steht, löst sich zu sich selbst auf, und das ist genau die
+   gewünschte deutsche Fassung.
+
+   Sie existiert trotzdem, und zwar aus einem Grund: ohne ein de.lproj bietet
+   macOS Deutsch gar nicht erst als Sprache dieses Bundles an. Dann wäre Deutsch
+   nur noch über den Umweg „Systemsprache" erreichbar, und die Auswahl
+   „Deutsch" in den Einstellungen liefe ins Leere.
+
+   Hier gehört nur hinein, was auf Deutsch anders lauten soll als der Schlüssel
+   selbst. */

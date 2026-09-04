@@ -23,6 +23,27 @@
 #
 set -euo pipefail
 
+# Quit a running Notable before replacing its bundle.
+#
+# `rm -rf /Applications/Notable.app` under a running app deletes the bundle out
+# from under it: the process keeps going on the inode it already has, its TCC
+# grants and its menu-bar item stay, and the next `open` starts a *second*
+# instance next to the first. Ask it to quit, wait, and only then replace it.
+quit_notable() {
+  local dest="$1"
+  [ -d "$dest" ] || return 0
+  pgrep -x Notable >/dev/null 2>&1 || return 0
+  echo "==> Quitting the running Notable"
+  osascript -e 'tell application id "de.jonasgehring.notable" to quit' 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    pgrep -x Notable >/dev/null 2>&1 || return 0
+    sleep 0.2
+  done
+  echo "Notable is still running — quit it and run this again." >&2
+  exit 1
+}
+
+
 # NOTE: never `producer | grep -q` under `set -o pipefail`. `grep -q` exits the
 # moment it matches, the producer then gets SIGPIPE on its next write, and the
 # pipeline reports 141 — so the check fails *precisely when it succeeds*. That
@@ -146,10 +167,12 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 # ----- 5. optional install ------------------------------------------------
 if [ "$INSTALL" -eq 1 ]; then
   DEST="/Applications/Notable.app"
+  quit_notable "$DEST"
   echo "==> Installing to $DEST"
   rm -rf "$DEST"
   cp -R "$APP" "$DEST"
   xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+  open "$DEST"
 fi
 
 echo ""

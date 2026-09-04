@@ -73,9 +73,39 @@ final class AgentCLIProviderTests: XCTestCase {
     /// a rebuild.
     func testArgumentsCanBeOverridden() {
         let store = UserDefaults(suiteName: "CLI.\(UUID().uuidString)")!
-        XCTAssertEqual(AgentCLITool.codex.arguments(store: store), ["exec", "-"])
+        XCTAssertEqual(AgentCLITool.codex.arguments(store: store), ["exec", "--sandbox", "read-only", "-"])
         store.set("chat --quiet", forKey: AgentCLITool.codex.argumentsKey)
         XCTAssertEqual(AgentCLITool.codex.arguments(store: store), ["chat", "--quiet"])
+    }
+
+    /// A transcript is untrusted input, and `codex exec` is the one tool here
+    /// whose sandbox costs nothing to demand (macOS Seatbelt, nothing to
+    /// install). Its default must not silently drift to something writable.
+    func testCodexRunsSandboxedByDefault() {
+        let store = UserDefaults(suiteName: "CLI.\(UUID().uuidString)")!
+        let arguments = AgentCLITool.codex.arguments(store: store)
+        XCTAssertEqual(arguments.firstIndex(of: "--sandbox").map { arguments[$0 + 1] }, "read-only")
+    }
+
+    /// The two halves of the prompt must not read as one voice: a bare `---`
+    /// put "ignore previous instructions" from inside a transcript on the same
+    /// footing as the instructions themselves.
+    func testPromptLabelsTheTrustBoundary() {
+        let prompt = AgentCLIProvider.prompt(system: "SYS", user: "USER")
+        let instructions = try! XCTUnwrap(prompt.range(of: "[ANWEISUNGEN]"))
+        let material = try! XCTUnwrap(prompt.range(of: "[MATERIAL"))
+        XCTAssertTrue(instructions.lowerBound < material.lowerBound)
+        XCTAssertTrue(prompt.contains("SYS"))
+        XCTAssertTrue(prompt.contains("USER"))
+    }
+
+    /// Provider-independent, and the only defence Gemini has — so it is pinned
+    /// where the prompt lives, not left to a reviewer to notice.
+    func testSystemPromptsStateThatTranscriptsAreNotInstructions() {
+        for prompt in [SummarizationPrompt.system, ChatPrompt.system] {
+            XCTAssertTrue(prompt.contains("zitiertes Material"), prompt.prefix(80).description)
+            XCTAssertTrue(prompt.contains("niemals ein Befehl"))
+        }
     }
 
     func testDisplayNameNamesTheDestination() {
@@ -112,5 +142,49 @@ final class AgentCLIProviderTests: XCTestCase {
             XCTAssertEqual(DictationEnhancer.provider(named: id.rawValue).id, id.rawValue)
         }
         XCTAssertFalse(SummarizationProviderID.anthropicAPI.isCLI)
+    }
+
+    // MARK: - Review 2026-09-03
+
+    /// `codex exec --json` and Gemini's stream mode emit one object per line.
+    /// The whole blob does not parse, and the old parser then pasted the raw
+    /// JSONL into the note as if it were the summary.
+    func testJSONLinesYieldTheLastAnswer() throws {
+        let output = """
+        {"type":"task_started"}
+        {"type":"agent_message","message":"Zwischenschritt"}
+        {"type":"agent_message","last_agent_message":"Die fertige Zusammenfassung."}
+        """
+        let parsed = try AgentCLIProvider.parse(output, tool: .codex)
+        XCTAssertEqual(parsed.text, "Die fertige Zusammenfassung.")
+    }
+
+    /// A single JSON object is not JSONL and must keep working.
+    func testSingleJSONObjectStillParses() throws {
+        let parsed = try AgentCLIProvider.parse(#"{"response":"Antwort"}"#, tool: .gemini)
+        XCTAssertEqual(parsed.text, "Antwort")
+    }
+
+    /// Plain multi-line text is not JSONL either.
+    func testPlainMultilineOutputIsTakenVerbatim() throws {
+        let output = "Erste Zeile\nZweite Zeile"
+        let parsed = try AgentCLIProvider.parse(output, tool: .gemini)
+        XCTAssertEqual(parsed.text, output)
+    }
+
+    /// A quoted argument is one argument.
+    func testCustomArgumentsRespectQuoting() {
+        XCTAssertEqual(
+            AgentCLITool.splitArguments(#"--model "gemini 2.5 pro" -p"#),
+            ["--model", "gemini 2.5 pro", "-p"]
+        )
+        XCTAssertEqual(AgentCLITool.splitArguments("exec  --sandbox   read-only -"),
+                       ["exec", "--sandbox", "read-only", "-"])
+    }
+
+    /// The Codex invocation pins the read-only sandbox rather than relying on
+    /// it staying the default.
+    func testCodexRunsInAReadOnlySandbox() {
+        XCTAssertEqual(AgentCLITool.codex.defaultArguments, ["exec", "--sandbox", "read-only", "-"])
     }
 }

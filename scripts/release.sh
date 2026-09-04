@@ -166,7 +166,9 @@ if [ "$PUBLISH" -eq 1 ]; then
   git add project.yml
   git commit -m "Release $TAG"
   git tag "$TAG"
-  git push origin HEAD --tags
+  # Only this tag: `--tags` pushes every local tag, including experiments and
+  # tags from other branches that were never meant to be published.
+  git push origin HEAD "$TAG"
   gh release create "$TAG" "$ZIP" \
     --title "Notable $VERSION" \
     --generate-notes
@@ -179,7 +181,9 @@ The project.yml version bump is on disk — review it, then run the following to
   git add project.yml
   git commit -m "Release $TAG"
   git tag "$TAG"
-  git push origin HEAD --tags
+  # Only this tag: `--tags` pushes every local tag, including experiments and
+  # tags from other branches that were never meant to be published.
+  git push origin HEAD "$TAG"
   gh release create "$TAG" "$ZIP" \\
     --title "Notable $VERSION" \\
     --generate-notes

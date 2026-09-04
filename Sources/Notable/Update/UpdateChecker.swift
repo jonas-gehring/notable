@@ -119,9 +119,24 @@ struct UpdateInfo: Equatable {
 }
 
 enum UpdateResolver {
-    /// First asset whose filename ends in `.zip` (case-insensitive).
+    /// Asset names that are never the app, however tempting their extension.
+    private static let excludedAssetMarkers = ["dsym", "symbols", "debug", "sources", "source-code"]
+
+    /// The `.zip` that is actually the application.
+    ///
+    /// "First `.zip` wins" was enough while exactly one was attached, and it is
+    /// a foothold as soon as one is not: a `Notable-1.0.2.dSYM.zip` uploaded
+    /// before the app would have been downloaded, and — before the signature
+    /// check — installed. Preference goes to a name that carries the version,
+    /// symbol archives are excluded outright, and nothing else changes.
     static func firstZipAsset(_ release: GitHubRelease) -> URL? {
-        release.assets.first { $0.name.lowercased().hasSuffix(".zip") }?.browserDownloadURL
+        let zips = release.assets.filter { asset in
+            let name = asset.name.lowercased()
+            return name.hasSuffix(".zip") && !excludedAssetMarkers.contains { name.contains($0) }
+        }
+        let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        let preferred = zips.first { $0.name.lowercased().contains(version.lowercased()) }
+        return (preferred ?? zips.first)?.browserDownloadURL
     }
 
     /// Decide whether a release is a usable update relative to `current`.
@@ -171,7 +186,10 @@ final class UpdateChecker: ObservableObject {
     /// network+parsing unit that the test bundle compiles on its own, and reaching
     /// for the notification singleton from here would drag the whole UserNotifications
     /// stack in behind it. The app wires this up in `AppDelegate`.
-    var onUpdateFound: ((String) -> Void)?
+    /// Returns whether the announcement actually reached the user. A version is
+    /// only recorded as announced when it did — otherwise a notification lost to
+    /// a not-yet-granted permission would silence that version permanently.
+    var onUpdateFound: ((String) -> Bool)?
 
     private let currentVersion: SemanticVersion
     private let session: URLSession
@@ -187,6 +205,13 @@ final class UpdateChecker: ObservableObject {
     private static let notifiedVersionKey = "updateNotifiedVersion"
     /// On-launch checks run at most once per this interval.
     private static let launchThrottle: TimeInterval = 24 * 60 * 60
+    /// While the app is running, it re-checks on this interval.
+    ///
+    /// A menu-bar app stays up for weeks, so "on launch" alone means an update
+    /// found on Monday is installed whenever the Mac next restarts. Six hours is
+    /// four requests a day against a public endpoint — nothing — and it makes
+    /// the automatic install actually automatic.
+    static let periodicInterval: TimeInterval = 6 * 60 * 60
 
     /// - Parameters:
     ///   - currentVersion: defaults to the running bundle's `CFBundleShortVersionString`.
@@ -218,13 +243,30 @@ final class UpdateChecker: ObservableObject {
     func checkOnLaunch() async {
         guard automaticChecks else { return }
         if let last = lastChecked, Date().timeIntervalSince(last) < Self.launchThrottle {
+            // Still let the caller act on a version found earlier and not yet
+            // installed — the throttle is about network traffic, not about
+            // forgetting what we already know.
+            announceIfNew()
             return
         }
         await check()
+        announceIfNew()
+    }
+
+    /// A periodic re-check for a long-running menu-bar app. Ignores the launch
+    /// throttle — the caller's timer is the throttle.
+    func checkPeriodically() async {
+        guard automaticChecks else { return }
+        await check()
+        announceIfNew()
+    }
+
+    private func announceIfNew() {
         guard let found = available else { return }
         guard defaults.string(forKey: Self.notifiedVersionKey) != found.versionString else { return }
-        defaults.set(found.versionString, forKey: Self.notifiedVersionKey)
-        onUpdateFound?(found.versionString)
+        if onUpdateFound?(found.versionString) == true {
+            defaults.set(found.versionString, forKey: Self.notifiedVersionKey)
+        }
     }
 
     /// Stop offering this version. Deliberately per-version rather than a blanket
@@ -282,7 +324,7 @@ final class UpdateChecker: ObservableObject {
             case 403:
                 lastError = String(localized: "GitHub-Anfragelimit erreicht. Später erneut versuchen.")
             default:
-                lastError = "Update-Prüfung fehlgeschlagen (HTTP \(http.statusCode))."
+                lastError = String(localized: "Update-Prüfung fehlgeschlagen (HTTP \(http.statusCode)).")
             }
         } catch {
             // Network offline, DNS, timeout, etc. — stay quiet, record nothing fatal.

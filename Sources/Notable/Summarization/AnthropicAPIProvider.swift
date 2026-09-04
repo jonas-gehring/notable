@@ -11,24 +11,47 @@ struct AnthropicAPIProvider: SummarizationProvider {
     private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
 
     func availability() async -> ProviderAvailability {
-        if KeychainStore.read(account: KeychainStore.anthropicAPIKeyAccount) == nil {
+        // "Not there" and "not allowed to look" are different problems and used
+        // to read the same — which sent the user off to create a key they
+        // already had.
+        switch KeychainStore.readResult(account: KeychainStore.anthropicAPIKeyAccount) {
+        case .value:
+            return .available
+        case .absent:
             return .unavailable(reason: String(localized: "Kein API-Key im Schlüsselbund (Einstellungen → Zusammenfassung)."))
+        case .denied(let status):
+            return .unavailable(reason: String(localized: "Schlüsselbund verweigert den Zugriff auf den API-Key (OSStatus \(Int(status))) — Eintrag „de.jonasgehring.notable“ prüfen."))
         }
-        return .available
     }
 
     func summarize(transcript: String, context: MeetingContext) async throws -> Summary {
+        let prompt = SummarizationPrompt.messages(transcript: transcript, context: context)
         let response = try await requestText(
-            system: SummarizationPrompt.system,
-            user: SummarizationPrompt.user(transcript: transcript, context: context),
+            system: prompt.system,
+            user: prompt.user,
             maxTokens: 16000 // Sonnet 5 counts adaptive thinking against max_tokens
         )
         return Summary(rawModelOutput: response.text, providerID: id, usage: response.usage)
     }
 
+    /// `maxTokens` defaults to a chat-sized ceiling, not a naming-sized one.
+    ///
+    /// It used to be hard-wired to 1024 with a comment about the strict-JSON
+    /// speaker mapping — but `MeetingChat` calls the same method for answers
+    /// about transcripts of up to 120 000 characters, and adaptive thinking
+    /// counts against `max_tokens` too. A longer answer hit
+    /// `stop_reason == "max_tokens"`, which the chat turns into an *error*: the
+    /// question was paid for and the user got nothing. Callers that really do
+    /// want a tight ceiling pass one.
     func complete(system: String, user: String) async throws -> Completion {
-        // A strict-JSON label→name mapping is small; keep the ceiling tight.
-        let response = try await requestText(system: system, user: user, maxTokens: 1024)
+        try await complete(system: system, user: user, maxTokens: Self.defaultCompletionTokens)
+    }
+
+    /// A chat-sized ceiling by default, not a naming-sized one.
+    static let defaultCompletionTokens = 8192
+
+    func complete(system: String, user: String, maxTokens: Int) async throws -> Completion {
+        let response = try await requestText(system: system, user: user, maxTokens: maxTokens)
         return Completion(text: response.text, usage: response.usage)
     }
 
@@ -66,7 +89,7 @@ struct AnthropicAPIProvider: SummarizationProvider {
 
         switch message.stopReason {
         case "refusal":
-            throw SummarizationError.requestFailed("Das Modell hat die Anfrage abgelehnt (refusal).")
+            throw SummarizationError.requestFailed(String(localized: "Das Modell hat die Anfrage abgelehnt (refusal)."))
         case "max_tokens":
             throw SummarizationError.requestFailed("Antwort abgeschnitten (max_tokens erreicht).")
         default:
@@ -121,12 +144,31 @@ struct AnthropicAPIProvider: SummarizationProvider {
     private static let retriableStatus: Set<Int> = [429, 500, 502, 503, 529]
     private static let maximumAttempts = 3
 
+    /// Transport failures that mean "try again", as opposed to "this will never
+    /// work". A connection reset right after a meeting ends is the same
+    /// transient the status-code retry was written for — but it arrives as a
+    /// thrown `URLError`, so the loop never saw it and attempt 1 was the last.
+    private static let retriableURLErrors: Set<URLError.Code> = [
+        .networkConnectionLost, .timedOut, .cannotConnectToHost,
+        .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet,
+        .secureConnectionFailed, .resourceUnavailable,
+    ]
+
     private static func send(_ request: URLRequest) async throws -> Data {
         var lastDetail = ""
         for attempt in 1...maximumAttempts {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await URLSession.shared.data(for: request)
+            } catch let error as URLError where retriableURLErrors.contains(error.code)
+                && attempt < maximumAttempts {
+                lastDetail = error.localizedDescription
+                try await Task.sleep(for: .seconds(Double(1 << (attempt - 1)) * 2))
+                continue
+            }
             guard let http = response as? HTTPURLResponse else {
-                throw SummarizationError.requestFailed("Keine HTTP-Antwort.")
+                throw SummarizationError.requestFailed(String(localized: "Keine HTTP-Antwort."))
             }
             if http.statusCode == 200 { return data }
 

@@ -15,48 +15,73 @@ struct ClaudeCodeCLIProvider: SummarizationProvider {
     /// work, so the agent gets no tools at all — a prompt injection hidden in a
     /// transcript then has nothing to reach for. (The scratch cwd already keeps
     /// it away from any project; this closes the door entirely.)
-    private static let toolLockdown = [
-        "--disallowed-tools", "Bash", "Edit", "Write", "Read", "Glob", "Grep", "Task", "WebFetch", "WebSearch",
+    ///
+    /// `--tools ""` instead of `--disallowed-tools <list>`: the exclusion list
+    /// could only name the built-ins it knew about, while the MCP servers from
+    /// `~/.claude.json` were loaded all the same and *their* tools were on no
+    /// list at all. `--tools ""` disables the built-in set wholesale, and the
+    /// two MCP flags make sure no server is configured to begin with.
+    ///
+    /// `--no-session-persistence` is a privacy rule, not a performance one:
+    /// `claude -p` otherwise writes the full prompt — transcript included — to
+    /// `~/.claude/projects/`, a second copy of every meeting that no retention
+    /// run ever sees and that "SQLite is the truth" does not account for.
+    private static let hardening = [
+        "--tools", "",
+        "--strict-mcp-config", "--mcp-config", #"{"mcpServers":{}}"#,
+        "--no-session-persistence",
     ]
 
     func availability() async -> ProviderAvailability {
         guard ClaudeCodeCLILocator.locate() != nil else {
-            return .unavailable(reason: "Claude Code CLI nicht gefunden.")
+            return .unavailable(reason: String(localized: "Claude Code CLI nicht gefunden."))
         }
         return .available
     }
 
     func summarize(transcript: String, context: MeetingContext) async throws -> Summary {
         guard let cliPath = ClaudeCodeCLILocator.locate() else {
-            throw SummarizationError.notConfigured("Claude Code CLI nicht gefunden.")
+            throw SummarizationError.notConfigured(String(localized: "Claude Code CLI nicht gefunden."))
         }
 
-        let prompt = SummarizationPrompt.system
-            + "\n\n---\n\n"
-            + SummarizationPrompt.user(transcript: transcript, context: context)
-
-        let response = try await Self.runAndParse(cliPath: cliPath, prompt: prompt)
+        // The note is written in the language of the meeting, not of the app.
+        let prompt = SummarizationPrompt.messages(transcript: transcript, context: context)
+        let response = try await Self.runAndParse(
+            cliPath: cliPath,
+            system: prompt.system,
+            user: prompt.user
+        )
         return Summary(rawModelOutput: response.text, providerID: id, usage: response.usage)
     }
 
     func complete(system: String, user: String) async throws -> Completion {
         guard let cliPath = ClaudeCodeCLILocator.locate() else {
-            throw SummarizationError.notConfigured("Claude Code CLI nicht gefunden.")
+            throw SummarizationError.notConfigured(String(localized: "Claude Code CLI nicht gefunden."))
         }
-        let prompt = system + "\n\n---\n\n" + user
-        let response = try await Self.runAndParse(cliPath: cliPath, prompt: prompt)
+        let response = try await Self.runAndParse(cliPath: cliPath, system: system, user: user)
         return Completion(text: response.text, usage: response.usage)
     }
 
     /// Runs the headless CLI (tools locked down) and returns the `result`
     /// field. The parser is deliberately defensive and names the CLI as the
     /// culprit on any surprise. Shared by `summarize` and `complete`.
-    private static func runAndParse(cliPath: String, prompt: String) async throws -> (text: String, usage: SummarizationUsage?) {
+    ///
+    /// The system prompt goes through `--system-prompt`, not concatenated into
+    /// stdin: glued together with a `---` separator, "ignore previous
+    /// instructions" inside a transcript sat on exactly the same footing as the
+    /// instructions themselves.
+    private static func runAndParse(
+        cliPath: String,
+        system: String,
+        user: String,
+        timeout: TimeInterval = 300
+    ) async throws -> (text: String, usage: SummarizationUsage?) {
         let output = try await CLIProcessRunner.run(
             tool: "Claude Code CLI",
             executable: cliPath,
-            arguments: ["-p", "--output-format", "json"] + toolLockdown,
-            stdin: prompt
+            arguments: ["-p", "--output-format", "json", "--system-prompt", system] + hardening,
+            stdin: user,
+            timeout: timeout
         )
 
         // Expected shape: {"result": "...", ...} — defensive against CLI updates.
@@ -64,17 +89,17 @@ struct ClaudeCodeCLIProvider: SummarizationProvider {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             throw SummarizationError.unexpectedResponse(
-                "Claude Code CLI lieferte kein JSON — CLI-Update? Ausgabe: \(String(output.prefix(200)))"
+                String(localized: "Claude Code CLI lieferte kein JSON — CLI-Update? Ausgabe: \(String(output.prefix(200)))")
             )
         }
         if let isError = object["is_error"] as? Bool, isError {
             let subtype = object["subtype"] as? String ?? "unbekannt"
-            throw SummarizationError.requestFailed("Claude Code CLI meldet Fehler (\(subtype)) — ggf. Max-Limit erreicht.")
+            throw SummarizationError.requestFailed(String(localized: "Claude Code CLI meldet Fehler (\(subtype)) — ggf. Max-Limit erreicht."))
         }
         guard let result = object["result"] as? String,
               !result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
-            throw SummarizationError.unexpectedResponse("Feld \"result\" fehlt oder ist leer — CLI-Update?")
+            throw SummarizationError.unexpectedResponse(String(localized: "Feld \"result\" fehlt oder ist leer — CLI-Update?"))
         }
         return (result.trimmingCharacters(in: .whitespacesAndNewlines), usage(from: object))
     }

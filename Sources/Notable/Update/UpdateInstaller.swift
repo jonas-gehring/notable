@@ -1,11 +1,17 @@
 import AppKit
 import Foundation
 
-/// Downloads a GitHub release `.zip`, unpacks it, and hands off to a detached
-/// shell script that waits for this process to quit, swaps the running bundle in
-/// place, and relaunches. One-click auto-update for a personal, self-signed tool:
-/// there is no Gatekeeper prompt (the download is signed with the same stable
-/// identity as the running app), so no user interaction is needed after the click.
+/// Downloads a GitHub release `.zip`, unpacks it, verifies its signature, and
+/// hands off to a detached shell script that waits for this process to quit,
+/// swaps the running bundle in place, and relaunches.
+///
+/// **The signature check is the whole trust story.** A `URLSession` download
+/// carries no quarantine flag, so Gatekeeper never looks at the staged bundle;
+/// without `verifySignature` anyone who could attach a zip to the release —
+/// a compromised GitHub account, or just a wrongly named asset — got code
+/// execution with this app's TCC grants (microphone, accessibility, calendar,
+/// system audio). The header used to *assert* the download was signed with the
+/// same identity; now it is checked, and a mismatch aborts the install.
 ///
 /// Split so the risky part — the swap script — is a **pure** static function
 /// (`swapScript`) that is unit-tested without touching the network or the disk.
@@ -34,9 +40,69 @@ final class UpdateInstaller: ObservableObject {
     @Published private(set) var downloadProgress: Double?
 
     private let session: URLSession
+    /// Whether a meeting is currently being captured. Injected so the installer
+    /// keeps no reference to the meeting controller (and so tests can say no).
+    private let isRecording: @MainActor () -> Bool
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = .shared, isRecording: @escaping @MainActor () -> Bool = { false }) {
         self.session = session
+        self.isRecording = isRecording
+    }
+
+    // MARK: - Unattended install
+
+    /// Whether a found update installs itself. Default **on**.
+    ///
+    /// Notable is a menu-bar app for one person: an update that waits for
+    /// someone to open a settings pane and click a button is an update that does
+    /// not happen. The swap takes about a second and the app comes back with its
+    /// menu-bar item where it was, so the honest default is "just do it" — with
+    /// the switch here for whoever disagrees, and the guards below so it never
+    /// happens *while* something is going on.
+    static let automaticInstallKey = "updateAutomaticInstall"
+
+    static func automaticInstallEnabled(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: automaticInstallKey) as? Bool ?? true
+    }
+
+    /// Why an unattended install did not happen. Purely for the log — none of
+    /// these is worth interrupting anyone over.
+    enum SkipReason: String {
+        case switchedOff
+        case busy
+        case recording
+        case windowOpen
+        case noZip
+    }
+
+    /// Installs `info` without asking, but only when nothing would be lost by
+    /// quitting right now.
+    ///
+    /// The three guards are the whole design. A capture in flight is obvious. An
+    /// open Notable window is less so and matters just as much: settings being
+    /// edited, a note being read, live notes being typed — a relaunch closes all
+    /// of them, and "the app restarted while I was writing" is exactly the
+    /// experience an automatic update must never produce. Everything else — the
+    /// signature check, the swap script, the guarded rollback — is the same path
+    /// the manual button takes.
+    @discardableResult
+    func installUnattended(
+        _ info: UpdateInfo,
+        defaults: UserDefaults = .standard,
+        bundlePath: String = Bundle.main.bundlePath
+    ) async -> SkipReason? {
+        guard Self.automaticInstallEnabled(defaults) else { return .switchedOff }
+        guard !phase.isBusy else { return .busy }
+        guard !isRecording() else { return .recording }
+        guard info.downloadURL.pathExtension.lowercased() == "zip" else { return .noZip }
+        // `NSApp.windows` includes panels the user never sees (the dictation
+        // overlay, the status item's own window), so only visible, titled
+        // windows count as "the user is in the middle of something".
+        let visible = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
+        guard !visible else { return .windowOpen }
+
+        await installAndRelaunch(info, bundlePath: bundlePath)
+        return nil
     }
 
     /// Downloads and installs `info`, then quits so the swap script can replace the
@@ -52,6 +118,12 @@ final class UpdateInstaller: ObservableObject {
             return
         }
         guard !phase.isBusy else { return }
+        // Quitting mid-meeting kills the capture and leaves the spool to
+        // recovery. An update is never urgent enough for that.
+        guard !isRecording() else {
+            phase = .failed(String(localized: "Update während einer Aufnahme nicht möglich — Meeting zuerst beenden."))
+            return
+        }
 
         do {
             phase = .downloading
@@ -62,6 +134,8 @@ final class UpdateInstaller: ObservableObject {
             downloadProgress = nil
             phase = .unpacking
             let newApp = try unpack(zip, expectedName: (bundlePath as NSString).lastPathComponent)
+
+            try Self.verifySignature(staged: newApp.path, matching: bundlePath)
 
             phase = .installing
             try launchSwap(newApp: newApp, dest: bundlePath)
@@ -90,7 +164,7 @@ final class UpdateInstaller: ObservableObject {
         let (tempFile, response) = try await session.download(for: request, delegate: progress)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw InstallError.download("Download fehlgeschlagen (HTTP \(code)).")
+            throw InstallError.download(String(localized: "Download fehlgeschlagen (HTTP \(code))."))
         }
         // The URLSession temp file is deleted when this call returns — move it now.
         let dest = FileManager.default.temporaryDirectory
@@ -107,15 +181,84 @@ final class UpdateInstaller: ObservableObject {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         let status = try run("/usr/bin/ditto", ["-x", "-k", zip.path, dir.path])
-        guard status == 0 else { throw InstallError.unpack("Entpacken fehlgeschlagen (ditto \(status)).") }
+        guard status == 0 else { throw InstallError.unpack(String(localized: "Entpacken fehlgeschlagen (ditto \(status)).")) }
 
         let contents = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         let apps = contents.filter { $0.pathExtension == "app" }
         // Prefer an exact name match; otherwise take the single app in the archive.
         guard let app = apps.first(where: { $0.lastPathComponent == expectedName }) ?? apps.first else {
-            throw InstallError.unpack("Keine .app im Archiv gefunden.")
+            throw InstallError.unpack(String(localized: "Keine .app im Archiv gefunden."))
         }
         return app
+    }
+
+    // MARK: - Signature verification
+
+    /// Refuses to install anything that is not signed by the same team as the
+    /// bundle it would replace.
+    ///
+    /// Two questions, both of which have to be answered before the swap script
+    /// exists: is the staged bundle intact and validly signed at all
+    /// (`codesign --verify`), and is it *us* (same `TeamIdentifier`). A bundle
+    /// with no team identifier — ad-hoc signed, or unsigned — never passes:
+    /// "cannot tell" has to mean "do not install", or the check is decoration.
+    nonisolated static func verifySignature(staged: String, matching destination: String) throws {
+        let verify = Self.capture("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged])
+        guard verify.status == 0 else {
+            throw InstallError.signature(String(
+                localized: "Signatur des Downloads ist ungültig — Update abgebrochen."
+            ) + " (codesign \(verify.status))")
+        }
+        guard let downloaded = teamIdentifier(ofBundleAt: staged) else {
+            throw InstallError.signature(String(
+                localized: "Download trägt keine Team-ID — Update abgebrochen."
+            ))
+        }
+        guard let installed = teamIdentifier(ofBundleAt: destination) else {
+            throw InstallError.signature(String(
+                localized: "Installierte App trägt keine Team-ID — Update abgebrochen."
+            ))
+        }
+        guard downloaded == installed else {
+            throw InstallError.signature(String(
+                localized: "Download stammt von einem anderen Entwickler — Update abgebrochen."
+            ) + " (\(downloaded) ≠ \(installed))")
+        }
+    }
+
+    /// `codesign -dv` writes its fields to **stderr**, one `Key=Value` per line.
+    nonisolated static func teamIdentifier(ofBundleAt path: String) -> String? {
+        let result = capture("/usr/bin/codesign", ["-dv", "--verbose=4", path])
+        guard result.status == 0 else { return nil }
+        return parseTeamIdentifier(result.output)
+    }
+
+    /// Pure, so the parsing is testable without a signed bundle on disk.
+    /// `not set` is what an ad-hoc signature reports — that is an absent team,
+    /// not a team named "not set".
+    nonisolated static func parseTeamIdentifier(_ codesignOutput: String) -> String? {
+        for line in codesignOutput.split(separator: "\n") {
+            guard let value = line.split(separator: "=", maxSplits: 1).last,
+                  line.hasPrefix("TeamIdentifier=") else { continue }
+            let team = value.trimmingCharacters(in: .whitespaces)
+            return team.isEmpty || team == "not set" ? nil : team
+        }
+        return nil
+    }
+
+    /// Runs a tool and returns its exit status plus stdout **and** stderr —
+    /// `codesign` reports on both depending on the flag.
+    nonisolated private static func capture(_ launchPath: String, _ args: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: launchPath)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch { return (-1, "") }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
 
     /// Writes the swap script and launches it detached. It receives the pid, the
@@ -169,10 +312,11 @@ final class UpdateInstaller: ObservableObject {
     enum InstallError: LocalizedError {
         case download(String)
         case unpack(String)
+        case signature(String)
 
         var errorDescription: String? {
             switch self {
-            case let .download(msg), let .unpack(msg): msg
+            case let .download(msg), let .unpack(msg), let .signature(msg): msg
             }
         }
     }
@@ -196,15 +340,31 @@ final class UpdateInstaller: ObservableObject {
       i=$((i + 1))
     done
 
+    # Still alive after the wait? Then the loop *timed out* rather than seeing
+    # the app quit, and swapping now would gut a running bundle. Do nothing —
+    # the user still has a working app and can retry the update.
+    if kill -0 "$pid" 2>/dev/null; then
+      rm -f "$0"
+      exit 1
+    fi
+
     rm -rf "$dest.old"
-    mv "$dest" "$dest.old" 2>/dev/null
+    # `|| exit 1`, not `2>/dev/null`: a failed move used to be swallowed, and
+    # ditto then *merged* the new bundle into the old one — mixed files, invalid
+    # signature, no way back.
+    mv "$dest" "$dest.old" || { rm -f "$0"; exit 1; }
     if /usr/bin/ditto "$newapp" "$dest"; then
       rm -rf "$dest.old" "$newapp"
     else
-      # Roll back to the previous bundle on any copy failure.
-      rm -rf "$dest"
-      mv "$dest.old" "$dest"
+      # Roll back to the previous bundle on any copy failure — but only if there
+      # is one. Unconditional `rm -rf "$dest"` deleted the app outright whenever
+      # `$dest.old` had never been created.
+      if [ -d "$dest.old" ]; then
+        rm -rf "$dest"
+        mv "$dest.old" "$dest"
+      fi
     fi
     open "$dest"
+    rm -f "$0"
     """
 }

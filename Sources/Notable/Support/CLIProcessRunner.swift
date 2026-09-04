@@ -49,6 +49,31 @@ private final class CLIRunState: @unchecked Sendable {
     }
 }
 
+/// The PATH a child CLI is started with.
+///
+/// An app launched from Finder or as a login item inherits launchd's
+/// `PATH=/usr/bin:/bin:/usr/sbin:/sbin` — nothing else. `claude` happens to be
+/// a native Mach-O and survives that, but an npm-installed CLI is a
+/// `#!/usr/bin/env node` script: `CLIToolLocator` finds the script, the shebang
+/// then fails to find `node`, and the whole thing surfaces as
+/// "Exit-Code 127: env: node: No such file". The directories the locator
+/// searches are exactly the ones such a CLI's runtime lives in.
+private static func childEnvironment() -> [String: String] {
+    var environment = ProcessInfo.processInfo.environment
+    let inherited = environment["PATH"].map { $0.split(separator: ":").map(String.init) } ?? []
+    var seen = Set<String>()
+    let merged = (CLIToolLocator.searchPaths + inherited + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+        .filter { seen.insert($0).inserted }
+    environment["PATH"] = merged.joined(separator: ":")
+    return environment
+}
+
+/// Runs a headless CLI and returns its stdout.
+///
+/// Cancelling the calling task terminates the process. Without that, a
+/// `withDeadline` that gave up after 15 s left `claude -p` running for the full
+/// 300 s timeout with a dangling continuation, and a retry started a second one
+/// next to it.
 static func run(
     tool: String,
     executable: String,
@@ -56,10 +81,20 @@ static func run(
     stdin input: String,
     timeout: TimeInterval = 300
 ) async throws -> String {
-    try await withCheckedThrowingContinuation { continuation in
+    // Handed to the cancellation handler, which runs outside the continuation
+    // body and on an arbitrary thread — hence the lock inside.
+    let handle = RunHandle()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+        // Cancelled before the process even started: do not launch one.
+        guard !Task.isCancelled else {
+            continuation.resume(throwing: CancellationError())
+            return
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = childEnvironment()
         // Scratch cwd: the transcript is untrusted input — do not
         // hand the CLI a real project directory as working context.
         let scratch = FileManager.default.temporaryDirectory
@@ -78,12 +113,18 @@ static func run(
             stdout: stdoutPipe.fileHandleForReading,
             stderr: stderrPipe.fileHandleForReading
         )
+        let watchdogs = WatchdogBox()
         let finish: @Sendable (Result<String, Error>) -> Void = { result in
             guard state.claimResume() else { return }
             state.stdoutHandle.readabilityHandler = nil
             state.stderrHandle.readabilityHandler = nil
             try? state.stdoutHandle.close()
             try? state.stderrHandle.close()
+            // The three watchdog stages are scheduled up to timeout + 6 s out
+            // and captured `process`; without this they keep it (and the run
+            // state) alive for the full timeout after a successful run.
+            watchdogs.cancelAll()
+            handle.clear()
             continuation.resume(with: result)
         }
 
@@ -112,11 +153,11 @@ static func run(
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) {
                 if state.didTimeOut {
                     finish(.failure(SummarizationError.requestFailed(
-                        "\(tool) antwortete nicht innerhalb von \(Int(timeout)) s und wurde beendet."
+                        String(localized: "\(tool) antwortete nicht innerhalb von \(Int(timeout)) s und wurde beendet.")
                     )))
                 } else if status != 0 {
                     let stderr = String(data: state.stderr, encoding: .utf8) ?? ""
-                    let hint = signalled ? " (durch Signal beendet)" : ""
+                    let hint = signalled ? String(localized: " (durch Signal beendet)") : ""
                     finish(.failure(SummarizationError.requestFailed(
                         "\(tool) Exit-Code \(status)\(hint): \(String(stderr.prefix(300)))"
                     )))
@@ -130,7 +171,7 @@ static func run(
             try process.run()
         } catch {
             finish(.failure(SummarizationError.requestFailed(
-                "\(tool) ließ sich nicht starten: \(error.localizedDescription)"
+                String(localized: "\(tool) ließ sich nicht starten: \(error.localizedDescription)")
             )))
             return
         }
@@ -160,13 +201,72 @@ static func run(
         }
         let lastResort = DispatchWorkItem {
             finish(.failure(SummarizationError.requestFailed(
-                "\(tool) antwortete nicht innerhalb von \(Int(timeout)) s und wurde beendet."
+                String(localized: "\(tool) antwortete nicht innerhalb von \(Int(timeout)) s und wurde beendet.")
             )))
         }
         let queue = DispatchQueue.global()
+        watchdogs.store([sigterm, sigkill, lastResort])
         queue.asyncAfter(deadline: .now() + timeout, execute: sigterm)
         queue.asyncAfter(deadline: .now() + timeout + 3, execute: sigkill)
         queue.asyncAfter(deadline: .now() + timeout + 6, execute: lastResort)
+
+        // Same shutdown sequence the watchdog uses, reachable from cancellation:
+        // SIGTERM, then SIGKILL for a CLI that ignores it. `finish` resumes
+        // exactly once, so an arriving termination handler is a no-op.
+        handle.arm {
+            guard !state.hasExited else { return }
+            process.terminate()
+            queue.asyncAfter(deadline: .now() + 3) {
+                guard !state.hasExited else { return }
+                kill(process.processIdentifier, SIGKILL)
+            }
+            finish(.failure(CancellationError()))
+        }
+        // Cancellation that landed between the guard above and `arm`.
+        if Task.isCancelled { handle.cancel() }
+        }
+    } onCancel: {
+        handle.cancel()
+    }
+}
+
+/// Holds the terminate closure for the cancellation handler, which runs on an
+/// arbitrary thread and may fire before the process exists or after it is gone.
+private final class RunHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var terminate: (() -> Void)?
+    private var cancelled = false
+
+    func arm(_ action: @escaping () -> Void) {
+        let fireNow: Bool = lock.withLock {
+            if cancelled { return true }
+            terminate = action
+            return false
+        }
+        if fireNow { action() }
+    }
+
+    func cancel() {
+        let action: (() -> Void)? = lock.withLock {
+            cancelled = true
+            defer { terminate = nil }
+            return terminate
+        }
+        action?()
+    }
+
+    func clear() { lock.withLock { terminate = nil } }
+}
+
+/// The scheduled watchdog work items, so a finished run can cancel them.
+private final class WatchdogBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [DispatchWorkItem] = []
+
+    func store(_ new: [DispatchWorkItem]) { lock.withLock { items = new } }
+    func cancelAll() {
+        let pending: [DispatchWorkItem] = lock.withLock { defer { items = [] }; return items }
+        pending.forEach { $0.cancel() }
     }
 }
 }

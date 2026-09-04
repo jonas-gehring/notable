@@ -82,7 +82,7 @@ final class NotificationCenterService: NSObject {
         // would move focus away from the field the text is meant for.
         let enhanced = UNNotificationCategory(
             identifier: Category.dictationEnhanced.rawValue,
-            actions: [UNNotificationAction(identifier: DictationAction.paste.rawValue, title: "Einfügen", options: [])],
+            actions: [UNNotificationAction(identifier: DictationAction.paste.rawValue, title: String(localized: "Einfügen"), options: [])],
             intentIdentifiers: [],
             options: []
         )
@@ -121,8 +121,8 @@ final class NotificationCenterService: NSObject {
         pendingConsentID = id
 
         let content = UNMutableNotificationContent()
-        content.title = "Meeting erkannt"
-        content.body = "\(sourceName) — aufzeichnen?"
+        content.title = String(localized: "Meeting erkannt")
+        content.body = String(localized: "\(sourceName) — aufzeichnen?")
         content.categoryIdentifier = canRemember
             ? Category.meetingConsent.rawValue
             : Category.meetingConsent.rawValue + ".once"
@@ -145,7 +145,7 @@ final class NotificationCenterService: NSObject {
     /// The improved text is on the clipboard; this says so and offers a paste.
     func postDictationEnhanced(id: String, preview: String) {
         let content = UNMutableNotificationContent()
-        content.title = "Diktat verbessert"
+        content.title = String(localized: "Diktat verbessert")
         content.body = preview
         content.categoryIdentifier = Category.dictationEnhanced.rawValue
         post(id: id, content: content)
@@ -156,11 +156,12 @@ final class NotificationCenterService: NSObject {
     /// button is one click away there — an "install now" action in a notification
     /// would replace the running app from a place the user cannot see what is
     /// being replaced.
-    func postUpdateAvailable(version: String) {
+    @discardableResult
+    func postUpdateAvailable(version: String) -> Bool {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Update verfügbar")
-        content.body = "Notable \(version) steht bereit — im Menü oder in den Einstellungen installieren."
-        post(id: "update.available.\(version)", content: content)
+        content.body = String(localized: "Notable \(version) steht bereit — im Menü oder in den Einstellungen installieren.")
+        return post(id: "update.available.\(version)", content: content)
     }
 
     func withdraw(id: String) {
@@ -170,10 +171,18 @@ final class NotificationCenterService: NSObject {
         center.removePendingNotificationRequests(withIdentifiers: [id])
     }
 
-    private func post(id: String, content: UNMutableNotificationContent) {
-        guard isAuthorized else { return }
+    /// Returns whether anything was actually posted.
+    ///
+    /// The caller needs to know: the update checker marked a version as
+    /// "announced" *before* calling this, so on a fresh install — where the
+    /// authorization dialog is still open when the launch check finishes — that
+    /// version was recorded as announced and never announced again, for good.
+    @discardableResult
+    private func post(id: String, content: UNMutableNotificationContent) -> Bool {
+        guard isAuthorized else { return false }
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        return true
     }
 
     // MARK: - Handling

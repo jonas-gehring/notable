@@ -25,7 +25,7 @@ struct SummarizationService: Sendable {
             throw SummarizationError.notConfigured("Unbekannter Provider: \(providerID)")
         }
         if case .unavailable(let reason) = await provider.availability() {
-            throw SummarizationError.notConfigured("\(provider.displayName) nicht verfügbar: \(reason)")
+            throw SummarizationError.notConfigured(String(localized: "\(provider.displayName) nicht verfügbar: \(reason)"))
         }
         return try await provider.summarize(transcript: transcript, context: context)
     }
@@ -43,7 +43,7 @@ struct SummarizationService: Sendable {
             throw SummarizationError.notConfigured("Unbekannter Provider: \(providerID)")
         }
         if case .unavailable(let reason) = await provider.availability() {
-            throw SummarizationError.notConfigured("\(provider.displayName) nicht verfügbar: \(reason)")
+            throw SummarizationError.notConfigured(String(localized: "\(provider.displayName) nicht verfügbar: \(reason)"))
         }
         return try await provider.complete(system: system, user: user)
     }

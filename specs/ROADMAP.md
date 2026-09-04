@@ -89,13 +89,47 @@ auch der Auto-Update-Pfad zum ersten Mal wirklich.
   `CLAUDE.md`. `LocalizationTests` ist der Wächter, weil eine fehlende Übersetzung
   nichts meldet, sondern einfach deutsch bleibt.
 
+### Stufe 5 — Code-Review vom 3. September 2026 umgesetzt
+
+Grundlage ist `docs/code-review-2026-09-03.md` (fünf Bereiche, rund 95 Befunde). Die
+Punkte, deren Fehlermodus still war — die also niemand gemeldet hätte:
+
+- **Datenschutz.** `claude -p` schrieb jedes Transkript zusätzlich nach
+  `~/.claude/projects/`; `--no-session-persistence` beendet das. System- und
+  Nutzer-Turn sind getrennt (`--system-prompt` bzw. beschriftete Blöcke), und beide
+  System-Prompts sagen jetzt ausdrücklich, dass Transkript-Inhalt Material ist und
+  niemals Anweisung.
+- **Updater.** Der Download wird gegen die Team-ID der laufenden App geprüft, bevor
+  irgendetwas ausgetauscht wird; das Swap-Skript bricht ab statt eine laufende App
+  auszuweiden; ⌘Q und die Update-Installation beenden ein laufendes Meeting sauber,
+  statt es der Absturz-Wiederherstellung zu überlassen. Neu: Updates installieren
+  sich selbst, wenn nichts dabei verloren geht (kein Meeting, kein offenes Fenster).
+- **Echtzeit-Audio.** Der CoreAudio-IO-Proc konvertierte, sperrte und schrieb auf die
+  Platte — auf dem Thread mit Puffer-Deadline. Jetzt kopiert er nur noch in einen
+  vorallokierten Ring; alles andere läuft auf einem eigenen Consumer-Thread. Verworfene
+  Puffer werden gezählt und gemeldet statt still zu verschwinden.
+- **Aufnahme neben Verarbeitung.** `processing` blockierte die nächste Aufnahme, und das
+  einmalige `.started` des Detektors für den Folge-Call verpuffte. Capture und
+  Verarbeitung sind getrennte Zustände.
+- **Speicher.** `SQLiteConnection` mit nummerierten Migrationen, Transaktionen für die
+  Schreibpaare, echte Fehler statt kurzer Listen bei `SQLITE_BUSY` — und FTS5, womit
+  „über" endlich „Über" findet und ein Titel-Treffer einen Treffer ergibt statt einen
+  pro Segment.
+- **Sprache.** Der Scanner sieht jetzt auch Enum-Labels; rund 190 deutsche Literale, die
+  im englischen Fenster deutsch geblieben wären, sind übersetzt. Zusammenfassungen und
+  Chat-Antworten folgen der Sprache der *Aufnahme*, nicht der der Oberfläche.
+- **Notiz.** `## Teilnehmer` steht jetzt in der Datei (eingeladen laut Kalender, gehört
+  laut Transkript), und die Teilnehmerliste liegt in SQLite, damit ein Umbenennen sie
+  nicht wieder verliert.
+
 ## Offen
 
-- **Notarisierung nachholen.** `v1.0.0` ist signiert, aber ohne Apple-Ticket: Gatekeeper
-  blockiert den ersten Start einer heruntergeladenen Kopie, und der Nutzer muss einmal
-  durch die Systemeinstellungen. `scripts/release.sh` kann notarisieren, sobald ein
-  `notarytool`-Schlüsselbundprofil existiert; das Asset lässt sich im bestehenden Release
-  austauschen, ohne Tag oder Version anzufassen.
+- **Sprecher-Erkennung an einem echten Call messen.** Die Diarisierung ist
+  nachgeschärft (Trennschwelle 0,62 statt 0,7 auf der VAD-kompaktierten Spur,
+  Mindestdauer 0,4 s, erwartete Sprecherzahl aus der Einladung) und die Namensprüfung
+  ist strenger *und* großzügiger zugleich: belegt wird über den Vornamen statt über
+  irgendein Token, und ein Kollege, der den Vornamen des Nutzers teilt, ist nicht
+  länger dauerhaft unbenennbar. Ob das reicht, sagt erst ein echter Call.
 - **Echter Call-Test gegen die 0-Segment-Aufnahme.** Echte Calls können null
   Transkript-Segmente liefern, während eine Solo-Aufnahme funktioniert; Hauptverdächtiger
   ist die Echo-Unterdrückung (VPIO) auf dem Mikrofon im Konflikt mit der Meeting-App. Der

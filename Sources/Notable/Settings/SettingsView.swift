@@ -115,6 +115,7 @@ struct GeneralSettingsView: View {
     @State private var launchAtLogin = false
     @State private var loginItemError: String?
     @AppStorage(AppLanguage.storageKey) private var languageRaw = AppLanguage.system.rawValue
+    @AppStorage(UpdateInstaller.automaticInstallKey) private var automaticInstall = true
     @State private var showRelaunchHint = false
 
     var body: some View {
@@ -206,13 +207,7 @@ struct GeneralSettingsView: View {
         )
     }
 
-    private func relaunch() {
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
-        }
-    }
+    private func relaunch() { AppRelauncher.relaunch() }
 
     @ViewBuilder
     private var updatesSection: some View {
@@ -253,11 +248,19 @@ struct GeneralSettingsView: View {
                     Text(error).font(.callout).foregroundStyle(.red)
                 }
             }
-            Toggle("Beim Start automatisch nach Updates suchen", isOn: automaticChecks)
+            Toggle("Automatisch nach Updates suchen", isOn: automaticChecks)
+            Toggle("Updates automatisch installieren", isOn: $automaticInstall)
+                .disabled(!updateChecker.automaticChecks)
         } header: {
             Text("Updates")
         } footer: {
-            Text("Prüft GitHub-Releases, höchstens einmal am Tag. „Installieren“ lädt die neue Version, ersetzt Notable in /Applications und startet neu.")
+            Text("""
+            Prüft GitHub-Releases beim Start und dann alle sechs Stunden. Automatisch \
+            installiert wird nur, wenn nichts dabei verloren geht: kein laufendes Meeting, \
+            kein offenes Notable-Fenster. Vorher wird die Signatur des Downloads geprüft — \
+            eine fremd signierte Datei wird nie installiert. Danach startet Notable neu; \
+            das dauert etwa eine Sekunde.
+            """)
         }
     }
 
@@ -350,8 +353,11 @@ struct DictationSettingsView: View {
     var body: some View {
         Form {
             Section {
+                // Symmetric to the enhancement picker: a key cannot hold both
+                // roles, so the one already taken by "Diktat mit Verbesserung"
+                // is not offered here either.
                 Picker("Push-to-talk-Taste", selection: $hotkeyRaw) {
-                    ForEach(HotkeySpec.allCases) { spec in
+                    ForEach(HotkeySpec.allCases.filter { $0 != EnhancementSettings.hotkey() }) { spec in
                         Text(spec.label).tag(spec.rawValue)
                     }
                 }
@@ -422,7 +428,7 @@ struct DictationSettingsView: View {
                 Stepper(value: $dictationIdleTimeout, in: 0...30, step: 5) {
                     Text(dictationIdleTimeout == 0
                         ? String(localized: "Freihändig bei Stille beenden: aus")
-                        : "Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden")
+                        : String(localized: "Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden"))
                 }
             } header: {
                 Text("Verhalten")
@@ -510,7 +516,12 @@ struct DictationSettingsView: View {
                 Section("Leistung") {
                     LabeledContent(
                         String(localized: "Letzte Latenz (Loslassen → Einfügen)"),
-                        value: String(format: "%d ms bei %.1f s Audio", latency, dictation.lastAudioSeconds ?? 0)
+                        // Not `String(format:)`: `%.1f` formats with a C locale,
+                        // so a German window printed "1.5 s" where every other
+                        // number on the pane reads "1,5 s".
+                        value: String(localized: """
+                        \(latency) ms bei \(dictation.lastAudioSeconds ?? 0, format: .number.precision(.fractionLength(1))) s Audio
+                        """)
                     )
                 }
             }
@@ -717,6 +728,7 @@ struct SummarizationSettingsView: View {
 
     @State private var apiKeyInput = ""
     @State private var apiKeyStored = false
+    @State private var confirmKeyRemoval = false
     @State private var keyTestResult: String?
     @State private var cliPath: String?
 
@@ -758,10 +770,21 @@ struct SummarizationSettingsView: View {
                         if apiKeyStored {
                             Label("Key im Schlüsselbund hinterlegt", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
-                            Button("Entfernen", role: .destructive) {
-                                KeychainStore.delete(account: KeychainStore.anthropicAPIKeyAccount)
-                                apiKeyStored = false
-                            }
+                            // Confirmed: the key is not recoverable from here,
+                            // and the button sits one row under "Sichern".
+                            Button("Entfernen", role: .destructive) { confirmKeyRemoval = true }
+                                .confirmationDialog(
+                                    "API-Key entfernen?",
+                                    isPresented: $confirmKeyRemoval
+                                ) {
+                                    Button("Entfernen", role: .destructive) {
+                                        KeychainStore.delete(account: KeychainStore.anthropicAPIKeyAccount)
+                                        apiKeyStored = false
+                                    }
+                                    Button("Abbrechen", role: .cancel) {}
+                                } message: {
+                                    Text("Der Schlüssel wird aus dem Schlüsselbund gelöscht. Zusammenfassungen über die API sind danach nicht mehr möglich.")
+                                }
                         } else {
                             Label("Kein Key hinterlegt", systemImage: "exclamationmark.triangle")
                                 .foregroundStyle(.secondary)
@@ -786,18 +809,16 @@ struct SummarizationSettingsView: View {
                 }
             }
 
-            if provider == .claudeCodeCLI {
-                Section("Anthropic Claude Code CLI (Abo)") {
-                    if let cliPath {
-                        Label("CLI gefunden: \(cliPath)", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Label("Claude Code CLI nicht gefunden", systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                    }
+            // Every CLI provider, not just Claude Code: picking Gemini or Codex
+            // here used to leave the pane blank — no path, no availability, no
+            // way to try a call, and no interface at all for the argument
+            // override those two exist for.
+            if let cli = SummarizationProviderID(rawValue: providerRaw), cli.isCLI {
+                Section(cli.label) {
+                    CLIProviderStatusRow(provider: cli)
                     Text("Nutzt die lokal installierte, eingeloggte CLI — ohne API-Schlüssel. Aufrufe zählen auf dein Abo-Kontingent.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -823,7 +844,11 @@ struct PermissionsSettingsView: View {
                     permissionRow(kind)
                 }
             } footer: {
-                Text("Alle fünf werden gebraucht. Fehlt eine, meldet das jeweilige Feature es und arbeitet eingeschränkt weiter.")
+                // No count: there were six kinds behind a sentence claiming
+                // five, and the onboarding said next door that only the
+                // microphone is required. Both cannot be true, and the number
+                // was the part that had to go.
+                Text("Zwingend ist nur das Mikrofon. Fehlt eine der anderen, meldet das jeweilige Feature es und arbeitet eingeschränkt weiter.")
             }
 
             Section {
@@ -841,14 +866,8 @@ struct PermissionsSettingsView: View {
     }
 
     /// Relaunch a fresh instance, then quit this one — the only way to pick up
-    /// TCC grants macOS caches per-process (screen recording, input monitoring).
-    private static func relaunch() {
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
-        }
-    }
+    /// TCC grants macOS caches per-process (input monitoring, accessibility).
+    private static func relaunch() { AppRelauncher.relaunch() }
 
     @ViewBuilder
     private func permissionRow(_ kind: PermissionsManager.Kind) -> some View {

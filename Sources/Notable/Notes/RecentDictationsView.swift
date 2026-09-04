@@ -14,9 +14,9 @@ struct RecentDictationsView: View {
 
         var label: String {
             switch self {
-            case .day: "Letzte 24 Stunden"
-            case .week: "Letzte 7 Tage"
-            case .all: "Alle"
+            case .day: String(localized: "Letzte 24 Stunden")
+            case .week: String(localized: "Letzte 7 Tage")
+            case .all: String(localized: "Alle")
             }
         }
     }
@@ -71,8 +71,12 @@ struct RecentDictationsView: View {
         .frame(minWidth: 480, minHeight: 360)
         .task(id: reloadKey) {
             loaded = false
-            let all = (try? await RecordingStore.shared.recentActivity(within: window.rawValue)) ?? []
-            items = all.filter { $0.kind == .dictation }
+            // Filtered in SQL, not here: with a mixed `LIMIT 200` the meetings
+            // in the window ate slots, so "all dictations" was quietly capped
+            // at whatever share of the last 200 rows happened to be dictations.
+            items = (try? await RecordingStore.shared.recentActivity(
+                kind: .dictation, within: window.rawValue
+            )) ?? []
             loaded = true
         }
     }
@@ -92,7 +96,9 @@ private struct RecentDictationRow: View {
     private var durationLabel: String? {
         guard let duration = item.duration, duration >= 1 else { return nil }
         let total = Int(duration.rounded())
-        return total >= 60 ? "\(total / 60) min \(total % 60) s" : "\(total) s"
+        return total >= 60
+            ? String(localized: "\(total / 60) min \(total % 60) s")
+            : String(localized: "\(total) s")
     }
 
     var body: some View {
@@ -118,9 +124,11 @@ private struct RecentDictationRow: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 4) {
-                Button("Einfügen") { try? Paster.insert(text) }
-                    .buttonStyle(.link)
-                    .disabled(text.isEmpty)
+                // No "Einfügen" here on purpose: clicking a button in this
+                // window makes the window key, so the synthesized ⌘V lands in
+                // Notable itself. Copying is the honest action from a window;
+                // pasting belongs to the menu, where the target app is still
+                // frontmost.
                 Button(copied ? "Kopiert" : "Kopieren") {
                     guard !text.isEmpty else { return }
                     NSPasteboard.general.clearContents()

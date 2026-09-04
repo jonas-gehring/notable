@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 /// Composition root. A singleton container instead of scattered @StateObjects,
 /// because the AppDelegate needs the same instances as the SwiftUI scenes.
@@ -18,7 +19,10 @@ final class AppContainer {
     lazy var notes = NoteManager(notesFolder: notesFolder)
     lazy var consent = ConsentCoordinator(meeting: meeting)
     let updateChecker = UpdateChecker()
-    let updateInstaller = UpdateInstaller()
+    /// `lazy` because it asks the meeting controller whether a capture is
+    /// running — an installer that quits the app mid-meeting would hand the
+    /// recording to crash recovery for nothing.
+    lazy var updateInstaller = UpdateInstaller(isRecording: { [unowned self] in self.meeting.state.isRecording })
     let dictationHistory = DictationHistory()
     let usage = UsageSummary()
 
@@ -43,6 +47,8 @@ final class AppContainer {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static let log = Logger(subsystem: "de.jonasgehring.notable", category: "app")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let container = AppContainer.shared
         container.dictation.start()
@@ -77,7 +83,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The notification's "Einfügen" button on an improved dictation.
         NotificationCenterService.shared.onPasteEnhanced = {
-            container.dictationHistory.pasteLastEnhanced()
+            // A paste that cannot happen has to say so — the text stays on the
+            // clipboard, but the button looked like it had worked.
+            if let error = container.dictationHistory.pasteLastEnhanced() {
+                container.dictation.overlay.flashError(error.localizedDescription)
+            }
         }
 
         // Surface the mic prompt on launch — without this the app never asks and
@@ -90,7 +100,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.updateChecker.onUpdateFound = { version in
             NotificationCenterService.shared.postUpdateAvailable(version: version)
         }
-        Task { await container.updateChecker.checkOnLaunch() }
+        Task {
+            await container.updateChecker.checkOnLaunch()
+            await installFoundUpdate()
+        }
+        // A menu-bar app runs for weeks; without this, an update found on Monday
+        // waits for the next reboot.
+        updateTimer = Timer.scheduledTimer(
+            withTimeInterval: UpdateChecker.periodicInterval, repeats: true
+        ) { _ in
+            Task { @MainActor in
+                await AppContainer.shared.updateChecker.checkPeriodically()
+                await Self.installFoundUpdateIfIdle()
+            }
+        }
 
         // The native menu can't refresh history on open (its items are NSMenuItems),
         // so prime the recents/last list at launch; the dictation flow refreshes it
@@ -103,8 +126,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // after the backfill rather than before it.
         Task {
             if !UserDefaults.standard.bool(forKey: "didBackfillWordCount") {
-                try? await RecordingStore.shared.backfillWordCounts()
-                UserDefaults.standard.set(true, forKey: "didBackfillWordCount")
+                // The flag is only set once the backfill actually succeeded.
+                // `try?` followed by an unconditional `set(true)` meant one
+                // transient failure — a locked database at launch — left those
+                // word counts NULL for good, and the statistics quietly
+                // understated every dictation from before the column existed.
+                do {
+                    try await RecordingStore.shared.backfillWordCounts()
+                    UserDefaults.standard.set(true, forKey: "didBackfillWordCount")
+                } catch {
+                    AppDelegate.log.error("Wortzahl-Backfill fehlgeschlagen: \(error.localizedDescription, privacy: .public)")
+                }
             }
             await container.usage.refresh()
         }
@@ -130,7 +162,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Quitting must not kill a running capture.
+    ///
+    /// ⌘Q, "Notable beenden" and the updater all went straight to
+    /// `NSApp.terminate`, which ends the meeting the hard way and leaves the
+    /// spool for the next launch to recover. Here the meeting is stopped
+    /// properly first and the quit resumes once its note has been produced.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let meeting = AppContainer.shared.meeting
+        guard meeting.state.isRecording else { return .terminateNow }
+        Task { @MainActor in
+            await meeting.stopAndAwaitNote()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     private var retentionTask: Task<Void, Never>?
+    private var updateTimer: Timer?
+
+    private func installFoundUpdate() async { await Self.installFoundUpdateIfIdle() }
+
+    /// Installs a found update by itself, if nothing would be lost by quitting.
+    ///
+    /// Every reason not to is in `installUnattended`; here it is only logged.
+    /// The user asked for an update that happens, not for a button that offers
+    /// one — and the button is still there for whoever turns this off.
+    @MainActor
+    private static func installFoundUpdateIfIdle() async {
+        let container = AppContainer.shared
+        guard let found = container.updateChecker.available else { return }
+        if let skipped = await container.updateInstaller.installUnattended(found) {
+            log.notice("Auto-Update übersprungen (\(skipped.rawValue, privacy: .public))")
+        }
+    }
 }
 
 @main
@@ -291,8 +356,8 @@ struct MenuContentView: View {
     /// meeting state lives outside `appState.captureState`.
     private var statusLabel: String {
         switch meeting.state {
-        case .recording: "Meeting wird aufgezeichnet…"
-        case .processing: "Meeting wird verarbeitet…"
+        case .recording: String(localized: "Meeting wird aufgezeichnet…")
+        case .processing: String(localized: "Meeting wird verarbeitet…")
         case .idle: appState.captureState.label
         }
     }
@@ -313,10 +378,10 @@ struct MenuContentView: View {
             // quality. Those are different statements and the menu should not
             // blur them.
             Text(dictation.downloadProgress.map {
-                "Vorläufiges Modell aktiv — \(ASREngineID.current.shortLabel) lädt: \(Int($0 * 100)) %"
-            } ?? "Vorläufiges Modell aktiv — \(ASREngineID.current.shortLabel) lädt…")
+                String(localized: "Vorläufiges Modell aktiv — \(ASREngineID.current.shortLabel) lädt: \(Int($0 * 100)) %")
+            } ?? String(localized: "Vorläufiges Modell aktiv — \(ASREngineID.current.shortLabel) lädt…"))
         } else if dictation.modelState != .ready {
-            Text(dictation.downloadProgress.map { "ASR-Modell lädt: \(Int($0 * 100)) %" }
+            Text(dictation.downloadProgress.map { String(localized: "ASR-Modell lädt: \(Int($0 * 100)) %") }
                 ?? dictation.modelState.label)
         }
         // Today's numbers at a glance; the window has the full picture. Omitted
@@ -332,8 +397,15 @@ struct MenuContentView: View {
             meeting.toggle()
         }
         .disabled(meeting.state == .processing)
+        // No `.keyboardShortcut` on the items below.
+        //
+        // A status-item menu is not in the main menu's key-equivalent chain, so
+        // these were never global shortcuts — they only worked while this menu
+        // was already open, which is the one moment nobody needs them. Printing
+        // "⌘⇧V" next to "Letztes Diktat einfügen" promised exactly the thing it
+        // could not do: press it in the app you want the text in, and nothing
+        // happens. ⌘, and ⌘Q stay, because macOS routes those itself.
         Button(liveNotes.isActive ? "Notizen zum Meeting…" : "Meeting-Notizen…") { open("meetingNotes") }
-            .keyboardShortcut("n", modifiers: [.command, .shift])
         if let next = nextEvent {
             Text("Nächstes: \(Self.nextEventLabel(next))")
         }
@@ -351,11 +423,20 @@ struct MenuContentView: View {
         Divider()
 
         // Dictation
-        Button("Letztes Diktat einfügen") { Task { try? await history.pasteLast() } }
-            .keyboardShortcut("v", modifiers: [.command, .shift])
+        Button("Letztes Diktat einfügen") {
+            Task {
+                do {
+                    _ = try await history.pasteLast()
+                } catch {
+                    // Same reasoning as the notification path: the transcript is
+                    // on the clipboard, and only this line says why nothing
+                    // appeared in the field.
+                    AppContainer.shared.dictation.overlay.flashError(error.localizedDescription)
+                }
+            }
+        }
             .disabled(history.last == nil)
         Button("Letztes Diktat kopieren") { Task { await history.copyLast() } }
-            .keyboardShortcut("c", modifiers: [.command, .shift])
             .disabled(history.last == nil)
         // Only present once the feature has been switched on — the switch is the
         // consent, so an unconfigured install offers no way to send text out.
@@ -380,7 +461,6 @@ struct MenuContentView: View {
         }
         if history.recent.isEmpty {
             Button("Letzte Diktate…") { open("recent") }
-                .keyboardShortcut("r", modifiers: [.command])
         } else {
             Menu("Letzte Diktate") {
                 ForEach(history.recent.prefix(8)) { item in
@@ -388,7 +468,6 @@ struct MenuContentView: View {
                 }
                 Divider()
                 Button("Alle anzeigen…") { open("recent") }
-                    .keyboardShortcut("r", modifiers: [.command])
             }
         }
 
@@ -398,7 +477,6 @@ struct MenuContentView: View {
         Menu("Notizen") {
             Button("Notizen verwalten…") { open("notes") }
             Button("Durchsuchen…") { open("search") }
-                .keyboardShortcut("f", modifiers: [.command])
             Button("Notizen-Ordner öffnen") {
                 try? notesFolder.ensureExists()
                 NSWorkspace.shared.open(notesFolder.folderURL)
@@ -484,9 +562,9 @@ struct MenuContentView: View {
         let time = event.startDate.formatted(date: .omitted, time: .shortened)
         let minutes = Int(event.startDate.timeIntervalSinceNow / 60)
         let relative: String
-        if minutes <= 0 { relative = "jetzt" }
-        else if minutes < 60 { relative = "in \(minutes) min" }
-        else { relative = "in \(minutes / 60) h \(minutes % 60) min" }
+        if minutes <= 0 { relative = String(localized: "jetzt") }
+        else if minutes < 60 { relative = String(localized: "in \(minutes) min") }
+        else { relative = String(localized: "in \(minutes / 60) h \(minutes % 60) min") }
         return "\(time) \(event.title) (\(relative))"
     }
 

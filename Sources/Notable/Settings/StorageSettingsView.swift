@@ -21,6 +21,8 @@ struct StorageSettingsView: View {
     @State private var pending: RetentionPlanner.Plan?
     @State private var lastResult: RetentionRunner.Result?
     @State private var isWorking = false
+    @State private var confirmClearApps = false
+    @State private var clearedApps: Int?
 
     private static let ages: [(Int, LocalizedStringKey)] = [
         (0, "Aus"), (7, "7 Tage"), (30, "30 Tage"), (90, "90 Tage"), (365, "1 Jahr"),
@@ -67,10 +69,24 @@ struct StorageSettingsView: View {
 
             Section {
                 Toggle("Ziel-App der Diktate erfassen", isOn: $appStatistics)
-                Button("Erfasste Ziel-Apps löschen") {
-                    Task { _ = try? await RecordingStore.shared.clearSourceApps() }
+                // Confirmed and counted: it is a database write with no undo,
+                // and it used to give no sign that anything had happened.
+                Button("Erfasste Ziel-Apps löschen") { confirmClearApps = true }
+                    .buttonStyle(.link)
+                    .confirmationDialog(
+                        "Erfasste Ziel-Apps löschen?",
+                        isPresented: $confirmClearApps
+                    ) {
+                        Button("Löschen", role: .destructive) { clearSourceApps() }
+                        Button("Abbrechen", role: .cancel) {}
+                    } message: {
+                        Text("Die Zuordnung „welches Diktat ging in welche App“ geht verloren. Wortzahlen und Zeiten bleiben.")
+                    }
+                if let clearedApps {
+                    Text("\(clearedApps) Einträge gelöscht.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.link)
             } header: {
                 Text("App-Statistik")
             } footer: {
@@ -83,7 +99,7 @@ struct StorageSettingsView: View {
                         Text("Nichts aufzuräumen.")
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("\(pending.removals.count) Sitzungen, \(byteText(pending.reclaimedBytes)) werden gelöscht.")
+                        Text("\(Self.sessions(pending.removals.count)), \(byteText(pending.reclaimedBytes)) werden gelöscht.")
                         HStack {
                             Button("Endgültig löschen") { runPlan(pending) }
                                 .buttonStyle(.borderedProminent)
@@ -95,9 +111,17 @@ struct StorageSettingsView: View {
                         .disabled(isWorking)
                 }
                 if let lastResult, lastResult.removedSessions > 0 {
-                    Text("Zuletzt gelöscht: \(lastResult.removedSessions) Sitzungen, \(byteText(lastResult.reclaimedBytes)).")
+                    Text("Zuletzt gelöscht: \(Self.sessions(lastResult.removedSessions)), \(byteText(lastResult.reclaimedBytes)).")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                // A failed database clean-up used to report itself as "0
+                // segments cleared" — indistinguishable from nothing to do.
+                if let lastResult, !lastResult.errors.isEmpty {
+                    Text("Aufräumen unvollständig: \(lastResult.errors.joined(separator: "; "))")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
                 }
             } header: {
                 Text("Manuell aufräumen")
@@ -113,11 +137,20 @@ struct StorageSettingsView: View {
         .task { await measure() }
     }
 
+    /// "1 Sitzung" / "4 Sitzungen" — picked, not interpolated blindly.
+    ///
+    /// German and English both inflect the noun, and every count here used to
+    /// read "1 Sitzungen" / "1 sessions". A `.stringsdict` for three call sites
+    /// is more machinery than one `== 1` deserves.
+    private static func sessions(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 Sitzung") : String(localized: "\(count) Sitzungen")
+    }
+
     @ViewBuilder
     private func usageRow(_ title: LocalizedStringKey, _ value: (count: Int, bytes: Int64)?) -> some View {
         LabeledContent(title) {
             if let value {
-                Text("\(byteText(value.bytes)) · \(value.count) Sitzungen")
+                Text("\(byteText(value.bytes)) · \(Self.sessions(value.count))")
             } else {
                 Text("wird gemessen…").foregroundStyle(.secondary)
             }
@@ -150,6 +183,12 @@ struct StorageSettingsView: View {
         }.value
         archive = (measured.0.count, measured.0.reduce(0) { $0 + $1.byteSize })
         failed = (measured.1.count, measured.1.reduce(0) { $0 + $1.byteSize })
+    }
+
+    private func clearSourceApps() {
+        Task {
+            clearedApps = (try? await RecordingStore.shared.clearSourceApps()) ?? 0
+        }
     }
 
     private func preview() {

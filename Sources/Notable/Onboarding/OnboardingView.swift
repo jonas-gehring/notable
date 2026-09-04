@@ -49,6 +49,9 @@ struct OnboardingView: View {
         .background(Theme.windowBackground)
         .onReceive(refreshTimer) { _ in permissions.refresh() }
         .onAppear { permissions.refresh() }
+        // ⌘W and the red button are ways of saying "not now", and they used to
+        // mean "ask me again at every launch, forever".
+        .onDisappear { markSeen() }
     }
 
     // MARK: Pages
@@ -60,16 +63,21 @@ struct OnboardingView: View {
             pageBody(
                 icon: "waveform",
                 title: "Willkommen bei Notable",
-                text: "Diktiere per Hotkey in jedes Textfeld und lass Meetings automatisch mitschreiben — die Erkennung läuft auf deinem Mac. **Audio verlässt das Gerät nie**; zum Zusammenfassen geht ausschließlich der Text eines Meetings hinaus. Jede Meeting-Notiz landet als Markdown-Datei in einem Ordner, den du aussuchst — auch ohne Notable lesbar.")
+                text: "Taste halten, sprechen, loslassen — der Text steht im Feld.",
+                bullets: [
+                    "Erkennung läuft auf deinem Mac",
+                    "Audio verlässt das Gerät nie",
+                    "Meeting-Notizen als Markdown-Datei",
+                ])
         case .microphone:
             permissionPage(
                 .microphone,
                 title: "Mikrofon",
-                text: "Ohne Mikrofon kein Diktat. Das ist die einzige zwingende Berechtigung.")
+                text: "Die einzige Berechtigung, ohne die nichts geht.")
         case .hotkey:
             VStack(alignment: .leading, spacing: 16) {
-                pageHeader(icon: "keyboard", title: "Hotkey & Einfügen")
-                Text("Für den globalen Push-to-talk-Hotkey und das Einfügen ins fokussierte Feld braucht Notable zwei Berechtigungen. Beide werden erst nach einem Neustart aktiv.")
+                pageHeader(icon: "keyboard", title: "Taste & Einfügen")
+                Text("Zwei Rechte, dann einmal neu starten.")
                     .foregroundStyle(Theme.textSubtle)
                 permissionRow(.inputMonitoring)
                 permissionRow(.accessibility)
@@ -80,24 +88,37 @@ struct OnboardingView: View {
             firstDictationPage
         case .meetings:
             VStack(alignment: .leading, spacing: 16) {
-                pageHeader(icon: "person.2.wave.2", title: "Meetings (optional)")
-                Text("Notable erkennt Calls und schreibt mit. Für den Ton der anderen verlangt macOS das Recht **Systemaudio-Aufnahme** — ein eigenes Recht, nicht die Bildschirmaufnahme; ein Bild wird nie aufgezeichnet. Der Kalender ordnet Aufnahmen dem Termin zu, die Mitteilung stellt vor jedem Mitschnitt die Rückfrage. Alles drei optional.")
+                pageHeader(icon: "person.2.wave.2", title: "Meetings")
+                Text("Optional. Notable erkennt Calls und fragt vorher.")
                     .foregroundStyle(Theme.textSubtle)
                 permissionRow(.systemAudio)
                 permissionRow(.calendar)
                 permissionRow(.notifications)
+                Text("„Systemaudio-Aufnahme“ ist der Ton der anderen — ein eigenes Recht, nicht die Bildschirmaufnahme. Ein Bild wird nie aufgezeichnet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textMuted)
             }
         case .provider:
             pageBody(
                 icon: "text.justify.left",
                 title: "Zusammenfassung",
-                text: "Meeting-Transkripte werden zu einer Notiz zusammengefasst — wahlweise über die Anthropic-API (Schlüssel im Schlüsselbund) oder über eine lokal installierte CLI: Claude Code, Gemini CLI oder Codex CLI. Lässt sich auch später einrichten; **Diktat funktioniert ohne**.",
+                text: "Wer aus dem Transkript die Notiz schreibt.",
+                bullets: [
+                    "Anthropic-API mit eigenem Schlüssel",
+                    "oder eine lokale CLI: Claude Code, Gemini, Codex",
+                    "Geht auch später — Diktat funktioniert ohne",
+                ],
                 action: ("Einstellungen öffnen…", { openSettings() }))
         case .done:
             pageBody(
                 icon: "checkmark.circle.fill",
                 title: "Alles bereit",
-                text: "Notable lebt in der Menüleiste — dort findest du Meeting-Aufnahme, Notizen, Statistik und Einstellungen. Die Notizen liegen als Markdown in **Dokumente/Notable**; den Ordner kannst du in den Einstellungen umlegen. Die LLM-Verbesserung für Diktate bleibt aus, bis du sie dort einschaltest.")
+                text: "Notable wohnt in der Menüleiste.",
+                bullets: [
+                    "Notizen liegen in Dokumente/Notable",
+                    "Aufnahme, Statistik und Einstellungen im Menü",
+                    "LLM-Verbesserung für Diktate bleibt aus, bis du sie einschaltest",
+                ])
         }
     }
 
@@ -105,8 +126,9 @@ struct OnboardingView: View {
         let done = dictation.lastDictationAt != nil
         return VStack(alignment: .leading, spacing: 16) {
             pageHeader(icon: "mic.fill", title: "Dein erstes Diktat")
-            Text("Klick in ein Textfeld einer anderen App (z. B. TextEdit), halte die Taste **\(hotkeyLabel)**, sprich einen Satz und lass los. Der Text erscheint im Feld.")
-                .foregroundStyle(Theme.textSubtle)
+            Text("In ein Textfeld einer anderen App klicken, **\(hotkeyLabel)** halten, einen Satz sprechen, loslassen.")
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.textDefault)
             HStack(spacing: 8) {
                 Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed")
                     .foregroundStyle(done ? Theme.success : Theme.textMuted)
@@ -135,11 +157,34 @@ struct OnboardingView: View {
 
     // MARK: Building blocks
 
+    /// One sentence, then facts as ticks.
+    ///
+    /// The pages used to carry a paragraph each — five or six lines of prose in
+    /// a 540-point window, which is a wall nobody reads on the way to their
+    /// first dictation. Everything that was in those paragraphs and still needs
+    /// saying is now either a single line or a tick; everything else was
+    /// documentation, and documentation belongs in the settings pane it
+    /// describes.
     private func pageBody(icon: String, title: LocalizedStringKey, text: LocalizedStringKey,
+                          bullets: [LocalizedStringKey] = [],
                           action: (LocalizedStringKey, () -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             pageHeader(icon: icon, title: title)
-            Text(text).foregroundStyle(Theme.textSubtle)
+            Text(text)
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.textDefault)
+            if !bullets.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array(bullets.enumerated()), id: \.offset) { _, bullet in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Theme.accent)
+                            Text(bullet).foregroundStyle(Theme.textSubtle)
+                        }
+                    }
+                }
+            }
             if let action {
                 Button(action.0) { action.1() }
             }
@@ -238,6 +283,16 @@ struct OnboardingView: View {
         dismiss()
     }
 
+    /// Closing the window counts as finishing it.
+    ///
+    /// Only `finish()` used to set the flag, so ⌘W or the red button left it
+    /// false — and `MenuBarLabel.onAppear` then reopened the tour on *every*
+    /// launch, forever, with no way out but walking to the last page. "Einführung
+    /// zeigen" in Settings is the way back in.
+    private func markSeen() {
+        didComplete = true
+    }
+
     private func openSettings() {
         openWindow(id: "settings")
         NSApp.activate(ignoringOtherApps: true)
@@ -245,11 +300,5 @@ struct OnboardingView: View {
 
     /// Relaunch a fresh instance to pick up TCC grants macOS caches per-process
     /// (screen recording, input monitoring) — mirrors the Settings relaunch.
-    private func relaunch() {
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
-            DispatchQueue.main.async { NSApp.terminate(nil) }
-        }
-    }
+    private func relaunch() { AppRelauncher.relaunch() }
 }

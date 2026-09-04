@@ -64,7 +64,10 @@ final class MeetingChatController: ObservableObject {
         defer { isThinking = false }
         do {
             let answer = try await SummarizationService.complete(
-                system: ChatPrompt.system,
+                system: ChatPrompt.system(
+                    question: question,
+                    transcript: context.segments.map(\.text).joined(separator: " ")
+                ),
                 user: ChatPrompt.user(context: context, history: history, question: question),
                 providerID: providerID)
             await UsageRecorder.record(
@@ -93,6 +96,7 @@ final class MeetingChatController: ObservableObject {
 struct MeetingChatView: View {
     let recording: RecordingStore.Recording
     @StateObject private var controller: MeetingChatController
+    @State private var confirmClear = false
     @AppStorage("summarizationProvider") private var providerID = SummarizationProviderID.anthropicAPI.rawValue
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
@@ -102,7 +106,13 @@ struct MeetingChatView: View {
         _controller = StateObject(wrappedValue: MeetingChatController(recordingID: recording.id))
     }
 
-    private let suggestions = ["Was waren die Action Items?", "Welche Entscheidungen wurden getroffen?", "Fasse die Kernpunkte zusammen."]
+    /// `String(localized:)` and not bare literals: these go into `Button(_:)`,
+    /// whose `StringProtocol` overload renders verbatim.
+    private let suggestions = [
+        String(localized: "Was waren die Action Items?"),
+        String(localized: "Welche Entscheidungen wurden getroffen?"),
+        String(localized: "Fasse die Kernpunkte zusammen."),
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -130,8 +140,14 @@ struct MeetingChatView: View {
             }
             Spacer()
             if !controller.messages.isEmpty {
-                Button("Verlauf löschen") { Task { await controller.clear() } }
+                Button("Verlauf löschen") { confirmClear = true }
                     .buttonStyle(.link)
+                    .confirmationDialog("Verlauf löschen?", isPresented: $confirmClear) {
+                        Button("Löschen", role: .destructive) { Task { await controller.clear() } }
+                        Button("Abbrechen", role: .cancel) {}
+                    } message: {
+                        Text("Alle Fragen und Antworten zu diesem Meeting werden entfernt. Transkript und Notiz bleiben.")
+                    }
             }
             Button("Fertig") { dismiss() }
         }

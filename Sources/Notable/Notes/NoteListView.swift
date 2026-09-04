@@ -148,7 +148,7 @@ struct NoteListView: View {
                     if note.folder != NoteManager.inboxFolder {
                         Button("Inbox") { perform { try await noteManager.move(note, toFolder: NoteManager.inboxFolder) } }
                     }
-                    ForEach(noteManager.projectFolders(), id: \.self) { folder in
+                    ForEach(noteManager.projectFolders, id: \.self) { folder in
                         if folder != note.folder {
                             Button(folder) { perform { try await noteManager.move(note, toFolder: folder) } }
                         }
@@ -166,6 +166,7 @@ struct NoteListView: View {
             .menuStyle(.borderlessButton)
             .frame(width: 44)
             .help("Verschieben / im Finder zeigen")
+            .accessibilityLabel("Verschieben / im Finder zeigen")
         }
     }
 

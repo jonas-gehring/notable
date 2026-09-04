@@ -22,9 +22,6 @@ struct LiveNotesView: View {
     @EnvironmentObject private var meeting: MeetingController
     @StateObject private var editor = NotesEditorProxy()
     @AppStorage("meetingNotesFloating") private var floating = true
-    @State private var now = Date()
-
-    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,7 +36,6 @@ struct LiveNotesView: View {
         .frame(minWidth: 380, minHeight: 300)
         .background(Theme.windowBackground)
         .background(FloatingWindowConfigurator(floating: floating))
-        .onReceive(clock) { now = $0 }
         .onChange(of: notes.isActive) { _, active in
             if active { editor.focus() }
         }
@@ -53,12 +49,12 @@ struct LiveNotesView: View {
             Image(systemName: notes.isActive ? "record.circle" : "note.text")
                 .foregroundStyle(notes.isActive ? Theme.accent : Theme.textMuted)
             VStack(alignment: .leading, spacing: 1) {
-                Text(notes.isActive ? notes.title : "Kein Meeting aktiv")
+                Text(notes.isActive ? notes.title : String(localized: "Kein Meeting aktiv"))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textEmphasis)
                     .lineLimit(1)
                 Text(notes.isActive
-                     ? "Notizen kommen als „Eigene Notizen“ in die Notiz und in die Zusammenfassung."
+                     ? String(localized: "Notizen kommen als „Eigene Notizen“ in die Notiz und in die Zusammenfassung.")
                      : String(localized: "Notizen gehören zu einer laufenden Aufnahme."))
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textSubtle)
@@ -66,10 +62,13 @@ struct LiveNotesView: View {
             }
             Spacer(minLength: 0)
             if notes.isActive {
-                Text(LiveNotes.timestamp(elapsed: notes.elapsed(at: now)))
-                    .font(.system(size: 12, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textSubtle)
+                // Its own small view, so the second hand does not re-evaluate
+                // the whole window. `body` here contains the editor bridge, and
+                // `NotesTextEditor.updateNSView` serializes the entire attributed
+                // document back to Markdown for a comparison — once per second,
+                // while someone is typing into it, and formerly also with no
+                // meeting running at all.
+                ElapsedLabel(notes: notes)
             }
         }
         .padding(.horizontal, 12)
@@ -103,6 +102,8 @@ struct LiveNotesView: View {
         .background(Theme.windowBackground)
     }
 
+    /// `help` doubles as the accessibility label: an icon-only button is
+    /// otherwise announced as "Taste" and nothing else.
     private func formatButton(_ symbol: String, _ block: NotesBlock, _ help: String) -> some View {
         Button { editor.applyBlock(block); editor.focus() } label: {
             Image(systemName: symbol)
@@ -112,6 +113,7 @@ struct LiveNotesView: View {
         .buttonStyle(.borderless)
         .foregroundStyle(Theme.textEmphasis)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     // MARK: - Footer
@@ -473,5 +475,25 @@ private struct FloatingWindowConfigurator: NSViewRepresentable {
                 ? [.canJoinAllSpaces, .fullScreenAuxiliary]
                 : [.managed]
         }
+    }
+}
+
+
+/// The elapsed-time readout, ticking on its own.
+///
+/// Split out of `LiveNotesView` so the clock redraws a `Text` rather than the
+/// whole window — and so it only runs while a meeting does.
+private struct ElapsedLabel: View {
+    @ObservedObject var notes: LiveNotesController
+    @State private var now = Date()
+
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Text(LiveNotes.timestamp(elapsed: notes.elapsed(at: now)))
+            .font(.system(size: 12, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(Theme.textSubtle)
+            .onReceive(clock) { now = $0 }
     }
 }

@@ -91,6 +91,9 @@ targets:
       # Which language the interface is drawn in, and what "system" falls back to.
       - path: Sources/Notable/Support/AppLanguage.swift
       - path: Sources/Notable/Meeting/ChatPrompt.swift
+      # The SQLite plumbing RecordingStore sits on: open, numbered migrations,
+      # query/run/transaction. Compiled into the test bundle because the store is.
+      - path: Sources/Notable/Storage/SQLiteConnection.swift
       - path: Sources/Notable/Storage/RecordingStore.swift
       - path: Sources/Notable/Storage/MarkdownProjector.swift
       # Retention rules (issue #2). The planner is pure; the runner is the only
@@ -171,6 +174,12 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Menu-bar app, no Dock presence by default.
         LSUIElement: true
+        # A second copy must never come up: the documented workflow runs a Debug
+        # build out of $DD next to the installed /Applications/Notable.app, and
+        # two instances mean two flags taps, two meeting detectors, two spools
+        # for one call and two notification delegates — none of which announce
+        # themselves. `open` brings the running instance forward instead.
+        LSMultipleInstancesProhibited: true
         NSMicrophoneUsageDescription: "Notable nutzt das Mikrofon für Diktat und Meeting-Aufnahmen. Audio verlässt das Gerät nicht."
         NSCalendarsFullAccessUsageDescription: "Notable liest den Kalender, um Aufnahmen dem passenden Termin zuzuordnen."
         NSAudioCaptureUsageDescription: "Notable zeichnet System-Audio auf, um die anderen Meeting-Teilnehmer zu transkribieren. Audio verlässt das Gerät nicht."

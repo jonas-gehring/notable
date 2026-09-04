@@ -106,7 +106,7 @@ enum RetentionPlanner {
         /// answerable a month later.
         var text: String {
             switch self {
-            case .tooOld(let days): return "älter als \(days) Tage"
+            case .tooOld(let days): return String(localized: "älter als \(days) Tage")
             case .overBudget: return String(localized: "über dem Speicherbudget")
             }
         }
@@ -211,7 +211,12 @@ enum SpoolInventory {
                 SpoolStore.Meta.self,
                 from: Data(contentsOf: url.appendingPathComponent("meta.json"))
             )
-            let startedAt = meta?.startedAt ?? values?.creationDate ?? Date.distantPast
+            // `Date.distantPast` as the fallback meant "older than twenty
+            // thousand days", so a session whose date could not be read at all
+            // was deleted *first*, ahead of everything genuinely old. Unknown
+            // age has to mean keep: `now` makes it the newest thing on disk,
+            // and only the total budget can ever reach it.
+            let startedAt = meta?.startedAt ?? values?.creationDate ?? Date()
             return RetentionPlanner.Session(url: url, startedAt: startedAt, byteSize: size(of: url, fileManager: fileManager))
         }
     }
@@ -240,6 +245,12 @@ actor RetentionRunner {
         var clearedDictationSegments = 0
         var clearedMeetingSegments = 0
         var deletedChatMessages = 0
+        /// What went wrong, in the user's language. The file half of the sweep
+        /// logged every failure while the database half reported a failed
+        /// clear-out as "0 segments cleared" and said nothing at all — so a
+        /// cleanup that removed nothing looked exactly like a cleanup with
+        /// nothing to remove.
+        var errors: [String] = []
     }
 
     private let store: RecordingStore
@@ -262,6 +273,13 @@ actor RetentionRunner {
     }
 
     @discardableResult
+    /// Logs a database failure and carries it out to the caller, so
+    /// `StorageSettingsView` can say what did not happen.
+    private func record(_ error: Error, in result: inout Result) {
+        log.error("Aufräumen (Datenbank) fehlgeschlagen: \(error.localizedDescription, privacy: .public)")
+        result.errors.append(error.localizedDescription)
+    }
+
     func run(_ plan: RetentionPlanner.Plan) async -> Result {
         var result = Result()
 
@@ -284,13 +302,25 @@ actor RetentionRunner {
         // Text only — never the row. `UsageMetrics` reads `recordings`, so
         // deleting a row would retroactively rewrite the statistics.
         if let before = plan.dictationTextBefore {
-            result.clearedDictationSegments = (try? await store.clearSegmentText(olderThan: before, kind: .dictation)) ?? 0
+            do {
+                result.clearedDictationSegments = try await store.clearSegmentText(olderThan: before, kind: .dictation)
+            } catch {
+                record(error, in: &result)
+            }
         }
         if let before = plan.meetingTextBefore {
-            result.clearedMeetingSegments = (try? await store.clearSegmentText(olderThan: before, kind: .meeting)) ?? 0
+            do {
+                result.clearedMeetingSegments = try await store.clearSegmentText(olderThan: before, kind: .meeting)
+            } catch {
+                record(error, in: &result)
+            }
         }
         if let before = plan.chatBefore {
-            result.deletedChatMessages = (try? await store.deleteChatMessages(olderThan: before)) ?? 0
+            do {
+                result.deletedChatMessages = try await store.deleteChatMessages(olderThan: before)
+            } catch {
+                record(error, in: &result)
+            }
         }
 
         if result != Result() {

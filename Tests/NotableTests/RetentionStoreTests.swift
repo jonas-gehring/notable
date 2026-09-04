@@ -31,9 +31,38 @@ final class RetentionStoreTests: XCTestCase {
         XCTAssertEqual(after.map(\.startedAt), before.map(\.startedAt))
         XCTAssertEqual(after.map(\.endedAt), before.map(\.endedAt))
 
-        // The text itself is gone; the newer dictation is untouched.
+        // The text itself is gone, and the emptied row no longer surfaces at
+        // all: it used to become a blank line in the menu whose "Einfügen"
+        // pasted an empty string. The newer dictation is untouched.
         let texts = try await store.recentDictations(limit: 10).map(\.text)
-        XCTAssertEqual(Set(texts), ["Ein neuer Satz", ""])
+        XCTAssertEqual(texts, ["Ein neuer Satz"])
+    }
+
+    /// The enhanced-dictation path stores the rule-polished original in
+    /// `recordings.raw_text` — a second copy of the text, in a second table.
+    /// Clearing only `segments.text` left it behind and handed it right back.
+    func testClearingAlsoDropsThePreEnhancementText() async throws {
+        let (store, dir) = makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        try await store.saveDictation(
+            text: "Der verbesserte Text.",
+            startedAt: old,
+            duration: 4,
+            rawText: "Der ursprüngliche, regelpolierte Text."
+        )
+        let stored = try await store.recentDictations(limit: 10)
+        XCTAssertEqual(stored.first?.rawText, "Der ursprüngliche, regelpolierte Text.")
+
+        try await store.clearSegmentText(olderThan: recent, kind: .dictation)
+
+        let remaining = try await store.recentDictations(limit: 10)
+        XCTAssertTrue(remaining.isEmpty, "geleertes Diktat taucht nicht mehr auf")
+
+        // …and the statistics still count it.
+        let rows = try await store.usageRows(from: .distantPast, to: .distantFuture)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertGreaterThan(rows[0].wordCount ?? 0, 0)
     }
 
     func testClearingDictationsLeavesMeetingsAlone() async throws {

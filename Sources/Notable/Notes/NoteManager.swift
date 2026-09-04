@@ -11,6 +11,13 @@ final class NoteManager: ObservableObject {
 
     /// Recent meeting notes, newest first — the list UI binds to this.
     @Published private(set) var notes: [RecordingStore.Recording] = []
+    /// The project subfolders, cached.
+    ///
+    /// `projectFolders()` is a synchronous `contentsOfDirectory` scan, and it
+    /// used to be called from inside the per-row `Menu` builder — up to two
+    /// hundred directory listings while the list draws. It changes only when a
+    /// folder is created or a note is moved, both of which end in `reload()`.
+    @Published private(set) var projectFolders: [String] = []
 
     private let store: RecordingStore
     private let notesFolder: NotesFolderManager
@@ -24,6 +31,7 @@ final class NoteManager: ObservableObject {
 
     func reload() async {
         notes = (try? await store.recentMeetings(limit: 200)) ?? []
+        projectFolders = scanProjectFolders()
     }
 
     // MARK: - Folder model (Inbox + one flat level of project folders)
@@ -37,7 +45,7 @@ final class NoteManager: ObservableObject {
 
     /// Existing project subfolders (every subdirectory of the root except the
     /// Inbox), sorted case-insensitively.
-    func projectFolders() -> [String] {
+    func scanProjectFolders() -> [String] {
         let root = notesFolder.folderURL
         let entries = (try? FileManager.default.contentsOfDirectory(
             at: root,
@@ -81,10 +89,12 @@ final class NoteManager: ObservableObject {
             MarkdownProjector.uniqueFileName(title: title, date: record.startedAt, in: directory, excluding: currentURL)
         )
 
+        // Write, record, *then* delete. The other order deleted the old file
+        // first, so a failing store write left `markdown_path` pointing at a
+        // file that no longer existed and "Im Finder zeigen" stopped working.
         try writeProjection(record: record, segments: loaded.segments, title: title, to: target)
-        removeStaleFile(currentURL, keeping: target)
-
         try await store.updateTitle(title, titleIsAuto: false, markdownPath: target.path, for: record.id)
+        removeStaleFile(currentURL, keeping: target)
         await reload()
     }
 
@@ -108,10 +118,11 @@ final class NoteManager: ObservableObject {
             MarkdownProjector.uniqueFileName(title: title, date: record.startedAt, in: destination, excluding: currentURL)
         )
 
+        // Same order as `rename`: the old file only goes once the store knows
+        // about the new one.
         try writeProjection(record: record, segments: loaded.segments, title: title, to: target)
-        removeStaleFile(currentURL, keeping: target)
-
         try await store.updateLocation(folder: key, markdownPath: target.path, for: record.id)
+        removeStaleFile(currentURL, keeping: target)
         await reload()
     }
 
@@ -136,13 +147,14 @@ final class NoteManager: ObservableObject {
         title: String,
         to target: URL
     ) throws {
-        // The store keeps only the calendar event *id*, not its title, so a
-        // re-projected note drops the front-matter `event:` line. Everything
-        // that defines the note — title, date, summary, transcript — is restored.
+        // The event title comes out of SQLite like everything else. It used to
+        // be passed as `nil` here, so every rename, move and notes-save silently
+        // dropped the front-matter `event:` line from a file that had it.
         let note = MarkdownProjector.Note(
             title: title,
             date: record.startedAt,
-            calendarEventTitle: nil,
+            calendarEventTitle: record.calendarEventTitle,
+            attendees: record.attendees,
             segments: segments.map { ($0.speaker, $0.text) },
             summary: record.summary,
             userNotes: record.userNotes
@@ -224,10 +236,10 @@ final class NoteManager: ObservableObject {
 
         var errorDescription: String? {
             switch self {
-            case .emptyTitle: "Der Titel darf nicht leer sein."
+            case .emptyTitle: String(localized: "Der Titel darf nicht leer sein.")
             case .invalidFolderName: String(localized: "Ungültiger Ordnername.")
-            case .reservedFolderName: "„Inbox“ ist reserviert."
-            case .notFound: "Notiz nicht gefunden."
+            case .reservedFolderName: String(localized: "„Inbox“ ist reserviert.")
+            case .notFound: String(localized: "Notiz nicht gefunden.")
             }
         }
     }

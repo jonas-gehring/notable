@@ -1,11 +1,15 @@
 import Foundation
-import SQLite3
-
-private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 /// SQLite (WAL) is the source of truth for recordings and transcript
 /// segments; Markdown files in the user's notes folder are a projection.
 /// Actor-confined — SQLite handles are not thread-safe.
+///
+/// Everything below the SQL lives in ``SQLiteConnection``: opening, the
+/// numbered migrations, prepare/bind/step/finalize, and the transaction
+/// helper. This file used to carry nine hand-written copies of that
+/// boilerplate, and each copy repeated the same two mistakes — a read loop
+/// that read `SQLITE_BUSY` as "no more rows", and a write pair with no
+/// transaction around it.
 actor RecordingStore {
     enum Kind: String, Sendable {
         case dictation
@@ -52,6 +56,18 @@ actor RecordingStore {
         /// nothing was enhanced — otherwise it would be impossible to see what
         /// the model did.
         var rawText: String? = nil
+        /// The calendar event's title as it stood when the meeting was recorded.
+        ///
+        /// In SQLite because "SQLite is the truth" was not true for it: the
+        /// title lived only in the Markdown front matter, so every rename, move
+        /// or re-render read it back as `nil` and silently dropped the `event:`
+        /// line from the file.
+        var calendarEventTitle: String? = nil
+        /// The calendar event's invitees, as they stood when the meeting was
+        /// recorded. Stored for the same reason as `calendarEventTitle`: the
+        /// Markdown file is a projection, so anything only in the file is lost
+        /// on the next rename.
+        var attendees: [String] = []
     }
 
     struct Segment: Sendable {
@@ -112,16 +128,8 @@ actor RecordingStore {
 
     static let shared = RecordingStore()
 
-    /// Owns the SQLite handle; its plain deinit closes the connection
-    /// (an actor's deinit cannot touch non-Sendable state on macOS < 15.4).
-    private final class Connection: @unchecked Sendable {
-        let handle: OpaquePointer
-        init(handle: OpaquePointer) { self.handle = handle }
-        deinit { sqlite3_close_v2(handle) }
-    }
-
     private let databaseURL: URL
-    private var connection: Connection?
+    private var connection: SQLiteConnection?
 
     init(directory: URL? = nil) {
         let base = directory ?? FileManager.default
@@ -130,11 +138,29 @@ actor RecordingStore {
         databaseURL = base.appendingPathComponent("notable.sqlite")
     }
 
+    /// The open, migrated database.
+    ///
+    /// The instance is only stored once `open` has fully succeeded. The previous
+    /// version assigned the handle first and ran the schema afterwards, so a
+    /// failure in the schema left a connection behind that every later call
+    /// reused — without a schema, and without ever trying again.
+    private func db() throws -> SQLiteConnection {
+        if let connection { return connection }
+        let opened = try SQLiteConnection.open(at: databaseURL)
+        connection = opened
+        return opened
+    }
+
     // MARK: - Public API
 
     /// The measurement parameters default to nil so every existing caller and test
     /// stays valid — and so a row that genuinely does not know its engine says so
     /// rather than claiming one.
+    ///
+    /// One transaction: the recording and its segment are two INSERTs, and an
+    /// error between them left a recording with no text — counted by `usageRows`,
+    /// listed by `recentActivity` with an empty snippet, invisible to
+    /// `recentDictations`.
     func saveDictation(
         text: String,
         startedAt: Date,
@@ -157,8 +183,10 @@ actor RecordingStore {
             enhanced: enhanced,
             rawText: rawText
         )
-        try insert(recording)
-        try insert(Segment(speaker: nil, start: 0, end: duration, text: text), recordingID: recording.id)
+        try db().transaction {
+            try insert(recording)
+            try insert(Segment(speaker: nil, start: 0, end: duration, text: text), recordingID: recording.id)
+        }
     }
 
     /// Whitespace-separated token count. Kept local to the store (rather than
@@ -172,36 +200,30 @@ actor RecordingStore {
         INSERT INTO recordings
             (id, kind, started_at, ended_at, title, calendar_event_id, markdown_path,
              summary, subtitle, folder, title_is_auto, user_notes, word_count,
-             engine, latency_ms, source_app, enhanced, raw_text)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+             engine, latency_ms, source_app, enhanced, raw_text, calendar_event_title, attendees)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
         """
-        try run(sql) { statement in
-            bind(statement, 1, recording.id)
-            bind(statement, 2, recording.kind.rawValue)
-            sqlite3_bind_double(statement, 3, recording.startedAt.timeIntervalSince1970)
-            bind(statement, 4, recording.endedAt?.timeIntervalSince1970)
-            bind(statement, 5, recording.title)
-            bind(statement, 6, recording.calendarEventID)
-            bind(statement, 7, recording.markdownPath)
-            bind(statement, 8, recording.summary)
-            bind(statement, 9, recording.subtitle)
-            bind(statement, 10, recording.folder)
-            sqlite3_bind_int(statement, 11, recording.titleIsAuto ? 1 : 0)
-            bind(statement, 12, recording.userNotes)
-            if let wordCount = recording.wordCount {
-                sqlite3_bind_int(statement, 13, Int32(wordCount))
-            } else {
-                sqlite3_bind_null(statement, 13)
-            }
-            bind(statement, 14, recording.engine)
-            if let latencyMs = recording.latencyMs {
-                sqlite3_bind_int(statement, 15, Int32(latencyMs))
-            } else {
-                sqlite3_bind_null(statement, 15)
-            }
-            bind(statement, 16, recording.sourceApp)
-            sqlite3_bind_int(statement, 17, recording.enhanced ? 1 : 0)
-            bind(statement, 18, recording.rawText)
+        try db().run(sql) { s in
+            s.bind(1, recording.id)
+            s.bind(2, recording.kind.rawValue)
+            s.bind(3, recording.startedAt)
+            s.bind(4, recording.endedAt)
+            s.bind(5, recording.title)
+            s.bind(6, recording.calendarEventID)
+            s.bind(7, recording.markdownPath)
+            s.bind(8, recording.summary)
+            s.bind(9, recording.subtitle)
+            s.bind(10, recording.folder)
+            s.bind(11, recording.titleIsAuto)
+            s.bind(12, recording.userNotes)
+            s.bind(13, recording.wordCount)
+            s.bind(14, recording.engine)
+            s.bind(15, recording.latencyMs)
+            s.bind(16, recording.sourceApp)
+            s.bind(17, recording.enhanced)
+            s.bind(18, recording.rawText)
+            s.bind(19, recording.calendarEventTitle)
+            s.bind(20, recording.attendees.isEmpty ? nil : recording.attendees.joined(separator: "\n"))
         }
     }
 
@@ -210,178 +232,168 @@ actor RecordingStore {
         INSERT INTO segments (recording_id, speaker, start_seconds, end_seconds, text)
         VALUES (?1, ?2, ?3, ?4, ?5)
         """
-        try run(sql) { statement in
-            bind(statement, 1, recordingID)
-            bind(statement, 2, segment.speaker)
-            sqlite3_bind_double(statement, 3, segment.start)
-            bind(statement, 4, segment.end)
-            bind(statement, 5, segment.text)
+        try db().run(sql) { s in
+            s.bind(1, recordingID)
+            s.bind(2, segment.speaker)
+            s.bind(3, segment.start)
+            s.bind(4, segment.end)
+            s.bind(5, segment.text)
         }
     }
 
     /// Atomic insert of a meeting with all its segments — a partial write
     /// must not leave orphaned rows.
     func insertMeeting(_ recording: Recording, segments: [Segment]) throws {
-        try execute("BEGIN IMMEDIATE")
-        do {
+        try db().transaction {
             try insert(recording)
             for segment in segments {
                 try insert(segment, recordingID: recording.id)
             }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
         }
     }
 
     // MARK: - Reads & edits (SQLite is the source of truth)
 
-    private static let recordingColumns =
-        "id, kind, started_at, ended_at, title, calendar_event_id, markdown_path, summary, subtitle, folder, title_is_auto, user_notes, word_count"
+    /// Every column of `recordings`, in the order ``readRecording`` expects.
+    ///
+    /// All of them: the short list this used to be meant `meeting(id:)` always
+    /// reported `enhanced == false` and `rawText == nil` no matter what stood in
+    /// the row, because those columns were simply not selected.
+    private static let recordingColumns = """
+    id, kind, started_at, ended_at, title, calendar_event_id, markdown_path, summary, \
+    subtitle, folder, title_is_auto, user_notes, word_count, engine, latency_ms, \
+    source_app, enhanced, raw_text, calendar_event_title, attendees
+    """
 
-    /// Reads a full Recording from a prepared statement whose columns are
-    /// `recordingColumns` in order.
-    private func readRecording(_ s: OpaquePointer?) -> Recording {
-        func text(_ i: Int32) -> String? { sqlite3_column_text(s, i).map { String(cString: $0) } }
-        func date(_ i: Int32) -> Date? {
-            sqlite3_column_type(s, i) == SQLITE_NULL ? nil
-                : Date(timeIntervalSince1970: sqlite3_column_double(s, i))
-        }
-        return Recording(
-            id: text(0) ?? "",
-            kind: Kind(rawValue: text(1) ?? "") ?? .meeting,
-            startedAt: date(2) ?? Date(timeIntervalSince1970: 0),
-            endedAt: date(3),
-            title: text(4),
-            calendarEventID: text(5),
-            markdownPath: text(6),
-            summary: text(7),
-            subtitle: text(8),
-            folder: text(9),
-            titleIsAuto: sqlite3_column_int(s, 10) != 0,
-            userNotes: text(11),
-            wordCount: sqlite3_column_type(s, 12) == SQLITE_NULL ? nil : Int(sqlite3_column_int(s, 12))
+    private static func readRecording(_ s: SQLiteConnection.Statement) -> Recording {
+        Recording(
+            id: s.text(0),
+            kind: Kind(rawValue: s.text(1)) ?? .meeting,
+            startedAt: s.date(2) ?? Date(timeIntervalSince1970: 0),
+            endedAt: s.date(3),
+            title: s.string(4),
+            calendarEventID: s.string(5),
+            markdownPath: s.string(6),
+            summary: s.string(7),
+            subtitle: s.string(8),
+            folder: s.string(9),
+            titleIsAuto: s.bool(10),
+            userNotes: s.string(11),
+            wordCount: s.int(12),
+            engine: s.string(13),
+            latencyMs: s.int(14),
+            sourceApp: s.string(15),
+            enhanced: s.bool(16),
+            rawText: s.string(17),
+            calendarEventTitle: s.string(18),
+            attendees: s.string(19)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? []
         )
     }
 
     /// Recent meetings for the note list, newest first.
     func recentMeetings(limit: Int = 100) throws -> [Recording] {
-        let sql = "SELECT \(Self.recordingColumns) FROM recordings WHERE kind = 'meeting' ORDER BY started_at DESC LIMIT ?1"
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int(statement, 1, Int32(limit))
-        var rows: [Recording] = []
-        while sqlite3_step(statement) == SQLITE_ROW { rows.append(readRecording(statement)) }
-        return rows
+        try db().query(
+            "SELECT \(Self.recordingColumns) FROM recordings WHERE kind = 'meeting' ORDER BY started_at DESC LIMIT ?1",
+            bind: { $0.bind(1, limit) },
+            row: Self.readRecording
+        )
     }
 
     /// A recording plus its segments — enough to re-render the whole note from
     /// SQLite (rename/move/regenerate all round-trip through this).
     func meeting(id: String) throws -> (recording: Recording, segments: [Segment])? {
-        let sql = "SELECT \(Self.recordingColumns) FROM recordings WHERE id = ?1"
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, id, -1, sqliteTransient)
-        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-        let recording = readRecording(statement)
+        let recording = try db().queryOne(
+            "SELECT \(Self.recordingColumns) FROM recordings WHERE id = ?1",
+            bind: { $0.bind(1, id) },
+            row: Self.readRecording
+        )
+        guard let recording else { return nil }
         return (recording, try segments(for: id))
     }
 
     /// Transcript segments for a recording, in chronological order.
     func segments(for recordingID: String) throws -> [Segment] {
-        let sql = "SELECT speaker, start_seconds, end_seconds, text FROM segments WHERE recording_id = ?1 ORDER BY start_seconds ASC"
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, recordingID, -1, sqliteTransient)
-        var rows: [Segment] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            rows.append(Segment(
-                speaker: sqlite3_column_text(statement, 0).map { String(cString: $0) },
-                start: sqlite3_column_double(statement, 1),
-                end: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 2),
-                text: sqlite3_column_text(statement, 3).map { String(cString: $0) } ?? ""
-            ))
-        }
-        return rows
+        try db().query(
+            """
+            SELECT speaker, start_seconds, end_seconds, text FROM segments
+            WHERE recording_id = ?1 ORDER BY start_seconds ASC
+            """,
+            bind: { $0.bind(1, recordingID) },
+            row: { (s: SQLiteConnection.Statement) -> Segment in
+                Segment(
+                    speaker: s.string(0),
+                    start: s.double(1) ?? 0,
+                    end: s.double(2),
+                    text: s.text(3)
+                )
+            }
+        )
     }
 
     /// Stores the user's own notes for a recording (edited from the note window).
     func setUserNotes(_ notes: String?, for id: String) throws {
-        try run("UPDATE recordings SET user_notes = ?1 WHERE id = ?2") { s in
-            bind(s, 1, notes)
-            bind(s, 2, id)
+        try db().run("UPDATE recordings SET user_notes = ?1 WHERE id = ?2") { s in
+            s.bind(1, notes)
+            s.bind(2, id)
         }
     }
 
     /// Stores the summary (and optional subtitle) once summarization succeeds.
     func setSummary(_ summary: String?, subtitle: String? = nil, for id: String) throws {
-        try run("UPDATE recordings SET summary = ?1, subtitle = ?2 WHERE id = ?3") { s in
-            bind(s, 1, summary)
-            bind(s, 2, subtitle)
-            bind(s, 3, id)
+        try db().run("UPDATE recordings SET summary = ?1, subtitle = ?2 WHERE id = ?3") { s in
+            s.bind(1, summary)
+            s.bind(2, subtitle)
+            s.bind(3, id)
         }
     }
 
     /// Renames a note: the title, its file path, and whether it is still
     /// auto-generated all move together. Caller writes the .md file itself.
     func updateTitle(_ title: String, titleIsAuto: Bool, markdownPath: String?, for id: String) throws {
-        try run("UPDATE recordings SET title = ?1, title_is_auto = ?2, markdown_path = ?3 WHERE id = ?4") { s in
-            bind(s, 1, title)
-            sqlite3_bind_int(s, 2, titleIsAuto ? 1 : 0)
-            bind(s, 3, markdownPath)
-            bind(s, 4, id)
+        try db().run("UPDATE recordings SET title = ?1, title_is_auto = ?2, markdown_path = ?3 WHERE id = ?4") { s in
+            s.bind(1, title)
+            s.bind(2, titleIsAuto)
+            s.bind(3, markdownPath)
+            s.bind(4, id)
         }
     }
 
     /// Moves a note between folders (Inbox → project). Caller moves the file.
     func updateLocation(folder: String?, markdownPath: String?, for id: String) throws {
-        try run("UPDATE recordings SET folder = ?1, markdown_path = ?2 WHERE id = ?3") { s in
-            bind(s, 1, folder)
-            bind(s, 2, markdownPath)
-            bind(s, 3, id)
+        try db().run("UPDATE recordings SET folder = ?1, markdown_path = ?2 WHERE id = ?3") { s in
+            s.bind(1, folder)
+            s.bind(2, markdownPath)
+            s.bind(3, id)
         }
     }
 
     /// Most recent dictations, newest first.
+    ///
+    /// `s.text != ''` because retention *empties* the text and keeps the row
+    /// (the statistics read `recordings`, so the row has to survive). Without
+    /// the filter a cleaned-up dictation became a blank line in the menu whose
+    /// "Einfügen" pasted an empty string.
     func recentDictations(limit: Int = 20) throws -> [(date: Date, text: String, rawText: String?)] {
-        let sql = """
-        SELECT r.started_at, s.text, r.raw_text
-        FROM recordings r JOIN segments s ON s.recording_id = r.id
-        WHERE r.kind = 'dictation'
-        ORDER BY r.started_at DESC
-        LIMIT ?1
-        """
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int(statement, 1, Int32(limit))
-
-        var rows: [(date: Date, text: String, rawText: String?)] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let date = Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
-            let text = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? ""
-            // Non-nil only where an enhancement actually replaced something —
-            // that is what makes the change visible after the fact.
-            let rawText = sqlite3_column_text(statement, 2).map { String(cString: $0) }
-            rows.append((date, text, rawText))
-        }
-        return rows
+        try db().query(
+            """
+            SELECT r.started_at, s.text, r.raw_text
+            FROM recordings r JOIN segments s ON s.recording_id = r.id
+            WHERE r.kind = 'dictation' AND s.text != ''
+            ORDER BY r.started_at DESC
+            LIMIT ?1
+            """,
+            bind: { $0.bind(1, limit) },
+            row: { s in
+                (
+                    date: s.date(0) ?? Date(timeIntervalSince1970: 0),
+                    text: s.text(1),
+                    // Non-nil only where an enhancement actually replaced
+                    // something — that is what makes the change visible after
+                    // the fact.
+                    rawText: s.string(2)
+                )
+            }
+        )
     }
 
     /// One row in the "recent transcripts" overview — a recording collapsed to
@@ -408,7 +420,12 @@ actor RecordingStore {
     /// trailing time window. `hours <= 0` means no time limit (everything).
     /// Meetings surface their title, dictations a snippet of the spoken text —
     /// both taken without exploding into per-segment rows.
-    func recentActivity(within hours: Int = 24, limit: Int = 200) throws -> [ActivityItem] {
+    ///
+    /// `kind` filters in SQL rather than in the view. Filtering afterwards meant
+    /// meetings ate slots out of the same `LIMIT`, so "only dictations" was
+    /// quietly capped at however many of the last 200 rows happened to be
+    /// dictations.
+    func recentActivity(kind: Kind? = nil, within hours: Int = 24, limit: Int = 200) throws -> [ActivityItem] {
         let cutoff = hours <= 0
             ? 0
             : Date().timeIntervalSince1970 - Double(hours) * 3600
@@ -416,38 +433,32 @@ actor RecordingStore {
         let sql = """
         SELECT r.id, r.kind, r.started_at, r.ended_at, r.title, r.markdown_path,
                (SELECT s.text FROM segments s
-                WHERE s.recording_id = r.id
+                WHERE s.recording_id = r.id AND s.text != ''
                 ORDER BY s.start_seconds ASC LIMIT 1) AS snippet
         FROM recordings r
-        WHERE r.started_at >= ?1
+        WHERE r.started_at >= ?1 AND (?2 IS NULL OR r.kind = ?2)
         ORDER BY r.started_at DESC
-        LIMIT ?2
+        LIMIT ?3
         """
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, cutoff)
-        sqlite3_bind_int(statement, 2, Int32(limit))
-
-        var items: [ActivityItem] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let endedRaw = sqlite3_column_type(statement, 3) == SQLITE_NULL
-                ? nil
-                : Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
-            items.append(ActivityItem(
-                id: sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "",
-                kind: Kind(rawValue: sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? "") ?? .dictation,
-                startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
-                endedAt: endedRaw,
-                title: sqlite3_column_text(statement, 4).map { String(cString: $0) },
-                snippet: sqlite3_column_text(statement, 6).map { String(cString: $0) },
-                markdownPath: sqlite3_column_text(statement, 5).map { String(cString: $0) }
-            ))
-        }
-        return items
+        return try db().query(
+            sql,
+            bind: { s in
+                s.bind(1, cutoff)
+                s.bind(2, kind?.rawValue)
+                s.bind(3, limit)
+            },
+            row: { (s: SQLiteConnection.Statement) -> ActivityItem in
+                ActivityItem(
+                    id: s.text(0),
+                    kind: Kind(rawValue: s.text(1)) ?? .dictation,
+                    startedAt: s.date(2) ?? Date(timeIntervalSince1970: 0),
+                    endedAt: s.date(3),
+                    title: s.string(4),
+                    snippet: s.string(6),
+                    markdownPath: s.string(5)
+                )
+            }
+        )
     }
 
     struct SearchHit: Sendable, Identifiable {
@@ -461,47 +472,143 @@ actor RecordingStore {
         let snippet: String
     }
 
-    /// Case-insensitive substring search over all transcript segments,
-    /// newest first. (SQLite LIKE folds ASCII only — good enough for v1.)
+    /// Full-text search over transcript segments plus the note titles, newest
+    /// first.
+    ///
+    /// **Two statements, merged in Swift, and that is the point.** As one query
+    /// with `OR r.title LIKE …` over the `segments ⋈ recordings` join, a title
+    /// match produced one row *per segment*: a 300-segment meeting filled the
+    /// entire result list with identical entries whose snippets did not contain
+    /// the search term at all. A title matches a recording, so it yields one hit.
+    ///
+    /// The text half goes through FTS5 (`unicode61 remove_diacritics 2`) when the
+    /// index exists. The old `LIKE` folded ASCII only — "über" never found
+    /// "Über", while the snippet rendered for the same search *was* diacritic-
+    /// insensitive, so a hit could be displayed with a snippet that did not
+    /// contain what was searched for. Without FTS5 in this build of SQLite the
+    /// `LIKE` path stands in: worse, but never broken.
     func search(_ query: String, limit: Int = 30) throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
-        let escaped = trimmed
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "%", with: "\\%")
-            .replacingOccurrences(of: "_", with: "\\_")
+        let connection = try db()
 
+        var hits = connection.hasFullTextIndex
+            ? try fullTextHits(trimmed, limit: limit, on: connection)
+            : try likeHits(trimmed, limit: limit, on: connection)
+        hits += try titleHits(trimmed, limit: limit, on: connection)
+
+        var seen = Set<String>()
+        return hits
+            .filter { seen.insert($0.id).inserted }
+            .sorted { ($0.startedAt, $0.segmentRowID) > ($1.startedAt, $1.segmentRowID) }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// The FTS5 query string. Every token is quoted (so `%`, `-`, `"` and the
+    /// operator words are literal) and given a `*`, which is what makes typing
+    /// "budg" find "Budget" — a prefix search, not a substring one.
+    static func matchExpression(for query: String) -> String {
+        query
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"*" }
+            .joined(separator: " ")
+    }
+
+    private func fullTextHits(_ query: String, limit: Int, on connection: SQLiteConnection) throws -> [SearchHit] {
         let sql = """
         SELECT r.id, s.id, r.kind, r.title, r.started_at, r.markdown_path, s.text
-        FROM segments s JOIN recordings r ON r.id = s.recording_id
-        WHERE s.text LIKE '%' || ?1 || '%' ESCAPE '\\'
-           OR r.title LIKE '%' || ?1 || '%' ESCAPE '\\'
+        FROM segments_fts f
+        JOIN segments s ON s.id = f.rowid
+        JOIN recordings r ON r.id = s.recording_id
+        WHERE segments_fts MATCH ?1 AND s.text != ''
         ORDER BY r.started_at DESC, s.start_seconds ASC
         LIMIT ?2
         """
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
+        do {
+            return try connection.query(
+                sql,
+                bind: { s in
+                    s.bind(1, Self.matchExpression(for: query))
+                    s.bind(2, limit)
+                },
+                row: { (s: SQLiteConnection.Statement) -> SearchHit in Self.searchHit(s, query: query) }
+            )
+        } catch {
+            // A MATCH expression SQLite refuses is a bad *query*, not a broken
+            // database — fall back rather than show the user a SQLite error.
+            return try likeHits(query, limit: limit, on: connection)
         }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, escaped, -1, sqliteTransient)
-        sqlite3_bind_int(statement, 2, Int32(limit))
+    }
 
-        var hits: [SearchHit] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let text = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? ""
-            hits.append(SearchHit(
-                recordingID: sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "",
-                segmentRowID: sqlite3_column_int64(statement, 1),
-                kind: Kind(rawValue: sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "") ?? .dictation,
-                title: sqlite3_column_text(statement, 3).map { String(cString: $0) },
-                startedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
-                markdownPath: sqlite3_column_text(statement, 5).map { String(cString: $0) },
-                snippet: Self.snippet(around: trimmed, in: text)
-            ))
-        }
-        return hits
+    private func likeHits(_ query: String, limit: Int, on connection: SQLiteConnection) throws -> [SearchHit] {
+        let sql = """
+        SELECT r.id, s.id, r.kind, r.title, r.started_at, r.markdown_path, s.text
+        FROM segments s JOIN recordings r ON r.id = s.recording_id
+        WHERE s.text != '' AND s.text LIKE '%' || ?1 || '%' ESCAPE '\\'
+        ORDER BY r.started_at DESC, s.start_seconds ASC
+        LIMIT ?2
+        """
+        return try connection.query(
+            sql,
+            bind: { s in
+                s.bind(1, Self.escapedForLike(query))
+                s.bind(2, limit)
+            },
+            row: { (s: SQLiteConnection.Statement) -> SearchHit in Self.searchHit(s, query: query) }
+        )
+    }
+
+    /// One hit per recording whose title matches — `segmentRowID` 0, so it can
+    /// never collide with a text hit on the same recording.
+    private func titleHits(_ query: String, limit: Int, on connection: SQLiteConnection) throws -> [SearchHit] {
+        let sql = """
+        SELECT r.id, r.kind, r.title, r.started_at, r.markdown_path,
+               (SELECT s.text FROM segments s
+                WHERE s.recording_id = r.id AND s.text != ''
+                ORDER BY s.start_seconds ASC LIMIT 1)
+        FROM recordings r
+        WHERE r.title LIKE '%' || ?1 || '%' ESCAPE '\\'
+        ORDER BY r.started_at DESC
+        LIMIT ?2
+        """
+        return try connection.query(
+            sql,
+            bind: { s in
+                s.bind(1, Self.escapedForLike(query))
+                s.bind(2, limit)
+            },
+            row: { (s: SQLiteConnection.Statement) -> SearchHit in
+                SearchHit(
+                    recordingID: s.text(0),
+                    segmentRowID: 0,
+                    kind: Kind(rawValue: s.text(1)) ?? .dictation,
+                    title: s.string(2),
+                    startedAt: s.date(3) ?? Date(timeIntervalSince1970: 0),
+                    markdownPath: s.string(4),
+                    snippet: Self.snippet(around: query, in: s.text(5))
+                )
+            }
+        )
+    }
+
+    private static func searchHit(_ s: SQLiteConnection.Statement, query: String) -> SearchHit {
+        SearchHit(
+            recordingID: s.text(0),
+            segmentRowID: s.int64(1),
+            kind: Kind(rawValue: s.text(2)) ?? .dictation,
+            title: s.string(3),
+            startedAt: s.date(4) ?? Date(timeIntervalSince1970: 0),
+            markdownPath: s.string(5),
+            snippet: snippet(around: query, in: s.text(6))
+        )
+    }
+
+    private static func escapedForLike(_ query: String) -> String {
+        query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
     }
 
     /// ±60 characters around the first case-insensitive match.
@@ -523,38 +630,32 @@ actor RecordingStore {
     /// The stats layer (`UsageMetrics`) aggregates these into durations, saved
     /// time and per-period buckets — the store stays free of stats logic.
     func usageRows(from: Date, to: Date) throws -> [UsageRecord] {
-        let sql = """
-        SELECT kind, started_at, ended_at, word_count, engine, latency_ms, source_app, enhanced
-        FROM recordings
-        WHERE started_at >= ?1 AND started_at < ?2
-        ORDER BY started_at ASC
-        """
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
-        var rows: [UsageRecord] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let kind = Kind(rawValue: sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "") ?? .dictation
-            let started = Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
-            let ended = sqlite3_column_type(statement, 2) == SQLITE_NULL
-                ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
-            let wordCount = sqlite3_column_type(statement, 3) == SQLITE_NULL
-                ? nil : Int(sqlite3_column_int(statement, 3))
-            let engine = sqlite3_column_text(statement, 4).map { String(cString: $0) }
-            let latency = sqlite3_column_type(statement, 5) == SQLITE_NULL
-                ? nil : Int(sqlite3_column_int(statement, 5))
-            let sourceApp = sqlite3_column_text(statement, 6).map { String(cString: $0) }
-            let enhanced = sqlite3_column_int(statement, 7) == 1
-            rows.append(UsageRecord(
-                kind: kind, startedAt: started, endedAt: ended, wordCount: wordCount,
-                engine: engine, latencyMs: latency, sourceApp: sourceApp, enhanced: enhanced))
-        }
-        return rows
+        try db().query(
+            """
+            SELECT kind, started_at, ended_at, word_count, engine, latency_ms, source_app, enhanced
+            FROM recordings
+            WHERE started_at >= ?1 AND started_at < ?2
+            ORDER BY started_at ASC
+            """,
+            bind: { s in
+                s.bind(1, from)
+                s.bind(2, to)
+            },
+            // Explicit types: an inferred closure with eight optional-returning
+            // accessors takes the type checker past its own budget.
+            row: { (s: SQLiteConnection.Statement) -> UsageRecord in
+                UsageRecord(
+                    kind: Kind(rawValue: s.text(0)) ?? .dictation,
+                    startedAt: s.date(1) ?? Date(timeIntervalSince1970: 0),
+                    endedAt: s.date(2),
+                    wordCount: s.int(3),
+                    engine: s.string(4),
+                    latencyMs: s.int(5),
+                    sourceApp: s.string(6),
+                    enhanced: s.bool(7)
+                )
+            }
+        )
     }
 
     /// Appends one LLM round-trip's spend. Never overwrites: see ``LLMUsage``.
@@ -565,55 +666,50 @@ actor RecordingStore {
              cache_creation_tokens, cache_read_tokens, cost_usd, billed)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         """
-        try run(sql) { s in
-            bind(s, 1, usage.recordingID)
-            bind(s, 2, usage.provider)
-            bind(s, 3, usage.purpose)
-            sqlite3_bind_double(s, 4, usage.createdAt.timeIntervalSince1970)
-            sqlite3_bind_int(s, 5, Int32(clamping: usage.inputTokens))
-            sqlite3_bind_int(s, 6, Int32(clamping: usage.outputTokens))
-            sqlite3_bind_int(s, 7, Int32(clamping: usage.cacheCreationTokens))
-            sqlite3_bind_int(s, 8, Int32(clamping: usage.cacheReadTokens))
-            sqlite3_bind_double(s, 9, usage.costUSD)
-            sqlite3_bind_int(s, 10, usage.billed ? 1 : 0)
+        try db().run(sql) { s in
+            s.bind(1, usage.recordingID)
+            s.bind(2, usage.provider)
+            s.bind(3, usage.purpose)
+            s.bind(4, usage.createdAt)
+            s.bind(5, usage.inputTokens)
+            s.bind(6, usage.outputTokens)
+            s.bind(7, usage.cacheCreationTokens)
+            s.bind(8, usage.cacheReadTokens)
+            s.bind(9, usage.costUSD)
+            s.bind(10, usage.billed)
         }
     }
 
     /// Every LLM round-trip in the window, oldest first — the raw input the
     /// stats layer buckets. Same shape as ``usageRows``: no aggregation here.
     func llmUsageRows(from: Date, to: Date) throws -> [LLMUsage] {
-        let sql = """
-        SELECT recording_id, provider, purpose, created_at, input_tokens, output_tokens,
-               cache_creation_tokens, cache_read_tokens, cost_usd, billed
-        FROM llm_usage
-        WHERE created_at >= ?1 AND created_at < ?2
-        ORDER BY created_at ASC
-        """
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, from.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 2, to.timeIntervalSince1970)
-        var rows: [LLMUsage] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            func text(_ i: Int32) -> String? { sqlite3_column_text(statement, i).map { String(cString: $0) } }
-            rows.append(LLMUsage(
-                recordingID: text(0),
-                provider: text(1) ?? "",
-                purpose: text(2) ?? "",
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
-                inputTokens: Int(sqlite3_column_int(statement, 4)),
-                outputTokens: Int(sqlite3_column_int(statement, 5)),
-                cacheCreationTokens: Int(sqlite3_column_int(statement, 6)),
-                cacheReadTokens: Int(sqlite3_column_int(statement, 7)),
-                costUSD: sqlite3_column_double(statement, 8),
-                billed: sqlite3_column_int(statement, 9) != 0
-            ))
-        }
-        return rows
+        try db().query(
+            """
+            SELECT recording_id, provider, purpose, created_at, input_tokens, output_tokens,
+                   cache_creation_tokens, cache_read_tokens, cost_usd, billed
+            FROM llm_usage
+            WHERE created_at >= ?1 AND created_at < ?2
+            ORDER BY created_at ASC
+            """,
+            bind: { s in
+                s.bind(1, from)
+                s.bind(2, to)
+            },
+            row: { (s: SQLiteConnection.Statement) -> LLMUsage in
+                LLMUsage(
+                    recordingID: s.string(0),
+                    provider: s.text(1),
+                    purpose: s.text(2),
+                    createdAt: s.date(3) ?? Date(timeIntervalSince1970: 0),
+                    inputTokens: s.int(4) ?? 0,
+                    outputTokens: s.int(5) ?? 0,
+                    cacheCreationTokens: s.int(6) ?? 0,
+                    cacheReadTokens: s.int(7) ?? 0,
+                    costUSD: s.double(8) ?? 0,
+                    billed: s.bool(9)
+                )
+            }
+        )
     }
 
     /// One-time backfill of `word_count` for dictation rows written before the
@@ -621,38 +717,25 @@ actor RecordingStore {
     /// with a UserDefaults flag so it runs at most once. Meetings stay null —
     /// their word count is not a usage metric.
     func backfillWordCounts() throws {
-        let selectSQL = """
-        SELECT r.id, COALESCE(
-            (SELECT GROUP_CONCAT(s.text, ' ') FROM segments s WHERE s.recording_id = r.id), '')
-        FROM recordings r
-        WHERE r.word_count IS NULL AND r.kind = 'dictation'
-        """
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, selectSQL, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        var updates: [(id: String, count: Int)] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let id = sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? ""
-            let text = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? ""
-            updates.append((id, Self.wordCount(text)))
-        }
-        sqlite3_finalize(statement)
+        let connection = try db()
+        let updates = try connection.query(
+            """
+            SELECT r.id, COALESCE(
+                (SELECT GROUP_CONCAT(s.text, ' ') FROM segments s WHERE s.recording_id = r.id), '')
+            FROM recordings r
+            WHERE r.word_count IS NULL AND r.kind = 'dictation'
+            """,
+            row: { s in (id: s.text(0), count: Self.wordCount(s.text(1))) }
+        )
         guard !updates.isEmpty else { return }
 
-        try execute("BEGIN IMMEDIATE")
-        do {
+        try connection.transaction {
             for update in updates {
-                try run("UPDATE recordings SET word_count = ?1 WHERE id = ?2") { s in
-                    sqlite3_bind_int(s, 1, Int32(update.count))
-                    bind(s, 2, update.id)
+                try connection.run("UPDATE recordings SET word_count = ?1 WHERE id = ?2") { s in
+                    s.bind(1, update.count)
+                    s.bind(2, update.id)
                 }
             }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
         }
     }
 
@@ -661,234 +744,90 @@ actor RecordingStore {
     /// Chat turns for a meeting, oldest first. Stored as primitives — the chat
     /// layer maps role strings to its own type.
     func chatMessages(for recordingID: String) throws -> [(role: String, text: String, createdAt: Date)] {
-        let sql = "SELECT role, text, created_at FROM chat_messages WHERE recording_id = ?1 ORDER BY created_at ASC, id ASC"
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_text(statement, 1, recordingID, -1, sqliteTransient)
-        var rows: [(role: String, text: String, createdAt: Date)] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
-            rows.append((
-                role: sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "",
-                text: sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? "",
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
-            ))
-        }
-        return rows
+        try db().query(
+            """
+            SELECT role, text, created_at FROM chat_messages
+            WHERE recording_id = ?1 ORDER BY created_at ASC, id ASC
+            """,
+            bind: { $0.bind(1, recordingID) },
+            row: { s in
+                (
+                    role: s.text(0),
+                    text: s.text(1),
+                    createdAt: s.date(2) ?? Date(timeIntervalSince1970: 0)
+                )
+            }
+        )
     }
 
     func appendChatMessage(recordingID: String, role: String, text: String, createdAt: Date) throws {
-        try run("INSERT INTO chat_messages (recording_id, role, text, created_at) VALUES (?1, ?2, ?3, ?4)") { s in
-            bind(s, 1, recordingID)
-            bind(s, 2, role)
-            bind(s, 3, text)
-            sqlite3_bind_double(s, 4, createdAt.timeIntervalSince1970)
+        try db().run("INSERT INTO chat_messages (recording_id, role, text, created_at) VALUES (?1, ?2, ?3, ?4)") { s in
+            s.bind(1, recordingID)
+            s.bind(2, role)
+            s.bind(3, text)
+            s.bind(4, createdAt)
         }
     }
 
     func clearChat(for recordingID: String) throws {
-        try run("DELETE FROM chat_messages WHERE recording_id = ?1") { s in bind(s, 1, recordingID) }
+        try db().run("DELETE FROM chat_messages WHERE recording_id = ?1") { $0.bind(1, recordingID) }
     }
 
     // MARK: - Retention (issue #2)
 
-    /// Empties the text of segments belonging to recordings started before
-    /// `date` — and **only** the text.
+    /// Empties the text of recordings started before `date` — and **only** the
+    /// text.
     ///
     /// The `recordings` row stays, `word_count` stays, and therefore the
     /// statistics stay: `usageRows` reads nothing but `recordings`. Deleting a
     /// row would retroactively rewrite how much was ever dictated, which
     /// is a different and much worse thing than freeing disk space.
     /// `llm_usage` is never touched at all — it is the ledger.
+    ///
+    /// Both copies of the text go in one transaction: `recordings.raw_text`
+    /// holds the full rule-polished dictation of every *enhanced* run, so
+    /// emptying `segments.text` alone left the text sitting in another table —
+    /// where `recentDictations` handed it straight back out.
     @discardableResult
     func clearSegmentText(olderThan date: Date, kind: Kind) throws -> Int {
-        let sql = """
-        UPDATE segments SET text = ''
-        WHERE text != '' AND recording_id IN (
-            SELECT id FROM recordings WHERE kind = ?1 AND started_at < ?2
-        )
-        """
-        return try runCounting(sql) { s in
-            bind(s, 1, kind.rawValue)
-            sqlite3_bind_double(s, 2, date.timeIntervalSince1970)
+        let connection = try db()
+        return try connection.transaction {
+            let cleared = try connection.runCounting("""
+            UPDATE segments SET text = ''
+            WHERE text != '' AND recording_id IN (
+                SELECT id FROM recordings WHERE kind = ?1 AND started_at < ?2
+            )
+            """) { s in
+                s.bind(1, kind.rawValue)
+                s.bind(2, date)
+            }
+            try connection.run("""
+            UPDATE recordings SET raw_text = NULL
+            WHERE raw_text IS NOT NULL AND kind = ?1 AND started_at < ?2
+            """) { s in
+                s.bind(1, kind.rawValue)
+                s.bind(2, date)
+            }
+            return cleared
         }
     }
 
     @discardableResult
     func deleteChatMessages(olderThan date: Date) throws -> Int {
-        try runCounting("DELETE FROM chat_messages WHERE created_at < ?1") { s in
-            sqlite3_bind_double(s, 1, date.timeIntervalSince1970)
-        }
+        try db().runCounting("DELETE FROM chat_messages WHERE created_at < ?1") { $0.bind(1, date) }
     }
 
     /// Forgets every recorded target app. The counterpart to the "record app
     /// statistics" switch: turning it off stops new rows, this clears the old.
     @discardableResult
     func clearSourceApps() throws -> Int {
-        try runCounting("UPDATE recordings SET source_app = NULL WHERE source_app IS NOT NULL") { _ in }
+        try db().runCounting("UPDATE recordings SET source_app = NULL WHERE source_app IS NOT NULL")
     }
 
     /// Reclaims the pages a large delete freed. Only ever called from the manual
     /// "clean up now" path — it rewrites the whole file and has no business in
     /// the launch sequence.
     func vacuum() throws {
-        try execute("VACUUM")
-    }
-
-    private func runCounting(_ sql: String, bindings: (OpaquePointer?) -> Void) throws -> Int {
-        let handle = try ensureOpen()
-        try run(sql, bindings: bindings)
-        return Int(sqlite3_changes(handle))
-    }
-
-    // MARK: - Connection & schema
-
-    private func ensureOpen() throws -> OpaquePointer {
-        if let connection { return connection.handle }
-
-        try FileManager.default.createDirectory(
-            at: databaseURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-
-        var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
-        guard sqlite3_open_v2(databaseURL.path, &handle, flags, nil) == SQLITE_OK, let handle else {
-            let message = handle.map { lastMessage($0) } ?? "open failed"
-            sqlite3_close_v2(handle)
-            throw StoreError.sqlite(message)
-        }
-        connection = Connection(handle: handle)
-
-        try execute("PRAGMA journal_mode=WAL")
-        try execute("PRAGMA foreign_keys=ON")
-        try execute("""
-        CREATE TABLE IF NOT EXISTS recordings (
-            id TEXT PRIMARY KEY,
-            kind TEXT NOT NULL,
-            started_at REAL NOT NULL,
-            ended_at REAL,
-            title TEXT,
-            calendar_event_id TEXT,
-            markdown_path TEXT,
-            summary TEXT,
-            subtitle TEXT,
-            folder TEXT,
-            title_is_auto INTEGER NOT NULL DEFAULT 0,
-            user_notes TEXT,
-            word_count INTEGER
-        )
-        """)
-        try execute("""
-        CREATE TABLE IF NOT EXISTS segments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            recording_id TEXT NOT NULL REFERENCES recordings(id),
-            speaker TEXT,
-            start_seconds REAL NOT NULL,
-            end_seconds REAL,
-            text TEXT NOT NULL
-        )
-        """)
-        try execute("CREATE INDEX IF NOT EXISTS idx_segments_recording ON segments(recording_id)")
-        try execute("""
-        CREATE TABLE IF NOT EXISTS chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            recording_id TEXT NOT NULL REFERENCES recordings(id),
-            role TEXT NOT NULL,
-            text TEXT NOT NULL,
-            created_at REAL NOT NULL
-        )
-        """)
-        try execute("CREATE INDEX IF NOT EXISTS idx_chat_recording ON chat_messages(recording_id)")
-        // What each summarization round-trip spent. `recording_id` is a plain
-        // column, **not** a foreign key: the meeting flow summarizes before it
-        // inserts the recording (the summary and its auto-title have to land in
-        // the same row), so an FK with `foreign_keys=ON` would reject the write.
-        try execute("""
-        CREATE TABLE IF NOT EXISTS llm_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            recording_id TEXT,
-            provider TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            created_at REAL NOT NULL,
-            input_tokens INTEGER NOT NULL DEFAULT 0,
-            output_tokens INTEGER NOT NULL DEFAULT 0,
-            cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-            cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-            cost_usd REAL NOT NULL DEFAULT 0,
-            billed INTEGER NOT NULL DEFAULT 0
-        )
-        """)
-        try execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON llm_usage(created_at)")
-
-        // Migrate DBs created before these columns existed. ADD COLUMN is a
-        // cheap metadata-only op in SQLite; each is skipped if already present.
-        migrateAddColumn(handle, table: "recordings", column: "summary", type: "TEXT")
-        migrateAddColumn(handle, table: "recordings", column: "subtitle", type: "TEXT")
-        migrateAddColumn(handle, table: "recordings", column: "folder", type: "TEXT")
-        migrateAddColumn(handle, table: "recordings", column: "title_is_auto", type: "INTEGER NOT NULL DEFAULT 0")
-        migrateAddColumn(handle, table: "recordings", column: "user_notes", type: "TEXT")
-        migrateAddColumn(handle, table: "recordings", column: "word_count", type: "INTEGER")
-        // Issue #5. All nullable and never backfilled: six weeks of existing rows
-        // never had these values, and a guessed engine or latency would be a
-        // fabricated measurement sitting in a statistics window.
-        migrateAddColumn(handle, table: "recordings", column: "engine", type: "TEXT")
-        migrateAddColumn(handle, table: "recordings", column: "latency_ms", type: "INTEGER")
-        migrateAddColumn(handle, table: "recordings", column: "source_app", type: "TEXT")
-        migrateAddColumn(handle, table: "recordings", column: "enhanced", type: "INTEGER")
-        // The pre-enhancement text, so what the model changed stays visible.
-        // Only set when an enhancement actually replaced something.
-        migrateAddColumn(handle, table: "recordings", column: "raw_text", type: "TEXT")
-        return handle
-    }
-
-    /// Idempotent ADD COLUMN: swallows the "duplicate column name" error so the
-    /// migration is safe to run on every open. Any other failure is surfaced by
-    /// the next real query rather than crashing startup.
-    private func migrateAddColumn(_ handle: OpaquePointer, table: String, column: String, type: String) {
-        _ = sqlite3_exec(handle, "ALTER TABLE \(table) ADD COLUMN \(column) \(type)", nil, nil, nil)
-    }
-
-    private func execute(_ sql: String) throws {
-        let handle = try ensureOpen()
-        guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-    }
-
-    private func run(_ sql: String, bindings: (OpaquePointer?) -> Void) throws {
-        let handle = try ensureOpen()
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-        defer { sqlite3_finalize(statement) }
-        bindings(statement)
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw StoreError.sqlite(lastMessage(handle))
-        }
-    }
-
-    private func bind(_ statement: OpaquePointer?, _ index: Int32, _ value: String?) {
-        if let value {
-            sqlite3_bind_text(statement, index, value, -1, sqliteTransient)
-        } else {
-            sqlite3_bind_null(statement, index)
-        }
-    }
-
-    private func bind(_ statement: OpaquePointer?, _ index: Int32, _ value: Double?) {
-        if let value {
-            sqlite3_bind_double(statement, index, value)
-        } else {
-            sqlite3_bind_null(statement, index)
-        }
-    }
-
-    private func lastMessage(_ handle: OpaquePointer) -> String {
-        String(cString: sqlite3_errmsg(handle))
+        try db().execute("VACUUM")
     }
 }

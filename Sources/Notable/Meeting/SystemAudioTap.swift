@@ -15,9 +15,9 @@ final class SystemAudioTap: @unchecked Sendable {
         var errorDescription: String? {
             switch self {
             case .osStatus(let call, let status):
-                "System-Audio-Tap: \(call) fehlgeschlagen (OSStatus \(status)). Fehlt die Berechtigung „Systemaudio-Aufnahme“?"
+                String(localized: "System-Audio-Tap: \(call) fehlgeschlagen (OSStatus \(status)). Fehlt die Berechtigung „Systemaudio-Aufnahme“?")
             case .noTapFormat:
-                "System-Audio-Tap: Format nicht lesbar."
+                String(localized: "System-Audio-Tap: Format nicht lesbar.")
             }
         }
     }
@@ -42,6 +42,22 @@ final class SystemAudioTap: @unchecked Sendable {
 
     private static let rebuildAttempts = 3
     private static let rebuildRetryDelay = DispatchTimeInterval.milliseconds(300)
+
+    /// Writes silence for the wall-clock time the system track missed.
+    func padGapToWallClock() { downsampler.padGapToWallClock() }
+
+    /// Rebuilds the capture chain and pads the hole, for a cause the
+    /// device-property listener does not see.
+    ///
+    /// Waking from sleep is exactly that case: the mic engine usually posts a
+    /// configuration change and gets padded, while the tap is handed no
+    /// default-output-device change at all — so the system track came back
+    /// short by the whole sleep and every later segment was stamped early.
+    func rebuildAfterInterruption() {
+        guard isCapturing, !rebuildInFlight else { return }
+        teardown()
+        attemptRebuild(remaining: Self.rebuildAttempts)
+    }
 
     func start(spoolingTo spoolURL: URL? = nil) throws {
         try downsampler.reset(spoolingTo: spoolURL)
@@ -111,15 +127,17 @@ final class SystemAudioTap: @unchecked Sendable {
         self.aggregateID = aggregateID
 
         // 4. IO proc: input buffers are the tapped system audio.
+        //
+        // This block runs on CoreAudio's real-time thread with a deadline of
+        // one buffer period. It must do nothing but hand the bytes over —
+        // `appendFromIOProc` copies them into a slot allocated below and
+        // returns. Conversion, metering and the spool write happen on the
+        // consumer thread that `beginRealtimeCapture` starts.
+        downsampler.beginRealtimeCapture(format: format)
         var ioProcID: AudioDeviceIOProcID?
         status = AudioDeviceCreateIOProcIDWithBlock(&ioProcID, aggregateID, nil) {
-            [downsampler, format] _, inInputData, _, _, _ in
-            guard let buffer = AVAudioPCMBuffer(
-                pcmFormat: format,
-                bufferListNoCopy: inInputData,
-                deallocator: nil
-            ) else { return }
-            downsampler.append(buffer)
+            [downsampler] _, inInputData, _, _, _ in
+            downsampler.appendFromIOProc(inInputData)
         }
         guard status == noErr, let ioProcID else {
             teardown()
@@ -134,12 +152,25 @@ final class SystemAudioTap: @unchecked Sendable {
         }
     }
 
+    /// How many buffers the IO proc had to drop because the hand-off ring was
+    /// full, or because their layout did not match the format the slots were
+    /// allocated for.
+    ///
+    /// A drop shortens the system track against the wall clock, which is the
+    /// mechanism behind every mis-attributed speaker in a long meeting — so it
+    /// is counted and reported rather than being a bare `return` in the IO proc.
+    var droppedBuffers: Int { downsampler.droppedBuffers }
+
     /// Stops capture, tears down tap + aggregate device, returns the samples.
     func stop() -> [Float] {
         isCapturing = false // entwertet Listener-Events und laufende Retries
         rebuildInFlight = false
         removeDeviceListener()
         teardown()
+        // Pad before draining, so the track ends at the wall clock rather than
+        // wherever the last buffer happened to land. The mic track does the
+        // same, which is what keeps the two the same length.
+        downsampler.padGapToWallClock()
         return downsampler.drain()
     }
 
@@ -147,19 +178,33 @@ final class SystemAudioTap: @unchecked Sendable {
     /// device changes mid-meeting (AirPods connect …), buffers would be
     /// misinterpreted — rebuild the capture chain against the new device.
     private func installDeviceListener() {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self, self.isCapturing, !self.rebuildInFlight else { return }
             self.teardown()
             self.attemptRebuild(remaining: Self.rebuildAttempts)
         }
         deviceListener = listener
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &address, .main, listener
+        )
+
+        // The *same* device changing its sample rate needs the same rebuild:
+        // the tap's stream format was fixed when it was created, so from that
+        // moment every buffer would be read at the wrong rate — and no
+        // default-output-device change is posted for it.
+        var rateAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &rateAddress, .main, listener
         )
     }
 
@@ -203,6 +248,14 @@ final class SystemAudioTap: @unchecked Sendable {
         )
         AudioObjectRemovePropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &address, .main, deviceListener
+        )
+        var rateAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &rateAddress, .main, deviceListener
         )
         self.deviceListener = nil
     }

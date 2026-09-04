@@ -34,6 +34,13 @@ final class AudioRecorder: @unchecked Sendable {
     /// Copy of everything captured so far, without stopping the engine.
     func snapshot() -> [Float] { downsampler.snapshot() }
 
+    /// Writes silence for the wall-clock time this track missed.
+    ///
+    /// Exposed because sleep/wake is not a route change: the engine may come
+    /// back without posting a configuration change, and the hole is then only
+    /// visible from the outside.
+    func padGapToWallClock() { downsampler.padGapToWallClock() }
+
     func start(spoolingTo spoolURL: URL? = nil, voiceProcessing: Bool = false) throws {
         try downsampler.reset(spoolingTo: spoolURL)
         self.voiceProcessing = voiceProcessing

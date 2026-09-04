@@ -1,10 +1,13 @@
 import AppKit
 import Foundation
+import os
 
 /// Owns the dictation state machine:
 /// idle → (hotkey down) recording → (hotkey up) transcribing → pasting → idle.
 @MainActor
 final class DictationController: ObservableObject {
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "dictation")
+
     enum ModelState: Equatable {
         case loading
         case ready
@@ -45,7 +48,10 @@ final class DictationController: ObservableObject {
     private let appState: AppState
     private let hotkey = HotkeyMonitor()
     private let recorder = AudioRecorder()
-    private let overlay = DictationOverlayController()
+    /// Not private: the menu and the notification action need somewhere to show
+    /// a paste failure, and the HUD is the one surface that is visible while
+    /// another app is frontmost.
+    let overlay = DictationOverlayController()
     /// Pauses playback / mutes output for the duration of a dictation. Both
     /// switches default to off — this reaches outside Notable.
     private let media = MediaInterrupter()
@@ -134,7 +140,7 @@ final class DictationController: ObservableObject {
             setupError = nil
         } else {
             // Listen-only taps need Input Monitoring; the usual cause of failure.
-            setupError = "Hotkey inaktiv: Eingabeüberwachung fehlt (Einstellungen → Berechtigungen)."
+            setupError = String(localized: "Hotkey inaktiv: Eingabeüberwachung fehlt (Einstellungen → Berechtigungen).")
         }
 
         loadModel()
@@ -158,14 +164,14 @@ final class DictationController: ObservableObject {
         if hotkey.start() {
             setupError = nil
         } else {
-            setupError = "Hotkey inaktiv: Eingabeüberwachung fehlt (Einstellungen → Berechtigungen)."
+            setupError = String(localized: "Hotkey inaktiv: Eingabeüberwachung fehlt (Einstellungen → Berechtigungen).")
         }
     }
 
     /// Applies a changed ASR-engine setting: unload nothing eagerly, just
     /// load the newly selected engine and route future recordings to it.
     func engineChanged() {
-        discardActiveRecording(reason: "ASR-Engine gewechselt — laufendes Diktat verworfen.")
+        discardActiveRecording(reason: String(localized: "ASR-Engine gewechselt — laufendes Diktat verworfen."))
         // A swap that was waiting for the *old* selection is meaningless now.
         pendingSwap = false
         loadModel()
@@ -191,7 +197,7 @@ final class DictationController: ObservableObject {
                     pendingSwap = true
                     return
                 }
-                overlay.flashNotice("\(selected.shortLabel) aktiv — volle Qualität.")
+                overlay.flashNotice(String(localized: "\(selected.shortLabel) aktiv — volle Qualität."))
             }
             activeEngine = selected
             isUsingBootstrap = false
@@ -236,7 +242,14 @@ final class DictationController: ObservableObject {
     }
 
     /// Retries a failed load without waiting for the next dictation.
+    ///
+    /// Only the *selected* engine can be reloaded — `loadSelectedModel` reads
+    /// `ASREngineID.current` — so a retry for any other slot would have cleared
+    /// that slot and then loaded nothing, leaving the user with a spinner that
+    /// never resolves. It was harmless only because the one caller always passes
+    /// the selected engine; saying so out loud is cheaper than relying on it.
     func retryLoad(_ engine: ASREngineID) {
+        guard engine == ASREngineID.current else { return }
         switch engine {
         case .parakeetV3: engineTask = nil
         case .unifiedEnglish: streamTask = nil
@@ -381,7 +394,7 @@ final class DictationController: ObservableObject {
     /// the next load picks up the new size, and reload eagerly if Whisper is
     /// the active engine.
     func whisperModelChanged() {
-        discardActiveRecording(reason: "Whisper-Modell gewechselt — laufendes Diktat verworfen.")
+        discardActiveRecording(reason: String(localized: "Whisper-Modell gewechselt — laufendes Diktat verworfen."))
         whisperTask = nil
         whisperState = .loading
         if ASREngineID.current == .whisper {
@@ -400,7 +413,7 @@ final class DictationController: ObservableObject {
             try recorder.start()
         } catch {
             ptt.reset()
-            overlay.flashError("Mikrofon nicht verfügbar: \(error.localizedDescription)")
+            overlay.flashError(String(localized: "Mikrofon nicht verfügbar: \(error.localizedDescription)"))
             return
         }
         recordingGeneration += 1
@@ -410,7 +423,11 @@ final class DictationController: ObservableObject {
         media.begin()
         recordingStartedAt = Date()
         appState.captureState = .recording
-        hotkey.beginEscInterception()
+        // The overlay's "Esc verwirft" is only true if the tap came up; without
+        // Accessibility it does not, and promising a way out that does not exist
+        // is worse than not offering one.
+        let escAvailable = hotkey.beginEscInterception()
+        overlay.setEscapeAvailable(escAvailable)
         overlay.show(.recording)
         playCue("Tink")
 
@@ -428,7 +445,7 @@ final class DictationController: ObservableObject {
                 if self.ptt.isLocked, self.idleTimeoutSeconds > 0 {
                     if self.recorder.level < 0.04 { self.silentTicks += 1 } else { self.silentTicks = 0 }
                     if self.silentTicks >= Int(self.idleTimeoutSeconds * 10) {
-                        self.autoStopNotice = "Diktat nach \(Int(self.idleTimeoutSeconds)) s Stille beendet."
+                        self.autoStopNotice = String(localized: "Diktat nach \(Int(self.idleTimeoutSeconds)) s Stille beendet.")
                         self.finishRecording()
                         return
                     }
@@ -440,7 +457,7 @@ final class DictationController: ObservableObject {
                 if self.timerTicks >= Self.maximumRecordingTicks {
                     // Shown once the transcript is in — the transcribing
                     // overlay would otherwise swallow the notice immediately.
-                    self.autoStopNotice = "Diktat nach \(Int(Self.maximumRecordingSeconds / 60)) Minuten automatisch beendet."
+                    self.autoStopNotice = String(localized: "Diktat nach \(Int(Self.maximumRecordingSeconds / 60)) Minuten automatisch beendet.")
                     self.finishRecording()
                     return
                 }
@@ -454,7 +471,26 @@ final class DictationController: ObservableObject {
         levelTimer = timer
     }
 
+    /// The transcribe → polish → enhance → paste → save task of the recording
+    /// that was just released. Held so Esc can still reach it.
+    private var postProcessingTask: Task<Void, Never>?
+
     private func cancelRecording() {
+        // Esc during transcription or enhancement: there is no recording left to
+        // stop, but there is a task to abort — and during `.enhancing` that task
+        // is waiting on a CLI round-trip of up to a minute. Cancelling it also
+        // terminates that process (`CLIProcessRunner` handles cancellation), so
+        // Esc means the same thing in both phases: nothing is pasted.
+        if appState.captureState == .transcribing {
+            recordingGeneration += 1
+            postProcessingTask?.cancel()
+            postProcessingTask = nil
+            hotkey.endEscInterception()
+            appState.captureState = .idle
+            applyPendingSwap()
+            overlay.hide()
+            return
+        }
         guard appState.captureState == .recording else { return }
         recordingGeneration += 1
         ptt.reset()
@@ -465,7 +501,18 @@ final class DictationController: ObservableObject {
         // Cancelling counts as ending: the volume comes back either way.
         media.end()
         appState.captureState = .idle
+        applyPendingSwap()
         overlay.hide()
+    }
+
+    /// Performs a swap that came due while a recording was in flight.
+    ///
+    /// Called from every path that returns to `.idle` — the finished dictation,
+    /// the too-short clip, and the cancel. `updateActiveEngine` is idempotent
+    /// and clears the flag itself; a no-op here is the normal case.
+    private func applyPendingSwap() {
+        guard pendingSwap else { return }
+        updateActiveEngine()
     }
 
     private func stopLevelTimer() {
@@ -493,7 +540,9 @@ final class DictationController: ObservableObject {
         let appStatisticsEnabled = UserDefaults.standard.object(forKey: "appStatistics") == nil
             ? true
             : UserDefaults.standard.bool(forKey: "appStatistics")
-        hotkey.endEscInterception()
+        // NOT `endEscInterception()` here: the tap stays until the task below
+        // is done, so Esc can still abort a long enhancement. Every exit path
+        // ends it — the short-clip return, the task's `defer`, and `cancel`.
         stopLevelTimer()
         let samples = recorder.stop()
         // Restored as soon as the microphone is closed — not after the paste.
@@ -505,7 +554,9 @@ final class DictationController: ObservableObject {
         recordingGeneration += 1
         let duration = Double(samples.count) / Double(sampleRate)
         guard duration >= minimumDuration else {
+            hotkey.endEscInterception()
             appState.captureState = .idle
+            applyPendingSwap()
             overlay.hide()
             return
         }
@@ -532,22 +583,52 @@ final class DictationController: ObservableObject {
         // dictation that a later key-down never asked for.
         let wantsEnhancement = enhanceRequested
         enhanceRequested = false
+        // Read back after every await below. A cancel, a hotkey change or an
+        // engine change bumps it, and the paste for a recording nobody is
+        // waiting for any more must not land in whatever field is focused now.
+        let generation = recordingGeneration
 
-        Task {
+        postProcessingTask = Task {
             defer {
+                hotkey.endEscInterception()
                 appState.captureState = .idle
+                // Only here, and only after `.idle`: `updateActiveEngine`
+                // refuses to swap while a capture is in flight, so asking
+                // inside the body — where the state is still `.transcribing` —
+                // merely set `pendingSwap` again, and no later path asked. A
+                // model that finished downloading mid-recording then stayed
+                // unused until the next engine change or restart.
+                applyPendingSwap()
             }
             do {
-                let text = try await rawTranscript(samples: samples, sampleRate: sampleRate)
+                let (text, engineUsed) = try await rawTranscript(samples: samples, sampleRate: sampleRate)
                 let category: AppCategory = appContextEnabled
                     ? AppCategory.of(bundleID: targetBundleID)
                     : .unknown
-                let polished = TextPolisher.polish(text, options: PolishProfile.options(for: category))
+                // Off the main actor: `polish` is pure, and it sits in the gap
+                // between the key release and the paste — language detection, a
+                // dozen regex passes, the dictionary and the paragraph rebuild.
+                // Milliseconds, but they are main-thread milliseconds in the one
+                // window where the user is waiting for text to appear.
+                let options = PolishProfile.options(for: category)
+                let polished = await Task.detached(priority: .userInitiated) {
+                    TextPolisher.polish(text, options: options)
+                }.value
                 let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
                     overlay.hide()
                     return
                 }
+                guard generation == recordingGeneration, !Task.isCancelled else { return }
+
+                // Stopped **here**, before the enhancement branch: this is how
+                // long transcription took. Measured after the paste it also
+                // contained the CLI round-trip of an enhanced dictation, and
+                // those seconds went into `latency_ms` and skewed the engine's
+                // own p50/p95 in the statistics window.
+                let elapsed = releasedAt.duration(to: .now)
+                lastLatencyMillis = Int(Double(elapsed.components.seconds) * 1000
+                    + Double(elapsed.components.attoseconds) / 1e15)
 
                 // The only place dictation text may leave the device, and it
                 // happens solely because *this* recording was started with the
@@ -580,6 +661,7 @@ final class DictationController: ObservableObject {
                     enhancementNotice = result.failure
                 }
 
+                guard generation == recordingGeneration, !Task.isCancelled else { return }
                 overlay.hide()
                 do {
                     try Paster.insert(toPaste)
@@ -587,7 +669,10 @@ final class DictationController: ObservableObject {
                     if let enhancementNotice {
                         overlay.flashError(enhancementNotice)
                     } else if let autoStopNotice {
-                        overlay.flashError(autoStopNotice)
+                        // A notice, not an error: the dictation ended exactly as
+                        // configured. A warning triangle for a working feature
+                        // teaches the user to distrust the triangle.
+                        overlay.flashNotice(autoStopNotice)
                         self.autoStopNotice = nil
                     }
                 } catch {
@@ -596,68 +681,81 @@ final class DictationController: ObservableObject {
                     // pasteboard now — say so, loudly.
                     overlay.flashError(error.localizedDescription)
                 }
-                let elapsed = releasedAt.duration(to: .now)
-                lastLatencyMillis = Int(Double(elapsed.components.seconds) * 1000
-                    + Double(elapsed.components.attoseconds) / 1e15)
                 lastAudioSeconds = duration
                 lastDictationAt = Date()
-                try? await RecordingStore.shared.saveDictation(
-                    text: toPaste,
-                    startedAt: self.recordingStartedAt,
-                    duration: duration,
-                    engine: ASREngineID.current.statisticsName,
-                    latencyMs: lastLatencyMillis,
-                    // Stays in SQLite. It is already part of this path (that is
-                    // how `AppCategory` picks a profile); issue #5 only persists
-                    // it, and it never goes into a prompt or off the machine.
-                    sourceApp: appStatisticsEnabled ? targetBundleID : nil,
-                    enhanced: rawText != nil,
-                    // Only set when the model actually changed something —
-                    // otherwise there is nothing to compare against.
-                    rawText: rawText
-                )
+                do {
+                    try await RecordingStore.shared.saveDictation(
+                        text: toPaste,
+                        startedAt: self.recordingStartedAt,
+                        duration: duration,
+                        engine: engineUsed,
+                        latencyMs: lastLatencyMillis,
+                        // Stays in SQLite. It is already part of this path (that
+                        // is how `AppCategory` picks a profile); issue #5 only
+                        // persists it, and it never goes into a prompt or off
+                        // the machine.
+                        sourceApp: appStatisticsEnabled ? targetBundleID : nil,
+                        enhanced: rawText != nil,
+                        // Only set when the model actually changed something —
+                        // otherwise there is nothing to compare against.
+                        rawText: rawText
+                    )
+                } catch {
+                    // The text is pasted either way — but history and statistics
+                    // would silently be missing this dictation, and "silently"
+                    // is the part that had to go.
+                    Self.log.error("Diktat nicht gespeichert: \(error.localizedDescription, privacy: .public)")
+                    overlay.flashError(String(localized: "Diktat nicht gespeichert — Text ist eingefügt."))
+                }
                 // Keep the native menu's "letztes/letzte Diktate" and the
                 // statistics line current — a `.menu` MenuBarExtra is built from
                 // NSMenuItems and cannot refresh itself on open (no onAppear).
                 await AppContainer.shared.dictationHistory.refresh()
                 await AppContainer.shared.usage.refresh()
-                // A swap that came due mid-recording happens here — after the
-                // text has landed, never between the audio and its transcript.
-                if pendingSwap { updateActiveEngine() }
             } catch {
                 // flashError hides itself after 3 s — no defer-hide racing it.
-                overlay.flashError("Transkription fehlgeschlagen: \(error.localizedDescription)")
+                overlay.flashError(String(localized: "Transkription fehlgeschlagen: \(error.localizedDescription)"))
             }
         }
     }
 
     /// Whole-clip transcription of the finished recording — one pass, no
     /// incremental session or streaming state — robust over clever.
-    private func rawTranscript(samples: [Float], sampleRate: Int) async throws -> String {
+    ///
+    /// Returns the statistics name of the engine that actually produced the
+    /// text, not the one that is selected. On a cold cache those differ, and
+    /// booking a stand-in run under the chosen engine put Tiny's latency into
+    /// v3's p50/p95 and its word count into v3's share of the engine card.
+    private func rawTranscript(
+        samples: [Float],
+        sampleRate: Int
+    ) async throws -> (text: String, engine: String) {
         // The stand-in, while it is the one carrying dictation. Its own slot, so
         // it can never be confused with a user-chosen Whisper of another size.
         if isUsingBootstrap, let bootstrapTask {
-            return try await bootstrapTask.value.transcribe(samples: samples, sampleRate: sampleRate)
+            let text = try await bootstrapTask.value.transcribe(samples: samples, sampleRate: sampleRate)
+            return (text, BootstrapPolicy.bootstrapStatisticsName)
         }
+        let name = activeEngine.statisticsName
         switch activeEngine {
         case .whisper:
             guard let whisperTask else {
-                throw SummarizationError.notConfigured("Kein ASR-Modell verfügbar.")
+                throw SummarizationError.notConfigured(String(localized: "Kein ASR-Modell verfügbar."))
             }
-            return try await whisperTask.value.transcribe(samples: samples, sampleRate: sampleRate)
+            return (try await whisperTask.value.transcribe(samples: samples, sampleRate: sampleRate), name)
         case .unifiedEnglish:
             guard let streamTask else {
-                throw SummarizationError.notConfigured("Kein ASR-Modell verfügbar.")
+                throw SummarizationError.notConfigured(String(localized: "Kein ASR-Modell verfügbar."))
             }
             let engine = try await streamTask.value
             try await engine.beginUtterance()
             try await engine.feed(samples)
-            return try await engine.finish()
+            return (try await engine.finish(), name)
         case .parakeetV3:
             guard let engineTask else {
-                throw SummarizationError.notConfigured("Kein ASR-Modell verfügbar.")
+                throw SummarizationError.notConfigured(String(localized: "Kein ASR-Modell verfügbar."))
             }
-            return try await engineTask.value.transcribe(samples: samples, sampleRate: sampleRate)
+            return (try await engineTask.value.transcribe(samples: samples, sampleRate: sampleRate), name)
         }
     }
 }

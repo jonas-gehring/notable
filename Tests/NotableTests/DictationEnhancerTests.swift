@@ -22,6 +22,66 @@ final class DictationEnhancerTests: XCTestCase {
         XCTAssertNotEqual(DictationEnhancer.forDictation().provider.id, AnthropicAPIProvider().id)
     }
 
+    // MARK: - Profiles
+
+    /// Saving a custom profile used to append `commonRules` to the stored
+    /// prompt, which then showed up in the editor and was appended again on the
+    /// next save. Five edits meant five copies of the rules in the prompt.
+    func testEditingACustomProfileRepeatedlyDoesNotGrowThePrompt() {
+        let store = UserDefaults(suiteName: "Enhance.\(UUID().uuidString)")!
+        let written = "Du schreibst im Protokollstil."
+        var profile = EnhancementProfile(id: "p1", title: "Protokoll", systemPrompt: written, isCustom: true)
+
+        for _ in 0..<5 {
+            EnhancementProfile.saveCustom([profile], store: store)
+            profile = EnhancementProfile.custom(store: store)[0]
+        }
+
+        XCTAssertEqual(profile.systemPrompt, written, "Der Editor zeigt nur, was der Nutzer geschrieben hat")
+        XCTAssertFalse(profile.systemPrompt.contains(EnhancementProfile.commonRules))
+    }
+
+    /// The rules still reach the model — appended at use time, exactly once.
+    func testCustomProfileStillCarriesTheCommonRulesAtUseTime() {
+        let profile = EnhancementProfile(id: "p1", title: "T", systemPrompt: "Kurz fassen.", isCustom: true)
+        let resolved = profile.resolvedSystemPrompt
+        XCTAssertTrue(resolved.hasPrefix("Kurz fassen."))
+        XCTAssertTrue(resolved.contains(EnhancementProfile.commonRules))
+        XCTAssertEqual(
+            resolved.components(separatedBy: EnhancementProfile.commonRules).count - 1, 1,
+            "genau eine Kopie der Regeln"
+        )
+    }
+
+    /// The built-ins bake the rules into their literal — appending again would
+    /// duplicate them there instead.
+    func testBuiltInProfilesCarryTheRulesExactlyOnce() {
+        for profile in EnhancementProfile.builtIn {
+            XCTAssertEqual(
+                profile.resolvedSystemPrompt.components(separatedBy: EnhancementProfile.commonRules).count - 1, 1,
+                profile.id
+            )
+        }
+    }
+
+    /// Profiles written by earlier builds carry one copy per past edit; loading
+    /// them heals the prompt rather than leaving the user to clean it up.
+    func testStoredProfilesFromEarlierBuildsAreCleanedOnLoad() {
+        let store = UserDefaults(suiteName: "Enhance.\(UUID().uuidString)")!
+        let polluted = EnhancementProfile(
+            id: "p1",
+            title: "Alt",
+            systemPrompt: "Kurz fassen." + EnhancementProfile.commonRules + EnhancementProfile.commonRules,
+            isCustom: true
+        )
+        let data = try! JSONEncoder().encode([polluted])
+        store.set(data, forKey: EnhancementProfile.defaultsKey)
+
+        let loaded = EnhancementProfile.custom(store: store)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].systemPrompt, "Kurz fassen.")
+    }
+
     /// Off means off at the key level: no hotkey is installed at all, so the
     /// feature cannot fire by accident.
     func testNoHotkeyWhileTheFeatureIsOff() {
@@ -137,6 +197,53 @@ final class DictationEnhancerTests: XCTestCase {
         XCTAssertEqual(result.text, input)
         XCTAssertNotNil(result.failure)
         XCTAssertNotNil(result.usage, "verworfen heißt nicht ungebucht — der Text war trotzdem draußen")
+    }
+
+    /// The meta-prefix rule may not eat ordinary dictated openings.
+    ///
+    /// "Hier ist der Bericht, den du wolltest" is a sentence someone dictates;
+    /// it used to be discarded — after the text had already been sent to a CLI —
+    /// with a bare "Verbesserung verworfen" and no way to see why.
+    func testOrdinaryOpeningsAreNotMistakenForCommentary() {
+        for text in [
+            "Hier ist der Bericht, den du wolltest.",
+            "Gerne schicke ich dir die Unterlagen morgen.",
+            "Natürlich, das können wir so machen.",
+            "Certainly worth another look at the numbers.",
+        ] {
+            XCTAssertEqual(
+                EnhancementGuard.accept(text, forInput: text),
+                text,
+                "Als Kommentar verworfen, obwohl es ein Diktat ist: \(text)"
+            )
+        }
+    }
+
+    /// …while an actual announcement still is one.
+    func testAnnouncementWithAColonIsStillRejected() {
+        let input = "Das ist ein diktierter Satz."
+        XCTAssertNil(EnhancementGuard.accept("Hier ist der überarbeitete Text: \(input)", forInput: input))
+        XCTAssertNil(EnhancementGuard.accept("Sure, here's the improved text:\n\n\(input)", forInput: input))
+    }
+
+    /// The common rules are appended at use time, so a round-trip through the
+    /// editor cannot accumulate copies of them.
+    func testCustomProfilePromptDoesNotGrowOnEverySave() {
+        let suite = "EnhancerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        var profile = EnhancementProfile(
+            id: UUID().uuidString, title: "Protokoll", systemPrompt: "Mach ein Protokoll.", isCustom: true
+        )
+        for _ in 0..<3 {
+            EnhancementProfile.saveCustom([profile], store: defaults)
+            profile = EnhancementProfile.custom(store: defaults)[0]
+        }
+        XCTAssertEqual(profile.systemPrompt, "Mach ein Protokoll.")
+        XCTAssertEqual(
+            profile.resolvedSystemPrompt.components(separatedBy: EnhancementProfile.commonRules).count - 1,
+            1,
+            "Die Grundregeln dürfen genau einmal im Prompt stehen"
+        )
     }
 
     func testTimeoutFallsBackToTheOriginal() async {

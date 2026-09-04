@@ -68,6 +68,24 @@ struct TextPolisher: Sendable {
     /// "um" and "er" are ordinary German words — these apply to English text only.
     static let englishFillers = ["uhm", "um", "uh", "erm", "er"]
 
+    /// The filler patterns, compiled once.
+    ///
+    /// `replacingOccurrences(options: .regularExpression)` compiles its pattern
+    /// on every call, and this ran eleven of them per dictation — on the main
+    /// thread, in the gap between the key release and the paste. The lists are
+    /// constants, so the regexes can be too.
+    private static let fillerPatterns: [String: NSRegularExpression] = {
+        var patterns: [String: NSRegularExpression] = [:]
+        for filler in universalFillers + englishFillers {
+            let escaped = NSRegularExpression.escapedPattern(for: filler)
+            if let regex = try? NSRegularExpression(pattern: "(^|\\s)\(escaped),?(?=[\\s.!?;:]|$)",
+                                                   options: [.caseInsensitive, .useUnicodeWordBoundaries]) {
+                patterns[filler] = regex
+            }
+        }
+        return patterns
+    }()
+
     static func polish(_ text: String, options: Options = Options()) -> String {
         var result = text
         let english = isEnglish(result, languages: options.spokenLanguages)
@@ -145,12 +163,24 @@ struct TextPolisher: Sendable {
         return recognizer.dominantLanguage == .english
     }
 
+    /// Removes a filler word and the comma that belongs to it — never the
+    /// sentence-final punctuation behind it.
+    ///
+    /// The pattern used to swallow `[,.]`, so "Das ist gut äh. Dann weiter."
+    /// came out as "Das ist gut Dann weiter.": Parakeet does set punctuation,
+    /// and losing a period costs `ParagraphFormatter` the sentence boundary it
+    /// counts and every "command after punctuation" rule downstream. A comma is
+    /// the filler's own and goes with it; `.!?;:` end a sentence that was there
+    /// before the filler and stay. `tidy` removes the space left in front.
     private static func removing(fillers: [String], from text: String) -> String {
         var result = text
         for filler in fillers {
-            let escaped = NSRegularExpression.escapedPattern(for: filler)
-            let pattern = "(?iu)(^|\\s)\(escaped)[,.]?(?=\\s|$)"
-            result = result.replacingOccurrences(of: pattern, with: "$1", options: .regularExpression)
+            guard let regex = fillerPatterns[filler] else { continue }
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex ..< result.endIndex, in: result),
+                withTemplate: "$1"
+            )
         }
         return result
     }
@@ -172,14 +202,45 @@ struct TextPolisher: Sendable {
     /// smart-replace expansion (the ASR never emits one), and a multi-line building
     /// block that arrives as a single line is not a building block any more. A run of
     /// blank lines is still capped at one, and spaces sitting against a break go away.
+    /// The four `tidy` patterns, compiled once — same reason as `fillerPatterns`.
+    ///
+    /// The templates carry **real** newlines, not `\\n`: a template treats a
+    /// backslash as an escape, so `"\\n"` would insert the letter n.
+    private static let tidyPatterns: [(regex: NSRegularExpression, template: String)] = [
+        ("[^\\S\\n]+", " "),
+        (" *\\n *", "\n"),
+        ("\\n{3,}", "\n\n"),
+        (" ([.,!?;:])", "$1"),
+    ].compactMap { pattern, template in
+        (try? NSRegularExpression(pattern: pattern)).map { ($0, template) }
+    }
+
     private static func tidy(_ text: String, capitalizeStart: Bool = true) -> String {
-        var result = text.replacingOccurrences(of: "[^\\S\\n]+", with: " ", options: .regularExpression)
-        result = result.replacingOccurrences(of: " *\\n *", with: "\n", options: .regularExpression)
-        result = result.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
-        result = result.replacingOccurrences(of: " ([.,!?;:])", with: "$1", options: .regularExpression)
+        var result = text
+        for (regex, template) in tidyPatterns {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex ..< result.endIndex, in: result),
+                withTemplate: template
+            )
+        }
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard capitalizeStart, let first = result.first, first.isLowercase else { return result }
-        return first.uppercased() + result.dropFirst()
+        guard capitalizeStart else { return result }
+        return capitalizingFirstWord(result)
+    }
+
+    /// Capitalizes the first word, but only when that word is entirely
+    /// lowercase.
+    ///
+    /// `tidy` used to uppercase the first character unconditionally, so a
+    /// dictation that opened with a product name came out as "IPhone ist gut" —
+    /// likewise macOS, eBay, iOS. `ParagraphFormatter` already had this guard
+    /// for list items; it is one rule, so it lives in one place and both call it.
+    static func capitalizingFirstWord(_ text: String) -> String {
+        guard let first = text.first, first.isLowercase else { return text }
+        let word = text.prefix { !$0.isWhitespace }
+        guard word.allSatisfy({ !$0.isUppercase }) else { return text }
+        return first.uppercased() + text.dropFirst()
     }
 
     /// Appends a period when the text ends without sentence-final punctuation.
@@ -311,7 +372,14 @@ enum FuzzyDictionary {
     /// Normalized-similarity threshold (1 - editDistance/maxLen).
     static let threshold = 0.85
     /// Keys shorter than this are too fuzzy to match safely (e.g. "Jon" vs "Jan").
-    static let minKeyLength = 4
+    ///
+    /// Seven, not four: with `threshold` at 0.85 a single edit already needs a
+    /// key of at least 7 characters to stay above it (1 - 1/7 ≈ 0.857), and two
+    /// edits need 14. A limit of 4 therefore excluded nothing the similarity
+    /// rule had not already excluded — the test that claimed to pin it passed
+    /// for the wrong reason. This number is the real one, and lowering it
+    /// changes nothing unless `threshold` moves with it.
+    static let minKeyLength = 7
     /// Absolute edit-distance cap regardless of length — no wild rewrites.
     static let maxDistance = 2
 
@@ -683,10 +751,30 @@ enum EnglishITN {
         return (tokens[i].lead + s + tokens[last].trail, n)
     }
 
+    /// Words that make a preceding ordinal an idiom rather than a number:
+    /// "second thoughts", "third party", "first hand". Writing "2nd thoughts"
+    /// into someone's mail is worse than leaving a genuine ordinal spelled out.
+    private static let ordinalIdiomFollowers: Set<String> = [
+        "thoughts", "party", "hand", "class", "aid", "person", "language",
+        "name", "off", "and", "foremost", "nature", "impression",
+    ]
+
+    /// Words after which an ordinal is adverbial, not a count: "at first".
+    private static let ordinalIdiomLeaders: Set<String> = ["a", "an", "at"]
+
     private static func matchOrdinal(_ tokens: [Tok], _ i: Int) -> (String, Int)? {
-        // Skip "a second"/"an eighth" — those are usually fractions/nouns, not ordinals.
-        if i > 0, tokens[i - 1].core == "a" || tokens[i - 1].core == "an" { return nil }
+        // Skip "a second"/"an eighth" — those are usually fractions/nouns, not
+        // ordinals — and "at first", which is an adverb.
+        if i > 0, ordinalIdiomLeaders.contains(tokens[i - 1].core) { return nil }
         guard let (value, n) = ordinalValue(tokens, i) else { return nil }
+        // Only a *standalone* ordinal word can be an idiom; "twenty first" is a
+        // number in any context, so a compound is never blocked.
+        if n == 1 {
+            let next = i + 1 < tokens.count ? tokens[i + 1].core : ""
+            if ordinalIdiomFollowers.contains(next) { return nil }
+            // "first of all" — but "the first of May" stays a number.
+            if next == "of", i + 2 < tokens.count, tokens[i + 2].core == "all" { return nil }
+        }
         let last = i + n - 1
         return (tokens[i].lead + String(value) + ordinalSuffix(value) + tokens[last].trail, n)
     }

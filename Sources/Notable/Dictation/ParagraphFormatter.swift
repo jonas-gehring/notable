@@ -288,12 +288,12 @@ enum ParagraphFormatter {
 
     /// Capitalizes a list item's first word, but only when that word is entirely
     /// lowercase — "iPhone" and "macOS" must survive a bullet unharmed.
+    ///
+    /// The rule itself lives in `TextPolisher`, which needs exactly the same one
+    /// for the start of a dictation; having it twice is how the two drifted
+    /// apart in the first place.
     private static func capitalizingFirstWord(_ text: String) -> String {
-        guard let first = text.first, first.isLowercase else { return text }
-        let word = text.prefix { !$0.isWhitespace }
-        guard word.allSatisfy({ !$0.isUppercase }) else { return text }
-        return text.replacingCharacters(in: text.startIndex ..< text.index(after: text.startIndex),
-                                        with: String(first).uppercased())
+        TextPolisher.capitalizingFirstWord(text)
     }
 
     /// Joins by attachment: blank line between paragraphs, single newline for a

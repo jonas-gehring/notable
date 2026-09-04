@@ -17,6 +17,14 @@ enum BootstrapPolicy {
     static let bootstrapEngine = ASREngineID.whisper
     static let bootstrapSize = WhisperModelSize.tiny
 
+    /// What a dictation carried by the stand-in is booked as.
+    ///
+    /// Not `bootstrapEngine.statisticsName`: that one reads the *chosen* Whisper
+    /// size out of the defaults, so a stand-in run would be filed under whatever
+    /// size the user picked and Tiny's latency would land in that model's p95.
+    /// The stand-in always runs Tiny, so the name says Tiny.
+    static let bootstrapStatisticsName = "\(bootstrapEngine.rawValue)-\(bootstrapSize.rawValue)"
+
     /// Load a stand-in at all?
     ///
     /// Only when the chosen model is genuinely missing. A present model means

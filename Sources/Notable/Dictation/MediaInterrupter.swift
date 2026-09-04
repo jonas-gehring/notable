@@ -45,9 +45,17 @@ final class MediaInterrupter {
     }
 
     /// Called when the recording ends — including when it was cancelled.
+    ///
+    /// The resume is conditional for the same reason the pause was: play/pause
+    /// is a *toggle*, so pressing it when nothing is playing starts something.
+    /// A podcast that reached its end during a long dictation would otherwise
+    /// have had the next episode started for it, by an app the user only asked
+    /// to transcribe.
     func end() {
         if didPause {
-            Self.sendPlayPauseKey()
+            if !Self.somethingIsPlaying() {
+                Self.sendPlayPauseKey()
+            }
             didPause = false
         }
         if let previousVolume {

@@ -79,4 +79,12 @@ final class BootstrapPolicyTests: XCTestCase {
         XCTAssertTrue(WhisperModelSize.allCases.contains(BootstrapPolicy.bootstrapSize))
         XCTAssertEqual(BootstrapPolicy.bootstrapSize.modelName, "tiny", "nicht die englisch-only Variante")
     }
+
+    /// A dictation carried by the stand-in must not be booked under the chosen
+    /// engine: Tiny's latency in v3's p95 and Tiny's words in v3's share are
+    /// both wrong, and neither is visible as wrong in the statistics window.
+    func testBootstrapRunsAreBookedUnderTinyNotUnderTheChosenEngine() {
+        XCTAssertEqual(BootstrapPolicy.bootstrapStatisticsName, "whisper-tiny")
+        XCTAssertNotEqual(BootstrapPolicy.bootstrapStatisticsName, ASREngineID.parakeetV3.statisticsName)
+    }
 }

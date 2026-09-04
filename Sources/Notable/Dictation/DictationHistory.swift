@@ -125,9 +125,20 @@ final class DictationHistory: ObservableObject {
     }
 
     /// Inserts the last enhanced text — what the notification's button does.
-    func pasteLastEnhanced() {
-        guard let lastEnhanced else { return }
-        try? Paster.insert(lastEnhanced)
+    ///
+    /// Returns the failure rather than swallowing it: without Accessibility the
+    /// synthesized ⌘V goes nowhere, and the user tapped a button that then did
+    /// nothing at all. The text is on the clipboard either way; the caller says
+    /// so.
+    @discardableResult
+    func pasteLastEnhanced() -> Error? {
+        guard let lastEnhanced else { return nil }
+        do {
+            try Paster.insert(lastEnhanced)
+            return nil
+        } catch {
+            return error
+        }
     }
 
     // MARK: - Pure / near-pure helpers

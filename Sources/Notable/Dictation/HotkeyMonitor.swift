@@ -77,9 +77,11 @@ final class HotkeyMonitor {
         endEscInterception()
         if let flagsSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), flagsSource, .commonModes)
+            CFRunLoopSourceInvalidate(flagsSource)
         }
         if let flagsTap {
             CGEvent.tapEnable(tap: flagsTap, enable: false)
+            CFMachPortInvalidate(flagsTap)
         }
         flagsSource = nil
         flagsTap = nil
@@ -129,8 +131,14 @@ final class HotkeyMonitor {
     // MARK: - Esc tap (active, only while recording)
 
     /// Called by the controller when a recording begins.
-    func beginEscInterception() {
-        guard escTap == nil else { return }
+    ///
+    /// Returns whether the tap is up. An *active* tap needs Accessibility, and
+    /// without it `tapCreate` returns nil — the overlay used to promise "Esc
+    /// verwirft" all the same, and Esc then did nothing at all. The caller says
+    /// so instead.
+    @discardableResult
+    func beginEscInterception() -> Bool {
+        guard escTap == nil else { return true }
 
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
@@ -148,22 +156,29 @@ final class HotkeyMonitor {
                 return swallow ? nil : Unmanaged.passUnretained(event)
             },
             userInfo: refcon
-        ) else { return }
+        ) else { return false }
 
         escTap = tap
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         escSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        return true
     }
 
     /// Called by the controller when the recording ends (any way).
+    ///
+    /// `CFMachPortInvalidate` matters: disabling a tap stops it delivering, but
+    /// the Mach port and its run-loop source stay alive. One per dictation adds
+    /// up over a day of use.
     func endEscInterception() {
         if let escSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), escSource, .commonModes)
+            CFRunLoopSourceInvalidate(escSource)
         }
         if let escTap {
             CGEvent.tapEnable(tap: escTap, enable: false)
+            CFMachPortInvalidate(escTap)
         }
         escSource = nil
         escTap = nil

@@ -32,6 +32,10 @@ final class DictationOverlayController {
         /// The notch's rectangle in the panel's own coordinates, so the view can
         /// leave it empty. `nil` on every screen without one.
         @Published var notchCutout: CGRect?
+        /// False when the Esc tap could not be created (Accessibility missing).
+        /// The hint is then not shown at all — an exit that does nothing is
+        /// worse than no exit hint.
+        @Published var escapeAvailable = true
     }
 
     private let model = Model()
@@ -94,6 +98,11 @@ final class DictationOverlayController {
 
     func setProvisional(_ provisional: Bool) {
         model.provisional = provisional
+    }
+
+    /// Whether Esc actually reaches this recording — see `escapeAvailable`.
+    func setEscapeAvailable(_ available: Bool) {
+        model.escapeAvailable = available
     }
 
     /// Like `flashError`, for something that is not an error.
@@ -263,7 +272,7 @@ private struct DictationOverlayView: View {
                     .lineLimit(1)
                     .truncationMode(.head)
             } else if model.locked {
-                Text("Taste beendet · Esc verwirft")
+                Text(model.escapeAvailable ? "Taste beendet · Esc verwirft" : "Taste beendet")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.65))
             }
@@ -293,8 +302,8 @@ private struct DictationOverlayView: View {
     private var accessibilityText: String {
         switch model.state {
         case .recording: model.locked ? String(localized: "Aufnahme fixiert") : String(localized: "Aufnahme läuft")
-        case .transcribing: "Transkribiere"
-        case .enhancing: "Verbessere"
+        case .transcribing: String(localized: "Transkribiere")
+        case .enhancing: String(localized: "Verbessere")
         case .loadingModel: String(localized: "Modell lädt")
         case .error(let message): message
         case .notice(let message): message
@@ -415,13 +424,21 @@ struct NotchOverlayView: View {
         return max(0, size.width - cutout.maxX)
     }
 
+    /// Plain `String`, so every branch has to go through `String(localized:)`
+    /// itself — `Text(statusText)` looks the value up verbatim and would have
+    /// rendered German inside an English window.
     private var statusText: String {
         switch model.state {
         case .recording:
             if !model.partial.isEmpty { return String(model.partial.suffix(40)) }
-            return model.locked ? "Fixiert — Esc verwirft" : "Aufnahme… (Esc verwirft)"
-        case .transcribing: return "Transkribiere…"
-        case .enhancing: return "Verbessere…"
+            if !model.escapeAvailable {
+                return model.locked ? String(localized: "Fixiert") : String(localized: "Aufnahme…")
+            }
+            return model.locked
+                ? String(localized: "Fixiert — Esc verwirft")
+                : String(localized: "Aufnahme… (Esc verwirft)")
+        case .transcribing: return String(localized: "Transkribiere…")
+        case .enhancing: return String(localized: "Verbessere…")
         case .loadingModel: return String(localized: "Modell lädt…")
         case .error(let message): return message
         case .notice(let message): return message

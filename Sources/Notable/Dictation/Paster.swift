@@ -13,7 +13,7 @@ enum Paster {
         var errorDescription: String? {
             switch self {
             case .accessibilityDenied:
-                "Bedienungshilfen fehlen — Text liegt in der Zwischenablage (⌘V)."
+                String(localized: "Bedienungshilfen fehlen — Text liegt in der Zwischenablage (⌘V).")
             }
         }
     }
@@ -76,18 +76,53 @@ enum Paster {
         return chunks
     }
 
+    /// How much of the previous pasteboard is worth carrying across a paste.
+    ///
+    /// Two megabytes: enough for text, a small image and the usual pile of
+    /// private flavours, far below anything that costs visible time to copy.
+    static let snapshotByteBudget = 2 * 1024 * 1024
+
+    /// Flavours that are *promises*, not data. Asking for their bytes is what
+    /// makes the promising app produce them — writing a temp file, rendering an
+    /// export — which is both slow and a side effect Notable has no business
+    /// triggering just because someone dictated.
+    private static func isPromise(_ type: NSPasteboard.PasteboardType) -> Bool {
+        let name = type.rawValue
+        return name.hasPrefix("com.apple.pasteboard.promised")
+            || name.hasPrefix("com.apple.NSFilePromise")
+            || name == "com.apple.pasteboard.promised-file-url"
+    }
+
+    /// A copy of the current pasteboard, bounded.
+    ///
+    /// This runs synchronously on the main thread inside the release→paste
+    /// budget, and it used to pull *every* representation of every item: one
+    /// large image, or a file promise, cost hundreds of milliseconds right where
+    /// the user is waiting. Over budget, the plain string is kept and the rest
+    /// is let go — losing an image from the clipboard is a smaller harm than a
+    /// dictation that visibly stalls, and the string is what almost every
+    /// clipboard actually holds.
+    static func snapshot(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
+        var remaining = snapshotByteBudget
+        var overBudget = false
+        var items: [[NSPasteboard.PasteboardType: Data]] = []
+        for item in pasteboard.pasteboardItems ?? [] {
+            var contents: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types where !isPromise(type) {
+                guard let data = item.data(forType: type) else { continue }
+                guard data.count <= remaining else { overBudget = true; continue }
+                remaining -= data.count
+                contents[type] = data
+            }
+            items.append(contents)
+        }
+        guard overBudget else { return items }
+        return items.map { $0.filter { $0.key == .string } }.filter { !$0.isEmpty }
+    }
+
     static func paste(_ text: String) {
         let pasteboard = NSPasteboard.general
-
-        let savedItems: [[NSPasteboard.PasteboardType: Data]] = (pasteboard.pasteboardItems ?? []).map { item in
-            var contents: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    contents[type] = data
-                }
-            }
-            return contents
-        }
+        let savedItems = snapshot(pasteboard)
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)

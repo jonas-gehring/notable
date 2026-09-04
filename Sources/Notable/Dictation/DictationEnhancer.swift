@@ -9,6 +9,17 @@ struct EnhancementProfile: Codable, Identifiable, Sendable, Equatable {
     var systemPrompt: String
     /// False for the four built-ins, which cannot be deleted.
     var isCustom: Bool = false
+
+    /// What actually goes to the model.
+    ///
+    /// The built-ins bake `commonRules` into their literal; a custom profile
+    /// stores only what the user typed and gets the rules appended here. They
+    /// used to be appended at *save* time instead, which put them into the
+    /// TextEditor the next time the sheet opened — under a footnote calling
+    /// them "automatically appended" — so every edit added another copy.
+    var resolvedSystemPrompt: String {
+        isCustom ? systemPrompt + EnhancementProfile.commonRules : systemPrompt
+    }
 }
 
 extension EnhancementProfile {
@@ -74,7 +85,23 @@ extension EnhancementProfile {
 
     static func custom(store: UserDefaults = .standard) -> [EnhancementProfile] {
         guard let data = store.data(forKey: defaultsKey) else { return [] }
-        return (try? JSONDecoder().decode([EnhancementProfile].self, from: data)) ?? []
+        let stored = (try? JSONDecoder().decode([EnhancementProfile].self, from: data)) ?? []
+        return stored.map(withoutCommonRules)
+    }
+
+    /// Strips every copy of `commonRules` out of a stored prompt.
+    ///
+    /// Self-healing rather than a migration: profiles saved by earlier builds
+    /// carry one copy per time they were edited, and there is no version to key
+    /// a migration off. Stripping on load is idempotent and makes the editor
+    /// show what the user wrote.
+    static func withoutCommonRules(_ profile: EnhancementProfile) -> EnhancementProfile {
+        guard profile.systemPrompt.contains(commonRules) else { return profile }
+        var clean = profile
+        clean.systemPrompt = profile.systemPrompt
+            .replacingOccurrences(of: commonRules, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean
     }
 
     static func saveCustom(_ profiles: [EnhancementProfile], store: UserDefaults = .standard) {
@@ -82,7 +109,12 @@ extension EnhancementProfile {
             !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !$0.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-        guard let data = try? JSONEncoder().encode(clean.map { var p = $0; p.isCustom = true; return p }) else { return }
+        let normalized = clean.map { profile -> EnhancementProfile in
+            var p = withoutCommonRules(profile)
+            p.isCustom = true
+            return p
+        }
+        guard let data = try? JSONEncoder().encode(normalized) else { return }
         store.set(data, forKey: defaultsKey)
     }
 
@@ -114,12 +146,36 @@ enum EnhancementGuard {
     static let ratioThreshold = 12
 
     /// Openings that mean the model is talking about the text rather than
-    /// returning it.
+    /// returning it — but **only** in front of a colon.
+    ///
+    /// Every one of these is also a perfectly ordinary way to start a dictated
+    /// sentence: "Hier ist der Bericht, den du wolltest", "Gerne schicke ich dir
+    /// die Unterlagen", "Certainly worth a look". Rejecting on the prefix alone
+    /// threw those away silently — after the text had already left the device —
+    /// and pasted the unimproved original with no explanation. A model
+    /// announcing its work ends that announcement with a colon
+    /// ("Hier ist die überarbeitete Version:"); a person dictating does not.
+    /// `gerne` and `natürlich,` are gone from the list entirely: they are the
+    /// two most common first words of a dictated German mail, and no colon rule
+    /// makes them worth the risk.
     static let metaPrefixes = [
         "hier ist", "hier die", "hier der", "here is", "here's",
         "überarbeitete version", "überarbeiteter text", "revised", "sure,", "certainly",
-        "gerne", "natürlich,",
     ]
+
+    /// True when `text` opens with a meta prefix *and* its first line carries a
+    /// colon — the shape of an announcement, not of a dictation.
+    ///
+    /// The colon is what the announcement always has and the dictation usually
+    /// does not: "Hier ist die überarbeitete Version:" and "Sure, here's the
+    /// improved text:" both have one, while "Hier ist der Bericht, den du
+    /// wolltest" does not — and that sentence used to be thrown away.
+    static func looksLikeCommentary(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        guard let prefix = metaPrefixes.first(where: { lowered.hasPrefix($0) }) else { return false }
+        let firstLine = text.prefix { $0 != "\n" }
+        return firstLine.dropFirst(prefix.count).contains(":")
+    }
 
     /// The text to paste, or `nil` when the answer must be discarded.
     static func accept(_ output: String, forInput input: String) -> String? {
@@ -127,8 +183,7 @@ enum EnhancementGuard {
         text = strippingCodeFence(text)
         guard !text.isEmpty else { return nil }
 
-        let lowered = text.lowercased()
-        guard !metaPrefixes.contains(where: { lowered.hasPrefix($0) }) else { return nil }
+        guard !looksLikeCommentary(text) else { return nil }
         // A fence anywhere in the body means the model formatted rather than
         // rewrote — dictated prose does not contain them.
         guard !text.contains("```") else { return nil }
@@ -210,7 +265,7 @@ struct DictationEnhancer: Sendable {
 
         do {
             let completion = try await withDeadline(deadline) {
-                try await provider.complete(system: profile.systemPrompt, user: trimmed)
+                try await provider.complete(system: profile.resolvedSystemPrompt, user: trimmed)
             }
             guard let accepted = EnhancementGuard.accept(completion.text, forInput: trimmed) else {
                 return Result(
@@ -225,7 +280,8 @@ struct DictationEnhancer: Sendable {
             return Result(text: text, didEnhance: false,
                       failure: String(localized: "Verbesserung dauerte zu lange — Originaltext eingefügt."))
         } catch {
-            return Result(text: text, didEnhance: false, failure: "Verbesserung fehlgeschlagen: \(error.localizedDescription)")
+            return Result(text: text, didEnhance: false,
+                          failure: String(localized: "Verbesserung fehlgeschlagen: \(error.localizedDescription)"))
         }
     }
 }

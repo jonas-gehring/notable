@@ -12,6 +12,31 @@ final class TextPolisherTests: XCTestCase {
         XCTAssertTrue(polished.hasPrefix("Das"), "Satzanfang groß: \(polished)")
     }
 
+    /// The filler pattern used to swallow a trailing `[,.]`, which cost the
+    /// sentence boundary that `ParagraphFormatter` counts and that every
+    /// "command after punctuation" rule downstream depends on.
+    func testFillerRemovalKeepsSentenceFinalPunctuation() {
+        let polished = TextPolisher.polish(
+            "Das ist gut äh. Dann machen wir weiter.",
+            options: .init(removeFillers: true, applyITN: false, paragraphs: false, structureCommands: false)
+        )
+        XCTAssertFalse(polished.lowercased().contains("äh"), polished)
+        XCTAssertTrue(polished.contains("gut."), "Punkt hinter dem Füllwort muss bleiben: \(polished)")
+        XCTAssertTrue(polished.contains("gut. Dann"), polished)
+    }
+
+    /// A comma is the filler's own punctuation and goes with it — the sentence
+    /// had no comma there before the "ähm" was spoken.
+    func testFillerRemovalTakesItsOwnComma() {
+        let polished = TextPolisher.polish(
+            "Wir treffen uns ähm, morgen früh.",
+            options: .init(removeFillers: true, applyITN: false, paragraphs: false, structureCommands: false)
+        )
+        XCTAssertFalse(polished.contains("ähm"), polished)
+        XCTAssertFalse(polished.contains(",,"), polished)
+        XCTAssertTrue(polished.contains("uns morgen früh."), polished)
+    }
+
     func testRemovesEnglishFillersInEnglishText() {
         let polished = TextPolisher.polish(
             "Um, I think this is uh really great and er quite useful for everyone here.",
@@ -175,6 +200,69 @@ final class TextPolisherTests: XCTestCase {
     /// Regression: a month word as the final token made matchDate call
     /// ordinalValue(i+1) with i+1 == tokens.count, indexing past the end and
     /// crashing the whole transcription path (dictation + meeting pipeline).
+    // MARK: - Review 2026-09-03
+
+    /// `tidy` used to uppercase the first character unconditionally.
+    func testCamelCaseFirstWordSurvivesCapitalization() {
+        var options = TextPolisher.Options()
+        options.applyITN = false
+        XCTAssertEqual(TextPolisher.polish("iPhone ist gut", options: options), "iPhone ist gut")
+        XCTAssertEqual(TextPolisher.polish("macOS läuft", options: options), "macOS läuft")
+        // A genuinely lowercase opening still gets capitalized.
+        XCTAssertEqual(TextPolisher.polish("das ist gut", options: options), "Das ist gut")
+    }
+
+    /// Sentence-final punctuation belongs to the sentence, not to the filler.
+    func testFillerRemovalKeepsSentencePunctuation() {
+        var options = TextPolisher.Options()
+        options.applyITN = false
+        XCTAssertEqual(
+            TextPolisher.polish("Das ist gut äh. Dann weiter.", options: options),
+            "Das ist gut. Dann weiter."
+        )
+        // Its own comma still goes with it.
+        XCTAssertEqual(
+            TextPolisher.polish("Das ist ähm, gut.", options: options),
+            "Das ist gut."
+        )
+    }
+
+    /// English ITN must not rewrite ordinal idioms into numbers.
+    func testOrdinalIdiomsAreNotNumbered() {
+        var options = TextPolisher.Options()
+        options.spokenLanguages = ["en"]
+        for phrase in [
+            "first of all we should talk",
+            "at first it looked fine",
+            "she had second thoughts about it",
+            "this is a third party service",
+        ] {
+            let polished = TextPolisher.polish(phrase, options: options)
+            XCTAssertFalse(polished.contains("1st"), polished)
+            XCTAssertFalse(polished.contains("2nd"), polished)
+            XCTAssertFalse(polished.contains("3rd"), polished)
+        }
+    }
+
+    /// A compound ordinal is a number in every context and stays converted.
+    func testCompoundOrdinalStillBecomesANumber() {
+        var options = TextPolisher.Options()
+        options.spokenLanguages = ["en"]
+        XCTAssertTrue(TextPolisher.polish("the twenty first attempt", options: options).contains("21st"))
+    }
+
+    /// The minimum key length has to be reachable: below 7 characters the
+    /// similarity threshold rejects every single-edit match anyway.
+    func testFuzzyMinimumKeyLengthMatchesTheSimilarityThreshold() {
+        let shortest = FuzzyDictionary.minKeyLength
+        let similarity = 1 - 1 / Double(shortest)
+        XCTAssertGreaterThanOrEqual(similarity, FuzzyDictionary.threshold,
+                                    "Ein Ein-Edit-Treffer der Mindestlänge muss die Schwelle erreichen können")
+        let below = 1 - 1 / Double(shortest - 1)
+        XCTAssertLessThan(below, FuzzyDictionary.threshold,
+                          "Ein Zeichen kürzer darf die Schwelle nicht mehr erreichen — sonst ist die Konstante wirkungslos")
+    }
+
     func testITNTrailingMonthDoesNotCrash() {
         XCTAssertEqual(EnglishITN.normalize("we meet in September"), "we meet in September")
         XCTAssertEqual(EnglishITN.normalize("September"), "September")

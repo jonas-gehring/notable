@@ -34,10 +34,10 @@ enum WhisperModelSize: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .tiny: "Tiny (schnell, ~75 MB)"
-        case .base: "Base (Standard, ~145 MB)"
-        case .small: "Small (genauer, ~465 MB)"
-        case .largeV3: "Large v3 (am genauesten, ~1,5 GB)"
+        case .tiny: String(localized: "Tiny (schnell, ~75 MB)")
+        case .base: String(localized: "Base (Standard, ~145 MB)")
+        case .small: String(localized: "Small (genauer, ~465 MB)")
+        case .largeV3: String(localized: "Large v3 (am genauesten, ~1,5 GB)")
         }
     }
 }
@@ -111,6 +111,6 @@ final class WhisperTranscriber: TranscriptionEngine, @unchecked Sendable {
 
     enum WhisperError: LocalizedError {
         case notLoaded
-        var errorDescription: String? { "Whisper-Modell nicht geladen." }
+        var errorDescription: String? { String(localized: "Whisper-Modell nicht geladen.") }
     }
 }

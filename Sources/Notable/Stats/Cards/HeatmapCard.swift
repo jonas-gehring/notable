@@ -33,6 +33,9 @@ struct HeatmapCard: View {
                                 .fill(Theme.chartPrimary.opacity(intensity(totals.dictationWords)))
                                 .frame(height: 11)
                                 .help("\(weekdaySymbol(index)) \(hour):00 — \(UsageMetrics.integer(totals.dictationWords)) Wörter")
+                                // 168 unlabelled shapes otherwise: VoiceOver
+                                // walked the whole grid announcing nothing.
+                                .accessibilityLabel("\(weekdaySymbol(index)) \(hour):00 — \(UsageMetrics.integer(totals.dictationWords)) Wörter")
                         }
                     }
                 }
@@ -68,6 +71,6 @@ struct HeatmapCard: View {
                 best = (row, hour, totals.dictationWords)
             }
         }
-        return "\(weekdaySymbol(best.row)) \(best.hour):00 · \(UsageMetrics.integer(best.words)) Wörter"
+        return String(localized: "\(weekdaySymbol(best.row)) \(best.hour):00 · \(UsageMetrics.integer(best.words)) Wörter")
     }
 }

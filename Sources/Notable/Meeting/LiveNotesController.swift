@@ -27,7 +27,7 @@ final class LiveNotesController: ObservableObject {
 
     /// Window header — the calendar event's title once the (async) match lands,
     /// a neutral fallback until then.
-    @Published private(set) var title: String = "Meeting"
+    @Published private(set) var title: String = String(localized: "Meeting")
 
     private var spool: SpoolStore.Session?
     private var pendingSave: Task<Void, Never>?
@@ -89,7 +89,7 @@ final class LiveNotesController: ObservableObject {
     private func clear() {
         spool = nil          // set first: the `text` didSet must not re-arm a save
         startedAt = nil
-        title = "Meeting"
+        title = String(localized: "Meeting")
         text = ""
     }
 

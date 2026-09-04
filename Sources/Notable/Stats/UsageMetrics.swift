@@ -261,9 +261,9 @@ enum UsageMetrics {
         let total = Int(seconds.rounded())
         let hours = total / 3600
         let minutes = (total % 3600) / 60
-        if hours > 0 { return "\(hours) h \(minutes) min" }
-        if minutes > 0 { return "\(minutes) min" }
-        return "\(total) s"
+        if hours > 0 { return String(localized: "\(hours) h \(minutes) min") }
+        if minutes > 0 { return String(localized: "\(minutes) min") }
+        return String(localized: "\(total) s")
     }
 
     /// A USD amount, e.g. `0,42 $` in a German locale. Anything above zero but
@@ -280,8 +280,10 @@ enum UsageMetrics {
     /// can never be read as one number: billed spend is stated as spend, the
     /// flat-rate figure only as what the API would have charged.
     static func llmCostLine(_ totals: LLMTotals) -> String {
-        let billed = totals.billedCostUSD > 0 ? "\(currency(totals.billedCostUSD)) berechnet" : nil
-        let shadow = totals.shadowCostUSD > 0 ? "\(currency(totals.shadowCostUSD)) über Abo" : nil
+        let billed = totals.billedCostUSD > 0
+            ? String(localized: "\(currency(totals.billedCostUSD)) berechnet") : nil
+        let shadow = totals.shadowCostUSD > 0
+            ? String(localized: "\(currency(totals.shadowCostUSD)) über Abo") : nil
         return [billed, shadow].compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -296,13 +298,15 @@ enum UsageMetrics {
     static func menuLine(_ totals: UsageTotals, label: String) -> String? {
         var parts: [String] = []
         if totals.dictationWords > 0 {
-            parts.append("\(integer(totals.dictationWords)) Wörter")
+            parts.append(String(localized: "\(integer(totals.dictationWords)) Wörter"))
         }
         if totals.meetingCount > 0 {
-            parts.append(totals.meetingCount == 1 ? "1 Meeting" : "\(totals.meetingCount) Meetings")
+            parts.append(totals.meetingCount == 1
+                ? String(localized: "1 Meeting")
+                : String(localized: "\(totals.meetingCount) Meetings"))
         }
         if totals.savedSeconds >= 60 {
-            parts.append("\(duration(totals.savedSeconds)) gespart")
+            parts.append(String(localized: "\(duration(totals.savedSeconds)) gespart"))
         }
         guard !parts.isEmpty else { return nil }
         return "\(label): " + parts.joined(separator: " · ")
@@ -332,7 +336,23 @@ enum UsageMetrics {
     /// The bucket a row with no `engine`/`sourceApp` lands in. It is shown, never
     /// folded into a neighbour: six weeks of existing rows have no value here, and
     /// silently attributing them to the current engine would invent a measurement.
+    ///
+    /// Localized at the point of display, not here: this value is also a
+    /// *grouping key*, so it has to stay one stable string no matter what
+    /// language the window is drawn in.
     static let unknownKey = "Unbekannt"
+
+    /// How `unknownKey` and the "rest" bucket are written on screen.
+    static func displayKey(_ key: String) -> String {
+        switch key {
+        case unknownKey: String(localized: "Unbekannt")
+        case restKey: String(localized: "Weitere")
+        default: key
+        }
+    }
+
+    /// The bucket that collects everything past the top N.
+    static let restKey = "Weitere"
 
     static var zeroTotals: UsageTotals {
         UsageTotals(dictationCount: 0, dictationWords: 0, dictationSeconds: 0,
@@ -394,7 +414,7 @@ enum UsageMetrics {
             rest.savedSeconds += entry.totals.savedSeconds
         }
         return all[..<limit].map { (sourceApp: $0.key, totals: $0.totals) }
-            + [(sourceApp: "Weitere", totals: rest)]
+            + [(sourceApp: restKey, totals: rest)]
     }
 
     private static func grouped(

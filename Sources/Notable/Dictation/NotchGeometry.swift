@@ -21,9 +21,9 @@ enum OverlayStyle: String, CaseIterable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .bottom: "Unten mittig (Standard)"
-        case .notch: "Oben an der Notch"
-        case .off: "Aus — nur Ton"
+        case .bottom: String(localized: "Unten mittig (Standard)")
+        case .notch: String(localized: "Oben an der Notch")
+        case .off: String(localized: "Aus — nur Ton")
         }
     }
 }

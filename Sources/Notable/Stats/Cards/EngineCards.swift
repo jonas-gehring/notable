@@ -30,7 +30,7 @@ struct EngineUsageCard: View {
     }
 
     private func label(_ engine: String) -> String {
-        ASREngineID(rawValue: engine)?.label ?? engine
+        ASREngineID(rawValue: engine)?.label ?? UsageMetrics.displayKey(engine)
     }
 }
 
@@ -55,7 +55,7 @@ struct EnginePerformanceCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(stats, id: \.engine) { entry in
                     HStack(spacing: 8) {
-                        Text(ASREngineID(rawValue: entry.engine)?.label ?? entry.engine)
+                        Text(ASREngineID(rawValue: entry.engine)?.label ?? UsageMetrics.displayKey(entry.engine))
                             .font(.system(size: 11))
                             .frame(width: 200, alignment: .leading)
                             .lineLimit(1)
@@ -113,7 +113,8 @@ struct TargetAppsCard: View {
 
     static func displayName(_ bundleID: String) -> String {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
-            return bundleID
+            // Covers the "Unbekannt" bucket, which is not a bundle ID at all.
+            return UsageMetrics.displayKey(bundleID)
         }
         return FileManager.default.displayName(atPath: url.path)
     }

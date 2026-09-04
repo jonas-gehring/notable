@@ -16,11 +16,15 @@ final class AppState: ObservableObject {
             }
         }
 
+        /// Every branch through `String(localized:)`: this is a plain `String`,
+        /// and `Text(state.label)` renders it verbatim — two of the three used
+        /// to show German inside an English window, right next to a third that
+        /// did not.
         var label: String {
             switch self {
-            case .idle: "Bereit"
+            case .idle: String(localized: "Bereit")
             case .recording: String(localized: "Aufnahme läuft…")
-            case .transcribing: "Transkribiere…"
+            case .transcribing: String(localized: "Transkribiere…")
             }
         }
     }

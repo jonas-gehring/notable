@@ -26,9 +26,13 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Only "Systemsprache" is translated: a language picker names each
+    /// language in that language, so "Deutsch" and "English" stay as they are in
+    /// every locale — that is what makes the list readable to someone who cannot
+    /// read the current one.
     var label: String {
         switch self {
-        case .system: "Systemsprache"
+        case .system: String(localized: "Systemsprache")
         case .german: "Deutsch"
         case .english: "English"
         }

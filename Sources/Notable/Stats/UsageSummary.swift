@@ -37,15 +37,7 @@ final class UsageSummary: ObservableObject {
         else { return }
 
         let typingWPM = UserDefaults.standard.object(forKey: "typingWPM") as? Double ?? 40
-        let totals = UsageMetrics.totals(
-            rows.map {
-                UsageRow(
-                    kind: $0.kind == .dictation ? .dictation : .meeting,
-                    startedAt: $0.startedAt,
-                    endedAt: $0.endedAt,
-                    wordCount: $0.wordCount)
-            },
-            typingWPM: typingWPM)
-        line = UsageMetrics.menuLine(totals, label: "Heute")
+        let totals = UsageMetrics.totals(rows.map(UsageRow.init), typingWPM: typingWPM)
+        line = UsageMetrics.menuLine(totals, label: String(localized: "Heute"))
     }
 }

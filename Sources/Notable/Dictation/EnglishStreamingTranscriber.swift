@@ -44,11 +44,14 @@ enum ASREngineID: String, CaseIterable, Identifiable {
         }
     }
 
+    /// `String(localized:)` per branch, like every other plain-`String` label:
+    /// a `Text(engine.label)` renders this verbatim, so an unwrapped literal is
+    /// German in an English window with nothing to warn about it.
     var label: String {
         switch self {
-        case .parakeetV3: "Parakeet v3 — mehrsprachig (Standard)"
-        case .unifiedEnglish: "Parakeet Unified — Englisch, Streaming"
-        case .whisper: "Whisper (OpenAI) — mehrsprachig"
+        case .parakeetV3: String(localized: "Parakeet v3 — mehrsprachig (Standard)")
+        case .unifiedEnglish: String(localized: "Parakeet Unified — Englisch, Streaming")
+        case .whisper: String(localized: "Whisper (OpenAI) — mehrsprachig")
         }
     }
 }

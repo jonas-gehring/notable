@@ -7,10 +7,14 @@ import SwiftUI
 /// therefore *say* that measuring has only just begun; a blank rectangle reads as
 /// a bug.
 struct DetailCard<Content: View>: View {
-    let title: String
-    var subtitle: String?
+    /// `LocalizedStringKey`, not `String`: a plain `String` parameter is the one
+    /// overload SwiftUI does *not* look up, so every card title and empty
+    /// message stayed German in an English window — and the localization test
+    /// could not see them either.
+    let title: LocalizedStringKey
+    var subtitle: LocalizedStringKey?
     /// Shown instead of the content when there is nothing to draw yet.
-    var emptyMessage: String = "Wird ab jetzt gemessen."
+    var emptyMessage: LocalizedStringKey = "Wird ab jetzt gemessen."
     var isEmpty: Bool = false
     @ViewBuilder var content: Content
 

@@ -41,20 +41,19 @@ final class StatsModel: ObservableObject {
     private var llmRows: [LLMUsageRow] = []
     private let calendar = Calendar.current
 
+    /// Injected rather than reached for, so the model can be driven from a test
+    /// database instead of the user's own.
+    private let store: RecordingStore
+
+    init(store: RecordingStore = .shared) {
+        self.store = store
+    }
+
     /// Fetches every recording once and caches the mapped rows.
     func load() async {
-        let raw = (try? await RecordingStore.shared.usageRows(from: .distantPast, to: Date())) ?? []
-        rows = raw.map {
-            UsageRow(
-                kind: $0.kind == .dictation ? .dictation : .meeting,
-                startedAt: $0.startedAt,
-                endedAt: $0.endedAt,
-                wordCount: $0.wordCount,
-                engine: $0.engine,
-                latencyMs: $0.latencyMs,
-                sourceApp: $0.sourceApp)
-        }
-        let llm = (try? await RecordingStore.shared.llmUsageRows(from: .distantPast, to: Date())) ?? []
+        let raw = (try? await store.usageRows(from: .distantPast, to: Date())) ?? []
+        rows = raw.map(UsageRow.init)
+        let llm = (try? await store.llmUsageRows(from: .distantPast, to: Date())) ?? []
         llmRows = llm.map {
             LLMUsageRow(at: $0.createdAt, tokens: $0.totalTokens, costUSD: $0.costUSD, billed: $0.billed)
         }
@@ -171,7 +170,10 @@ struct StatsView: View {
             }
             Spacer(minLength: 16)
             CalSegmented(
-                options: [(.day, "Tag"), (.week, "Woche"), (.month, "Monat"), (.year, "Jahr")],
+                options: [
+                    (.day, String(localized: "Tag")), (.week, String(localized: "Woche")),
+                    (.month, String(localized: "Monat")), (.year, String(localized: "Jahr")),
+                ],
                 selection: $granularity)
                 .frame(width: 248)
         }
@@ -258,7 +260,7 @@ struct StatsView: View {
 
     private var sinceSuffix: String {
         guard let first = model.firstRecording else { return "" }
-        return " · seit \(first.formatted(.dateTime.day().month(.abbreviated).year()))"
+        return String(localized: " · seit \(first.formatted(.dateTime.day().month(.abbreviated).year()))")
     }
 
     /// Saved time across the visible periods. Trend only — no axes, no labels; the
@@ -307,33 +309,33 @@ struct StatsView: View {
                     current: Double(model.periodTotals.dictationWords),
                     previous: Double(model.previousTotals.dictationWords)),
                 baseline: granularity.baselineLabel,
-                footnote: "insgesamt \(Self.integer(model.allTotals.dictationWords))")
+                footnote: String(localized: "insgesamt \(Self.integer(model.allTotals.dictationWords))"))
             StatTile(
                 icon: "waveform",
-                caption: "Diktate",
+                caption: String(localized: "Diktate"),
                 value: Self.integer(model.periodTotals.dictationCount),
                 delta: UsageMetrics.delta(
                     current: Double(model.periodTotals.dictationCount),
                     previous: Double(model.previousTotals.dictationCount)),
                 baseline: granularity.baselineLabel,
                 footnote: model.allTotals.dictationCount > 0
-                    ? "⌀ \(Self.duration(model.allTotals.dictationSeconds / Double(model.allTotals.dictationCount)))"
-                    : "insgesamt 0")
+                    ? String(localized: "⌀ \(Self.duration(model.allTotals.dictationSeconds / Double(model.allTotals.dictationCount)))")
+                    : String(localized: "insgesamt 0"))
             StatTile(
                 icon: "person.2.wave.2",
-                caption: "Meetings",
+                caption: String(localized: "Meetings"),
                 value: Self.integer(model.periodTotals.meetingCount),
                 delta: UsageMetrics.delta(
                     current: Double(model.periodTotals.meetingCount),
                     previous: Double(model.previousTotals.meetingCount)),
                 baseline: granularity.baselineLabel,
-                footnote: "\(Self.duration(model.periodTotals.meetingSeconds)) aufgezeichnet")
+                footnote: String(localized: "\(Self.duration(model.periodTotals.meetingSeconds)) aufgezeichnet"))
             // Only once something has actually been summarized: a tile reading
             // "0 Tokens" says nothing, and old databases have no rows at all.
             if !model.allLLM.isEmpty {
                 StatTile(
                     icon: "sparkles",
-                    caption: "KI-Tokens",
+                    caption: String(localized: "KI-Tokens"),
                     value: Self.integer(model.periodLLM.tokens),
                     delta: UsageMetrics.delta(
                         current: Double(model.periodLLM.tokens),
@@ -349,7 +351,7 @@ struct StatsView: View {
     /// back to the lifetime token count when no provider reported a cost.
     private var llmFootnote: String {
         let line = UsageMetrics.llmCostLine(model.allLLM)
-        return line.isEmpty ? "insgesamt \(Self.integer(model.allLLM.tokens))" : line
+        return line.isEmpty ? String(localized: "insgesamt \(Self.integer(model.allLLM.tokens))") : line
     }
 
     // MARK: Charts — one series each, one axis, one hue
@@ -366,8 +368,8 @@ struct StatsView: View {
 
     private var meetingsChart: some View {
         BucketChart(
-            title: "Meetings",
-            unitLabel: "Meetings",
+            title: String(localized: "Meetings"),
+            unitLabel: String(localized: "Meetings"),
             buckets: model.series,
             granularity: granularity,
             tint: Theme.chartSecondary,
@@ -441,10 +443,10 @@ private extension Granularity {
 
     var periodLabel: String {
         switch self {
-        case .day: "Heute"
-        case .week: "Diese Woche"
-        case .month: "Diesen Monat"
-        case .year: "Dieses Jahr"
+        case .day: String(localized: "Heute")
+        case .week: String(localized: "Diese Woche")
+        case .month: String(localized: "Diesen Monat")
+        case .year: String(localized: "Dieses Jahr")
         }
     }
 
@@ -462,10 +464,10 @@ private extension Granularity {
     /// does not actually plot.
     var rangeLabel: String {
         switch self {
-        case .day: "Letzte \(chartSpan) Tage"
-        case .week: "Letzte \(chartSpan) Wochen"
-        case .month: "Letzte \(chartSpan) Monate"
-        case .year: "Letzte \(chartSpan) Jahre"
+        case .day: String(localized: "Letzte \(chartSpan) Tage")
+        case .week: String(localized: "Letzte \(chartSpan) Wochen")
+        case .month: String(localized: "Letzte \(chartSpan) Monate")
+        case .year: String(localized: "Letzte \(chartSpan) Jahre")
         }
     }
 
@@ -482,7 +484,7 @@ private extension Granularity {
     func hoverLabel(_ date: Date) -> String {
         switch self {
         case .day: date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
-        case .week: "Woche ab \(date.formatted(.dateTime.day().month(.abbreviated)))"
+        case .week: String(localized: "Woche ab \(date.formatted(.dateTime.day().month(.abbreviated)))")
         case .month: date.formatted(.dateTime.month(.wide).year())
         case .year: date.formatted(.dateTime.year())
         }
@@ -560,7 +562,7 @@ private struct DeltaChip: View {
                 RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous)
                     .fill(tint.opacity(0.12)))
         } else {
-            Text(baseline.map { "unverändert \($0)" } ?? "–")
+            Text(baseline.map { String(localized: "unverändert \($0)") } ?? "–")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.textMuted)
                 .padding(.vertical, 2)

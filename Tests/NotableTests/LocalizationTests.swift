@@ -45,6 +45,79 @@ final class LocalizationTests: XCTestCase {
         return dict
     }
 
+    /// Property and function names whose `String` result is shown to a user.
+    ///
+    /// This is what makes the enum-label scan possible at all: a switch that
+    /// returns bare literals is just as often returning SF Symbol names
+    /// (`symbolName`), System-Settings anchors (`settingsPane`) or statistics
+    /// keys (`statisticsName`) — none of which may be translated. The enclosing
+    /// declaration is what separates the two, so the scan keys off its name and
+    /// nothing else.
+    private static let userFacingMembers: Set<String> = [
+        "label", "title", "name", "text", "caption", "message", "hint",
+        "purpose", "shortLabel", "displayName", "errorDescription", "subtitle",
+        "emptyMessage", "statusLabel", "periodLabel", "rangeLabel", "hoverLabel",
+        "footnote", "summaryLine", "description", "placeholder", "reason",
+    ]
+
+    /// `case .foo: "German"` inside one of `userFacingMembers`.
+    ///
+    /// The gap this closes is the one `CLAUDE.md` warns about and the scanner
+    /// itself used to have: only `LocalizedStringKey` is looked up, so a plain
+    /// `String` from an enum reaches `Text(...)` verbatim and stays German in
+    /// every language. Roughly a hundred of them were sitting in
+    /// `ASREngineID.label`, `OverlayStyle.label`, `Granularity.periodLabel`,
+    /// the icon picker and the provider list — every one of them invisible to a
+    /// test that only looked at `Text("…")`.
+    private static func enumLabelKeys() -> [(key: String, location: String)] {
+        let caseLiteral = try? NSRegularExpression(
+            pattern: #"^\s*(?:case [^:]+|default)\s*:\s*"((?:[^"\\]|\\.)+)"\s*$"#
+        )
+        let declaration = try? NSRegularExpression(
+            pattern: "\\b(?:var|func)\\s+([A-Za-z_][A-Za-z0-9_]*)"
+        )
+        guard let caseLiteral, let declaration else { return [] }
+
+        let sources = repoRoot.appendingPathComponent("Sources/Notable")
+        guard let walker = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil) else {
+            return []
+        }
+
+        var found: [(String, String)] = []
+        for case let file as URL in walker where file.pathExtension == "swift" {
+            let relative = file.path.replacingOccurrences(of: sources.path + "/", with: "")
+            if excludedFiles.contains(relative) { continue }
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            let lines = text.components(separatedBy: .newlines)
+
+            for (number, line) in lines.enumerated() {
+                if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { continue }
+                let range = NSRange(line.startIndex ..< line.endIndex, in: line)
+                guard let match = caseLiteral.firstMatch(in: line, range: range),
+                      let literalRange = Range(match.range(at: 1), in: line) else { continue }
+
+                // The nearest declaration above decides whether this is
+                // interface text. Thirty lines covers the longest switch here.
+                var member: String?
+                for back in stride(from: number - 1, through: max(0, number - 30), by: -1) {
+                    let candidate = lines[back]
+                    let candidateRange = NSRange(candidate.startIndex ..< candidate.endIndex, in: candidate)
+                    if let declarationMatch = declaration.firstMatch(in: candidate, range: candidateRange),
+                       let nameRange = Range(declarationMatch.range(at: 1), in: candidate) {
+                        member = String(candidate[nameRange])
+                        break
+                    }
+                }
+                guard let member, userFacingMembers.contains(member) else { continue }
+
+                let key = decodingUnicodeEscapes(String(line[literalRange]))
+                if key.contains("\\(") || key.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+                found.append((key, "\(relative):\(number + 1)"))
+            }
+        }
+        return found
+    }
+
     /// Literals passed to the SwiftUI initializers that take a `LocalizedStringKey`.
     /// Interpolated ones are skipped: their runtime key carries format specifiers
     /// (`%@`, `%1$@`) that cannot be reconstructed from the source text, so they are
@@ -95,10 +168,20 @@ final class LocalizationTests: XCTestCase {
         return found
     }
 
-    /// Turns `\u{201C}` into the character it stands for. Swift string literals may
-    /// spell any character that way, and several here do — the German quotation
-    /// marks, which would otherwise close the literal early in the source.
+    /// Undoes Swift's string-literal escaping, so what the scanner compares is
+    /// what the app asks for at runtime.
+    ///
+    /// `\u{201C}` is the reason this exists (the German quotation marks would
+    /// otherwise close the literal in the source), but `\"` matters just as
+    /// much: a message that quotes a JSON field name is written `\"result\"` in
+    /// Swift and stored unescaped in the strings table, so without this the two
+    /// could never match.
     static func decodingUnicodeEscapes(_ source: String) -> String {
+        var source = source
+        for (escape, replacement) in [("\\\\", "\u{0}"), ("\\\"", "\""), ("\\n", "\n"), ("\\t", "\t")] {
+            source = source.replacingOccurrences(of: escape, with: replacement)
+        }
+        source = source.replacingOccurrences(of: "\u{0}", with: "\\")
         guard source.contains("\\u{") else { return source }
         guard let pattern = try? NSRegularExpression(pattern: "\\\\u\\{([0-9A-Fa-f]{1,8})\\}") else { return source }
         var out = source
@@ -115,7 +198,7 @@ final class LocalizationTests: XCTestCase {
     /// The whole point: every literal the interface shows has an English entry.
     func testEveryUserFacingLiteralHasAnEnglishTranslation() throws {
         let table = try Self.englishTable()
-        let keys = Self.sourceKeys()
+        let keys = Self.sourceKeys() + Self.enumLabelKeys()
         XCTAssertGreaterThan(keys.count, 100, "The scan found almost nothing — the patterns have drifted from the source.")
 
         let untranslated = keys

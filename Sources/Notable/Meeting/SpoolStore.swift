@@ -20,6 +20,9 @@ enum SpoolStore {
         /// (or a deferred, recovery-bound meeting) keeps them together with the
         /// recording they belong to.
         var notesURL: URL { directory.appendingPathComponent("notes.md") }
+        /// Written the moment the note's Markdown file exists on disk — see
+        /// ``markNoteWritten(_:)``.
+        var doneURL: URL { directory.appendingPathComponent("note-written") }
     }
 
     static var baseURL: URL {
@@ -48,7 +51,20 @@ enum SpoolStore {
         )
     }
 
-    /// Sessions left behind by a crash (meta.json present).
+    /// Marks a session as having produced its note.
+    ///
+    /// There is a window between the `.md` being written and the SQLite row
+    /// being inserted. A crash inside it — or an `insertMeeting` that throws —
+    /// left the spool looking untouched, so the next launch recovered it and
+    /// wrote a *second* note, "Titel (2)", for a meeting that already had one.
+    /// The marker is written first and costs nothing; the worst it can do is
+    /// skip a recovery for a note that does exist.
+    static func markNoteWritten(_ session: Session, noteURL: URL) {
+        try? Data(noteURL.path.utf8).write(to: session.doneURL, options: .atomic)
+    }
+
+    /// Sessions left behind by a crash (meta.json present) that have not already
+    /// produced a note.
     static func orphans(base: URL = SpoolStore.baseURL) -> [(session: Session, meta: Meta)] {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: base, includingPropertiesForKeys: nil
@@ -59,6 +75,11 @@ enum SpoolStore {
             guard let data = try? Data(contentsOf: session.metaURL),
                   let meta = try? JSONDecoder().decode(Meta.self, from: data)
             else { return nil }
+            // Its note was already written; recovering it would duplicate it.
+            guard !FileManager.default.fileExists(atPath: session.doneURL.path) else {
+                archive(session)
+                return nil
+            }
             return (session, meta)
         }
         .sorted { $0.meta.startedAt < $1.meta.startedAt }

@@ -121,11 +121,14 @@ final class MeetingEndToEndTests: XCTestCase {
         XCTAssertTrue(fileURL.path.hasPrefix(folderURL.path), "Notiz liegt nicht im gewählten Ordner")
         XCTAssertTrue(onDisk.contains("## Transkript"), "Transkript-Abschnitt fehlt in der Datei")
         XCTAssertTrue(onDisk.contains("**Ich:**"), "Attribution 'Ich' fehlt in der Datei")
-        XCTAssertTrue(onDisk.contains("## Zusammenfassung"), "Zusammenfassung-Abschnitt fehlt in der Datei")
+        // Either heading: the summary is written in the language of the
+        // *meeting*, so an English fixture legitimately produces "## Summary".
+        let summaryHeading = ["## Zusammenfassung", "## Summary"].first { onDisk.contains($0) }
+        XCTAssertNotNil(summaryHeading, "Zusammenfassung-Abschnitt fehlt in der Datei")
         // Duplicate-heading regression is covered deterministically in
         // MarkdownProjectorTests (the LLM's exact heading wording varies, so it
         // is the wrong thing to count here).
-        let afterSummary = onDisk.components(separatedBy: "## Zusammenfassung").last ?? ""
+        let afterSummary = onDisk.components(separatedBy: summaryHeading ?? "## Zusammenfassung").last ?? ""
         XCTAssertGreaterThan(
             afterSummary.trimmingCharacters(in: .whitespacesAndNewlines).count, 20,
             "Zusammenfassung-Abschnitt steht in der Datei, ist aber leer"

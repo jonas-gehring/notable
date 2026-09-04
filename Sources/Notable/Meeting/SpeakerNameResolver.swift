@@ -30,6 +30,30 @@ enum SpeakerNameResolver {
     /// straight inversion of who said what.
     static var ownerNameTokens: Set<String> { nameTokens(in: NSFullUserName()) }
 
+    /// Forms of address, which say nothing about *who* someone is.
+    private static let honorifics: Set<String> = [
+        "herr", "frau", "mr", "mrs", "ms", "miss", "dr", "prof", "professor",
+    ]
+
+    /// Is this the account holder under another spelling?
+    ///
+    /// The rule is **containment, not overlap**: every naming token of the
+    /// candidate has to be one of the owner's. "Herr Hoffmann" for an account
+    /// called "Alex Hoffmann" is the inversion this exists for and is blocked;
+    /// "Jonas Weber" for an account called "Jonas Gehring" is a colleague who
+    /// merely shares a first name and is now allowed — under the old
+    /// any-token-overlap rule that person could never be named at all, which is
+    /// a permanent false negative about a real human being.
+    static func isOwnerName(_ name: String, ownerTokens: Set<String>) -> Bool {
+        guard !ownerTokens.isEmpty else { return false }
+        let parts = Set(name.lowercased()
+            .components(separatedBy: CharacterSet.letters.inverted)
+            .filter { $0.count >= 2 })
+            .subtracting(honorifics)
+        guard !parts.isEmpty else { return false }
+        return parts.isSubset(of: ownerTokens)
+    }
+
     // MARK: - Pure: apply a mapping to segments
 
     /// Relabels `segment.speaker` where the validated mapping supplies a name.
@@ -99,8 +123,13 @@ enum SpeakerNameResolver {
             if name == micSpeakerLabel { return [:] }       // must never resolve *to* "Ich"
 
             if requireVerbatim, !nameIsAttested(name, tokens: transcriptTokens) { continue }
-            // The local user is "Ich"; their name on a remote label inverts the roles.
-            if !ownerTokens.isEmpty, nameIsAttested(name, tokens: ownerTokens) { continue }
+            // The local user is "Ich"; their name on a remote label inverts the
+            // roles. Compared as a *whole* name, not token-by-token: overlapping
+            // on one token banned every colleague who happens to share the
+            // user's first or last name — a permanent false negative for a real
+            // person, in exchange for catching an inversion the full-name
+            // comparison catches anyway.
+            if isOwnerName(name, ownerTokens: ownerTokens) { continue }
 
             // Two labels → one name means the model could not actually tell them
             // apart. Reject everything rather than pick a coin-flip.
@@ -234,14 +263,22 @@ enum SpeakerNameResolver {
         )
     }
 
-    /// True if the name — or any of its ≥ 2-letter tokens — appears among the
-    /// transcript tokens. Lets "tom" in the transcript attest a "Tom Berger"
-    /// candidate spelling while still rejecting a wholly invented name.
+    /// True if the name is attested in the transcript — by its **first name**
+    /// or by the full name, never by just any token it happens to contain.
+    ///
+    /// Accepting *any* ≥ 2-letter token made the check weaker than it looked:
+    /// "Frank Weber" was attested by the German adverb "frank", "Tim Berger" by
+    /// a "Tim" spoken about someone else entirely. A surname alone is not
+    /// enough either — people are addressed by their first name in a call, and
+    /// that is what makes the first name the evidence. By this file's own rule a
+    /// false positive is the worse error, so the looser half is gone.
     static func nameIsAttested(_ name: String, tokens transcriptTokens: Set<String>) -> Bool {
         let parts = name.lowercased()
             .components(separatedBy: CharacterSet.letters.inverted)
             .filter { $0.count >= 2 }
-        guard !parts.isEmpty else { return false }
-        return parts.contains { transcriptTokens.contains($0) }
+        guard let first = parts.first else { return false }
+        // The full name spoken as one token ("hoffmann" for a mononym) counts too.
+        return transcriptTokens.contains(first)
+            || (parts.count > 1 && transcriptTokens.contains(parts.joined()))
     }
 }

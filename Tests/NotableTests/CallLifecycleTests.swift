@@ -51,7 +51,7 @@ final class AudioProcessSnapshotTests: XCTestCase {
             entry("com.tinyspeck.slackmacgap", pid: 2, input: true),
             entry("us.zoom.xos", pid: 3, input: true),
         ])
-        XCTAssertEqual(snap.firstInput(bundleIDs: ["us.zoom.xos", "com.tinyspeck.slackmacgap"])?.pid, 3)
+        XCTAssertEqual(snap.inputEntry(anyOf: ["us.zoom.xos", "com.tinyspeck.slackmacgap"])?.pid, 3)
     }
 
     func testUnavailableSnapshotFindsNothing() {

@@ -24,6 +24,17 @@ enum TrackSilence {
     /// from "quiet", never "quiet" from "loud".
     static let peakThreshold: Float = 1e-4
 
+    /// The same judgement for a **live** meter, which reports RMS rather than
+    /// peak.
+    ///
+    /// An order of magnitude lower on purpose: the RMS of any signal is at most
+    /// its peak and usually far below it, so reusing `peakThreshold` on a meter
+    /// reading made the live watchdog *stricter* than the final verdict — a very
+    /// quiet but perfectly working microphone could be reported dead mid-call
+    /// and then found healthy by `isSilent` afterwards. The failures this exists
+    /// for measured exactly 0.0, so the gap costs nothing.
+    static let liveRMSThreshold: Float = 1e-5
+
     /// Below this length a track says nothing about whether the device works
     /// (a two-second recording can legitimately be silent), so it is never
     /// flagged.

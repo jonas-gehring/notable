@@ -160,4 +160,33 @@ final class ChatPromptTests: XCTestCase {
         )
         XCTAssertTrue(prompt.contains("Meeting: Weekly Sync am"))
     }
+
+    // MARK: - Review 2026-09-03
+
+    /// The fallback exists for the context window, so it has to have a ceiling.
+    func testExcerptStaysInsideItsCharacterBudget() {
+        let segments = (0..<400).map { index in
+            ChatTranscriptSegment(
+                speaker: "Sprecher 1",
+                start: Double(index),
+                text: "Wir haben über das Budget gesprochen und welche Entscheidungen getroffen wurden \(index)."
+            )
+        }
+        let picked = ChatPrompt.relevantSegments(
+            segments, for: "Welche Entscheidungen wurden zum Budget getroffen?", characterBudget: 2_000
+        )
+        let size = picked.reduce(0) { $0 + $1.text.count }
+        XCTAssertLessThanOrEqual(size, 2_000)
+        XCTAssertFalse(picked.isEmpty, "Ein Budget darf den Auszug nicht ganz leeren")
+    }
+
+    /// Stop words are not keywords — otherwise "welche/wurden/haben" match
+    /// every segment and the "excerpt" is the whole transcript.
+    func testStopWordsAreNotKeywords() {
+        let words = ChatPrompt.significantWords("Welche Entscheidungen wurden getroffen?")
+        XCTAssertTrue(words.contains("entscheidungen"))
+        for stopWord in ["welche", "wurden"] {
+            XCTAssertFalse(words.contains(stopWord), "\(stopWord) darf kein Schlüsselwort sein")
+        }
+    }
 }

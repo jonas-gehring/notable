@@ -7,12 +7,29 @@ enum MarkdownProjector {
         var title: String
         var date: Date
         var calendarEventTitle: String?
+        /// Who was invited, from the calendar event. Separate from the speakers
+        /// actually heard: an invitation is not attendance, and the note must
+        /// not claim someone spoke because they were on the list.
+        var attendees: [String] = []
         var segments: [(speaker: String?, text: String)]
         var summary: String?
         /// The user's own free-text notes, kept verbatim as a safety copy (and
         /// woven into the summary elsewhere). Default nil keeps notes-free
         /// rendering byte-for-byte identical.
         var userNotes: String? = nil
+    }
+
+    /// The distinct speaker labels the transcript actually carries, in the
+    /// order they first speak. `"Ich"` is the local user and comes first
+    /// wherever it appears at all.
+    static func speakers(in note: Note) -> [String] {
+        var seen: [String] = []
+        for segment in note.segments {
+            guard let speaker = segment.speaker?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !speaker.isEmpty, !seen.contains(speaker) else { continue }
+            seen.append(speaker)
+        }
+        return seen
     }
 
     static func render(_ note: Note) -> String {
@@ -27,11 +44,41 @@ enum MarkdownProjector {
         if let event = note.calendarEventTitle {
             lines.append("event: \"\(yamlEscaped(event))\"")
         }
+        // A YAML list, so anything reading these files (Obsidian, a script) can
+        // filter by person without parsing the body.
+        if !note.attendees.isEmpty {
+            lines.append("attendees:")
+            for attendee in note.attendees {
+                lines.append("  - \"\(yamlEscaped(attendee))\"")
+            }
+        }
+        let speakers = Self.speakers(in: note)
+        if !speakers.isEmpty {
+            lines.append("speakers:")
+            for speaker in speakers {
+                lines.append("  - \"\(yamlEscaped(speaker))\"")
+            }
+        }
         lines.append("app: Notable")
         lines.append("---")
         lines.append("")
         lines.append("# \(note.title)")
         lines.append("")
+
+        // Who was there, right under the title: the first question anyone asks
+        // of a meeting note a week later, and it used to be answerable only by
+        // reading the whole transcript for speaker labels.
+        if !note.attendees.isEmpty || !speakers.isEmpty {
+            lines.append("## Teilnehmer")
+            lines.append("")
+            if !note.attendees.isEmpty {
+                lines.append("Eingeladen: " + note.attendees.joined(separator: ", "))
+            }
+            if !speakers.isEmpty {
+                lines.append("Im Transkript: " + speakers.joined(separator: ", "))
+            }
+            lines.append("")
+        }
 
         // The user's own notes come first and verbatim: they are the human
         // safety copy, and must survive even if summary/transcript are wrong.

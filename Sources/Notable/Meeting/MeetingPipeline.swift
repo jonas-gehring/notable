@@ -38,8 +38,43 @@ enum MeetingPipeline {
         return specs.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
     }
 
+    /// How the diarizer is asked to separate the remote speakers.
+    ///
+    /// Three deliberate departures from the defaults, all of them about the
+    /// same failure: a two-person call coming back as one speaker, or a
+    /// three-person call coming back as six.
+    ///
+    /// - `clusteringThreshold` 0.62 instead of 0.7. The track handed to the
+    ///   diarizer is already VAD-compacted, so the embeddings are computed on
+    ///   speech only and sit closer together than the library's default assumes;
+    ///   at 0.7 two distinct remote voices routinely merged into one label, and
+    ///   a merged label is the error that cannot be repaired afterwards — a
+    ///   split one at least shows up as "Sprecher 2" and "Sprecher 3" saying
+    ///   compatible things.
+    /// - `minSpeechDuration` 0.4 instead of 1.0, matching
+    ///   `minimumSegmentDuration`: a one-second floor threw away every "Ja." and
+    ///   "Genau." before they could even be attributed.
+    /// - `numClusters` from the calendar when it says something. An invitation
+    ///   with four people is the best prior available for how many voices are on
+    ///   the far end, and it costs nothing when there is none.
+    static func diarizerConfig(expectedSpeakers: Int?) -> DiarizerConfig {
+        DiarizerConfig(
+            clusteringThreshold: 0.62,
+            minSpeechDuration: 0.4,
+            minSilenceGap: 0.4,
+            numClusters: expectedSpeakers ?? -1
+        )
+    }
+
     /// Segments too short to transcribe meaningfully are dropped.
-    static let minimumSegmentDuration: TimeInterval = 0.5
+    ///
+    /// 0.25 s, not 0.5: at half a second the dropped slices were exactly the
+    /// one-word answers — "Ja.", "Nein.", "Okay." — that a question from "Ich"
+    /// is aimed at, so the transcript recorded the question and lost the reply.
+    /// FluidAudio's VAD emits speech from 0.15 s, Parakeet transcribes a 0.4 s
+    /// clip without complaint (dictation does it daily), and anything that comes
+    /// back empty is discarded a few lines below anyway.
+    static let minimumSegmentDuration: TimeInterval = 0.25
 
     /// Parakeet pads every call to 240 000 samples (15 s) before the encoder
     /// runs, so a 0.8 s segment costs the same as a 15 s one. A meeting is
@@ -100,10 +135,16 @@ enum MeetingPipeline {
         }
     }
 
+    /// - Parameter expectedSpeakers: how many voices the *remote* side is
+    ///   expected to have — the calendar's invitee count minus the local user.
+    ///   `nil` means "let the diarizer decide", which is what a call with no
+    ///   calendar event gets. It is a prior, not a promise: someone who never
+    ///   speaks costs nothing, and an uninvited joiner still gets a label.
     static func process(
         micSamples: [Float],
         systemSamples: [Float],
-        transcriber: any TranscriptionEngine
+        transcriber: any TranscriptionEngine,
+        expectedSpeakers: Int? = nil
     ) async throws -> [MeetingTranscriptSegment] {
         let sampleRate = PCMDownsampler.targetSampleRate
 
@@ -149,7 +190,7 @@ enum MeetingPipeline {
 
             if !compact.isEmpty {
                 let models = try await DiarizerModels.downloadIfNeeded()
-                let diarizer = DiarizerManager()
+                let diarizer = DiarizerManager(config: Self.diarizerConfig(expectedSpeakers: expectedSpeakers))
                 diarizer.initialize(models: models)
                 defer { diarizer.cleanup() }
                 let result = try diarizer.performCompleteDiarization(compact, sampleRate: sampleRate)

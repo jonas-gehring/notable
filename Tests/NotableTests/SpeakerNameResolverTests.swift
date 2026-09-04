@@ -51,6 +51,28 @@ final class SpeakerNameResolverTests: XCTestCase {
         XCTAssertEqual(named.map(\.speaker), ["Sprecher 1", "Anna"])
     }
 
+    /// A colleague who merely shares the account holder's first name must still
+    /// be nameable — the old token-overlap rule banned them for good.
+    func testColleagueSharingAFirstNameIsStillNamed() {
+        let segments = [seg("Sprecher 1", "Hier spricht Jonas Weber.")]
+        let named = SpeakerNameResolver.applyMapping(
+            segments,
+            mapping: ["Sprecher 1": "Jonas Weber"],
+            ownerTokens: SpeakerNameResolver.nameTokens(in: "Jonas Gehring")
+        )
+        XCTAssertEqual(named.map(\.speaker), ["Jonas Weber"])
+    }
+
+    /// An adverb that happens to look like a first name is not evidence that a
+    /// person was in the call.
+    func testNameIsNotAttestedByACoincidentalWord() {
+        let tokens: Set<String> = ["das", "war", "frank", "gesagt"]
+        XCTAssertFalse(SpeakerNameResolver.nameIsAttested("Weber Frank", tokens: tokens),
+                       "Nachname allein darf nicht belegen")
+        XCTAssertTrue(SpeakerNameResolver.nameIsAttested("Frank Weber", tokens: tokens),
+                      "Vorname im Transkript belegt weiterhin")
+    }
+
     /// Without a known account name the gate does nothing — it must not become a
     /// silent blanket filter on machines where the account has no full name.
     func testOwnerGateIsInertWithoutAnOwnerName() {

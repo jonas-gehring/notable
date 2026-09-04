@@ -44,15 +44,6 @@ struct AudioProcessSnapshot: Sendable, Equatable {
         entries.first { Self.matches($0.bundleID, bundleID) && $0.isRunningInput }
     }
 
-    /// The first bundle id from `bundleIDs` — in the given order, so callers
-    /// express priority — that has the microphone open.
-    func firstInput(bundleIDs: [String]) -> Entry? {
-        for id in bundleIDs {
-            if let entry = inputEntry(bundleID: id) { return entry }
-        }
-        return nil
-    }
-
     /// Microphone check across several process bundle ids — one app's audio may
     /// live under more than one (Safari: `com.apple.Safari` *and*
     /// `com.apple.WebKit`).

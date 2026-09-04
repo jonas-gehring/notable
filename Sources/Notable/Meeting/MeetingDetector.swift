@@ -50,12 +50,6 @@ struct DetectionStateMachine: Equatable, Sendable {
         return nil
     }
 
-    /// Legacy shape, kept for the fallback path (and its tests) where the only
-    /// signals available are "a known app is running" plus a global microphone
-    /// bit: the app running *is* the end signal there.
-    mutating func tick(candidatePresent: Bool, micActive: Bool) -> Event? {
-        tick(startSignal: candidatePresent && micActive, callStillActive: candidatePresent)
-    }
 }
 
 /// Detects active calls per *process*: a known meeting app (or a browser) that
@@ -176,13 +170,17 @@ final class MeetingDetector: ObservableObject {
             stillActive = legacy != nil
         }
 
-        if !stateMachine.isActive {
+        // Only publish an actual change: this is `@Published` and the poll runs
+        // every five seconds, so an unconditional assignment redrew every view
+        // holding the detector as an `EnvironmentObject` twelve times a minute
+        // for nothing.
+        if !stateMachine.isActive, currentCandidate != candidate {
             currentCandidate = candidate
         }
 
         switch stateMachine.tick(startSignal: startSignal, callStillActive: stillActive) {
         case .started:
-            let started = candidate ?? Candidate(sourceName: "Unbekannt")
+            let started = candidate ?? Candidate(sourceName: String(localized: "Unbekannt"))
             currentCandidate = started
             activeCandidate = started
             onMeetingStart?(started)

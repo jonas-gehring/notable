@@ -112,9 +112,25 @@ final class ConsentCoordinator {
         }
     }
 
+    /// Only claim `.recording` once a recording actually started.
+    ///
+    /// The status used to be set first and the result of `startAutomatically`
+    /// thrown away, so a start that could not happen — another recording still
+    /// running, or a microphone that would not open — left the user looking at a
+    /// coordinator that said "recording" after they had explicitly tapped
+    /// "Aufnehmen" in the notification.
     private func startRecording(source: String) {
+        if let refusal = meeting.startAutomatically(source: source) {
+            status = .declined
+            switch refusal {
+            case .alreadyRecording, .captureFailed:
+                // `MeetingController` already put the reason in `statusMessage`;
+                // repeating it here would only say it twice in two places.
+                break
+            }
+            return
+        }
         status = .recording
-        meeting.startAutomatically(source: source)
     }
 
     private var autoRecordEnabled: Bool {

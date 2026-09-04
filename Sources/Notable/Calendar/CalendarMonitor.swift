@@ -31,8 +31,16 @@ final class CalendarMonitor: ObservableObject {
     }
 
     /// The event a recording started at `date` most plausibly belongs to:
-    /// currently running (or starting within 5 minutes), not all-day,
-    /// preferring the one that started most recently.
+    /// currently running (or starting within 5 minutes), not all-day, not
+    /// declined.
+    ///
+    /// **A running event beats an upcoming one.** Sorting purely by start date
+    /// descending put the 10:30 slot ahead of the 10:00 call that was still in
+    /// progress at 10:27, so an overrunning meeting was filed under the meeting
+    /// that had not begun — wrong title, wrong `calendarEventID`, and the wrong
+    /// attendee pool handed to the speaker naming. Among equals, the one that
+    /// started most recently still wins, and an event with attendees beats one
+    /// without: attendees are what the naming actually uses.
     func currentEvent(at date: Date = Date()) -> EventMatch? {
         guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
 
@@ -44,7 +52,9 @@ final class CalendarMonitor: ObservableObject {
         let candidate = store.events(matching: predicate)
             .filter { !$0.isAllDay }
             .filter { $0.endDate > date && $0.startDate < date.addingTimeInterval(5 * 60) }
-            .sorted { $0.startDate > $1.startDate }
+            // An event the user said no to is not the meeting they are in.
+            .filter { !Self.isDeclined($0) && $0.status != .canceled }
+            .sorted { Self.ranks($0, over: $1, at: date) }
             .first
 
         guard let candidate, let identifier = candidate.eventIdentifier else { return nil }
@@ -53,6 +63,22 @@ final class CalendarMonitor: ObservableObject {
             eventIdentifier: identifier,
             attendeeNames: Self.attendeeNames(of: candidate)
         )
+    }
+
+    /// Did the user decline this invitation? EventKit has no direct accessor —
+    /// the answer is the current user's own row in the attendee list.
+    static func isDeclined(_ event: EKEvent) -> Bool {
+        event.attendees?.contains { $0.isCurrentUser && $0.participantStatus == .declined } ?? false
+    }
+
+    /// Ordering for `currentEvent`: running first, then the later start, then
+    /// the one that actually has attendees.
+    static func ranks(_ lhs: EKEvent, over rhs: EKEvent, at date: Date) -> Bool {
+        let lhsRunning = lhs.startDate <= date
+        let rhsRunning = rhs.startDate <= date
+        if lhsRunning != rhsRunning { return lhsRunning }
+        if lhs.startDate != rhs.startDate { return lhs.startDate > rhs.startDate }
+        return (lhs.attendees?.count ?? 0) > (rhs.attendees?.count ?? 0)
     }
 
     struct UpcomingEvent: Sendable {

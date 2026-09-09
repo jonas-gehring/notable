@@ -507,8 +507,10 @@ final class MeetingController: ObservableObject {
         guard case .idle = capture, !isRecovering,
               let (session, meta) = SpoolStore.orphans().first else { return }
 
-        let mic = SpoolStore.readSamples(session.micURL)
-        let system = SpoolStore.readSamples(session.systemURL)
+        // Whatever version wrote the spool — a session that outlived an update
+        // is exactly the case recovery exists for.
+        let mic = SpoolStore.readTrack(.mic, of: session)
+        let system = SpoolStore.readTrack(.system, of: session)
         let sampleRate = PCMDownsampler.targetSampleRate
         // Notes typed before the crash live in the spool next to the audio, and
         // they outrank the "too short to matter" rule: a two-second recording

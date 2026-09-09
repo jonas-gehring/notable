@@ -5,6 +5,10 @@ import os
 /// Accumulates PCM buffers of arbitrary format into 16 kHz mono Float32 —
 /// the input format for VAD, ASR, and diarization. Append is called from
 /// audio threads; the buffer is guarded by a lock.
+///
+/// **In memory it is always Float32; on disk it is whatever the spool file's
+/// extension says.** Dictation never spools, so the latency-critical path never
+/// converts anything; a meeting writes Int16 and halves what an hour costs.
 final class PCMDownsampler: @unchecked Sendable {
     static let targetSampleRate = 16_000
 
@@ -20,6 +24,11 @@ final class PCMDownsampler: @unchecked Sendable {
     private var levelValue: Float = 0
     private var spoolHandle: FileHandle?
     private var spoolURL: URL?
+    /// Sample format of the spool file, taken from its extension so the write
+    /// side and `SpoolAudio.read` can never disagree.
+    private var spoolFormat: SpoolAudio.Format = SpoolAudio.current
+    /// Reused by the Int16 encoder — this runs once per audio chunk.
+    private var encodeScratch: [Int16] = []
     /// Samples written since reset() — RAM and spool together.
     private var capturedCount = 0
     /// Wall clock at reset(); the reference for gap padding.
@@ -46,6 +55,7 @@ final class PCMDownsampler: @unchecked Sendable {
         try? spoolHandle?.close()
         spoolHandle = nil
         spoolURL = url
+        spoolFormat = url.map(SpoolAudio.Format.of) ?? SpoolAudio.current
         if let url {
             FileManager.default.createFile(atPath: url.path, contents: nil)
             spoolHandle = try FileHandle(forWritingTo: url)
@@ -143,7 +153,9 @@ final class PCMDownsampler: @unchecked Sendable {
             // variant avoids an uncatchable NSException on disk-full; on
             // failure we fall back to RAM accumulation.
             do {
-                try spoolHandle.write(contentsOf: Data(buffer: chunk))
+                try spoolHandle.write(
+                    contentsOf: SpoolAudio.encode(chunk, as: spoolFormat, scratch: &encodeScratch)
+                )
             } catch {
                 try? spoolHandle.close()
                 self.spoolHandle = nil

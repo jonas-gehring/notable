@@ -1,8 +1,10 @@
 import Foundation
 
-/// Disk spool for in-flight meeting recordings: raw Float32 PCM per track
+/// Disk spool for in-flight meeting recordings: one raw PCM file per track
 /// plus a metadata file. A crash mid-meeting leaves the session on disk;
 /// the next launch recovers it into a note instead of losing the meeting.
+///
+/// The sample format lives in the file extension — see ``SpoolAudio``.
 enum SpoolStore {
     struct Meta: Codable, Sendable {
         var startedAt: Date
@@ -10,11 +12,37 @@ enum SpoolStore {
         var eventID: String?
     }
 
+    /// The two audio tracks a session records. Their base names are fixed; the
+    /// extension says what is in them.
+    enum Track: String, CaseIterable, Sendable {
+        case mic
+        case system
+    }
+
     struct Session: Sendable {
         let directory: URL
 
-        var micURL: URL { directory.appendingPathComponent("mic.pcm") }
-        var systemURL: URL { directory.appendingPathComponent("system.pcm") }
+        /// Where a *new* recording writes this track.
+        func writeURL(_ track: Track) -> URL {
+            directory
+                .appendingPathComponent(track.rawValue)
+                .appendingPathExtension(SpoolAudio.current.fileExtension)
+        }
+
+        /// The file that actually holds this track, whatever wrote it.
+        ///
+        /// A spool that survives an update was written by the previous version,
+        /// so recovery has to find `mic.pcm` as readily as `mic.i16` — the one
+        /// case where getting the format wrong loses a whole meeting.
+        func recordedURL(_ track: Track) -> URL? {
+            let candidates: [SpoolAudio.Format] = [.int16, .float32, .alac]
+            return candidates
+                .map { directory.appendingPathComponent(track.rawValue).appendingPathExtension($0.fileExtension) }
+                .first { FileManager.default.fileExists(atPath: $0.path) }
+        }
+
+        var micURL: URL { writeURL(.mic) }
+        var systemURL: URL { writeURL(.system) }
         var metaURL: URL { directory.appendingPathComponent("meta.json") }
         /// The notes typed during the call. Lives beside the audio so a crash
         /// (or a deferred, recovery-bound meeting) keeps them together with the
@@ -85,20 +113,16 @@ enum SpoolStore {
         .sorted { $0.meta.startedAt < $1.meta.startedAt }
     }
 
-    /// Reads a raw Float32 PCM spool file; missing file = empty track.
-    /// Memory-mapped: an hour-long track is ~230 MB, and the pipeline reads
-    /// two of them — eager `Data(contentsOf:)` would double the peak on top
-    /// of the unavoidable [Float] copy (the ASR API takes [Float]).
+    /// Reads a spool file in whichever format its extension declares; a
+    /// missing file is an empty track.
     static func readSamples(_ url: URL) -> [Float] {
-        guard let data = try? Data(contentsOf: url, options: .alwaysMapped), !data.isEmpty else { return [] }
-        // A crash can truncate the file mid-float; convert whole floats only.
-        let count = data.count / MemoryLayout<Float>.size
-        guard count > 0 else { return [] }
-        var samples = [Float](repeating: 0, count: count)
-        samples.withUnsafeMutableBufferPointer { buffer in
-            _ = data.copyBytes(to: buffer, from: 0 ..< count * MemoryLayout<Float>.size)
-        }
-        return samples
+        SpoolAudio.read(url)
+    }
+
+    /// Reads one track of a session, finding the file whatever version wrote it.
+    static func readTrack(_ track: Track, of session: Session) -> [Float] {
+        guard let url = session.recordedURL(track) else { return [] }
+        return SpoolAudio.read(url)
     }
 
     static func remove(_ session: Session) {
@@ -134,9 +158,15 @@ enum SpoolStore {
 
     static func archive(_ session: Session) {
         try? FileManager.default.createDirectory(at: archiveURL, withIntermediateDirectories: true)
-        try? FileManager.default.moveItem(
-            at: session.directory,
-            to: archiveURL.appendingPathComponent(session.directory.lastPathComponent)
-        )
+        let destination = archiveURL.appendingPathComponent(session.directory.lastPathComponent)
+        do {
+            try FileManager.default.moveItem(at: session.directory, to: destination)
+        } catch {
+            return
+        }
+        // The move is a rename and is instant; the re-encode is minutes of I/O,
+        // so it happens afterwards and out of the way. Failing it leaves the
+        // raw tracks in place — the session stays large, nothing is lost.
+        SpoolArchiver.compressInBackground(sessionAt: destination)
     }
 }

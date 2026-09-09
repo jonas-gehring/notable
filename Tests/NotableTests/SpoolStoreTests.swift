@@ -14,11 +14,23 @@ final class SpoolStoreTests: XCTestCase {
         )
         let session = try SpoolStore.create(meta: meta, base: base)
 
-        // Raw Float32 PCM round trip.
+        // Int16 round trip through the format new recordings are written in.
         let samples: [Float] = [0.1, -0.5, 0.25, 1.0, -1.0]
-        try samples.withUnsafeBufferPointer { Data(buffer: $0) }.write(to: session.micURL)
-        XCTAssertEqual(SpoolStore.readSamples(session.micURL), samples)
+        let encoded = samples.map(SpoolAudio.encode)
+        try encoded.withUnsafeBufferPointer { Data(buffer: $0) }.write(to: session.micURL)
+        XCTAssertEqual(session.micURL.lastPathComponent, "mic.i16")
+        for (read, original) in zip(SpoolStore.readSamples(session.micURL), samples) {
+            XCTAssertEqual(read, original, accuracy: SpoolAudio.roundTripError)
+        }
         XCTAssertTrue(SpoolStore.readSamples(session.systemURL).isEmpty, "Fehlende Datei = leere Spur")
+
+        // A spool written before the format change stays readable — this is
+        // the case crash recovery exists for, across an update.
+        let legacy = session.directory.appendingPathComponent("system.pcm")
+        try samples.withUnsafeBufferPointer { Data(buffer: $0) }.write(to: legacy)
+        XCTAssertEqual(SpoolStore.readTrack(.system, of: session), samples,
+                       "Float32-Bestandsdatei wird unverändert gelesen")
+        XCTAssertEqual(session.recordedURL(.system)?.lastPathComponent, "system.pcm")
 
         let orphans = SpoolStore.orphans(base: base)
         XCTAssertEqual(orphans.count, 1)

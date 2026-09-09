@@ -125,6 +125,12 @@ targets:
       # The snapshot type is pure; only the CoreAudio fetch touches hardware.
       - path: Sources/Notable/Meeting/AudioProcessMonitor.swift
       - path: Sources/Notable/Meeting/SpoolStore.swift
+      # The spool's sample formats and the lossless archive re-encode. Both are
+      # pure file work, and both are the kind of thing that must be proved
+      # rather than believed: getting a format wrong destroys the only copy of
+      # a recording that its transcription already failed on.
+      - path: Sources/Notable/Meeting/SpoolAudio.swift
+      - path: Sources/Notable/Meeting/SpoolArchiver.swift
       # Pure core of the live meeting notes (timestamps, storable text). The
       # controller/window around it is @MainActor UI and stays out.
       - path: Sources/Notable/Meeting/LiveNotes.swift

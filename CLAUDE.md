@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status: v1 shipped and installed
 
-**Everything below describes real, tested code** (466 tests, 1 skip). The app is installed at `/Applications/Notable.app` and under daily use. The build plan that got here is `PLAN.md` — all phases including Phase 8 (dictation quality) are implemented.
+**Everything below describes real, tested code** (524 tests, 1 skip). The app is installed at `/Applications/Notable.app` and under daily use. The build plan that got here is `PLAN.md` — all phases including Phase 8 (dictation quality) are implemented.
 
-Runtime health (measured 2026-07-12, Release build): idle CPU 0.0 %, RSS ~120 MB (ASR models warm-loaded at launch — deliberate), leaks 14 KB of framework XPC-cache noise.
+Runtime health (measured 2026-09-07 on the running 1.1.0 build, up 2 d 15 h): idle CPU 0.0 %, **RSS 28 MB**. The earlier note here claimed ~120 MB with "ASR models warm-loaded at launch — deliberate"; the number no longer matches. `DictationController.start()` does still call `loadModel()` at launch, so the likely explanation is that macOS paged the weights out over two idle days rather than that the loading changed — but that is a guess, and only the 28 MB is measured. Anyone quoting a baseline here should measure it again shortly after a launch. Leaks were 14 KB of framework XPC-cache noise when last measured (2026-07-12).
+
+**What Notable puts on disk is not visible inside Notable** (measured 2026-09-07): 3.9 GB `spool-archive`, 80 MB `spool-failed`, 1.1 GB of ASR models under `~/Library/Application Support/FluidAudio/Models` — 5.1 GB, of which the storage pane shows two numbers and never mentions the models. See [`specs/21`](specs/21-spool-format-und-speicherplatz.md) and [`specs/20`](specs/20-modellverwaltung.md).
 
 ## Scope: personal tool, not a product
 

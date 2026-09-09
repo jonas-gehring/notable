@@ -25,8 +25,19 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [12](12-prozess-supervision.md) | **Prozess-Supervision** — Absturzerkennung, KeepAlive-LaunchAgent | S–M | Neustart-Schleife, zwei Startpfade | ⏸ zurückgestellt |
 | [13](13-ios-capture-companion.md) | **iOS-Capture-Companion** — das iPhone nimmt auf, der Mac transkribiert | ~7 Tage | iCloud-Entitlement bei Developer-ID-Verteilung | 📋 Entwurf |
 | [14](14-ios-vollport.md) | **Notable für iOS/iPadOS** — eigenständiger Client, On-Device-ASR, CloudKit-Sync | ~4 Wochen | ASR-Tempo auf dem Telefon, CloudKit ohne Ausweichweg | 📋 Entwurf |
+| 15–19 | **Textverbesserung, Aufbewahrung, Notch-HUD, Textbausteine, Statistik-Ausbau** — als GitHub-Issues #1–#5 geschrieben, nicht als Datei | — | — | gebaut, archiviert in `notable-issues-archiv-20260902.md` |
+| [20](20-modellverwaltung.md) | **Modellverwaltung** — 1,1 GB Modelle sichtbar, reparierbar, an die App-Version gebunden | S + M | Verzeichnisnamen gehören FluidAudio, nicht uns | 📋 Entwurf |
+| [21](21-spool-format-und-speicherplatz.md) | **Spool-Format & sichtbarer Speicherplatz** — Int16 statt Float32, ALAC im Archiv, die Zahl endlich sichtbar | S + S–M + S | ein Formatfehler zerstört die Notfallkopie | 📋 Entwurf |
+| [22](22-oberflaeche-entdoppeln.md) | **Oberfläche entdoppeln** — eine Implementierung je Begriff, eine Datei je Einstellungsseite | M | reiner Umbau ohne Testkriterium außer „vorher genauso" | 📋 Entwurf |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
+
+**Zu 20–22:** Sie stammen nicht aus einem Feature-Wunsch, sondern aus einer Messung an
+der produktiven Installation am 2026-09-07 — 5,1 GB Platzbedarf, den die App nirgends
+nennt, davon rund die Hälfte reines Format. Sie sind unabhängig voneinander und in
+dieser Reihenfolge sinnvoll: 21 gibt sofort Platz zurück, 20 macht den zweitgrößten
+Posten überhaupt erst sichtbar, 22 ist Pflege ohne sichtbaren Effekt. Keine von ihnen
+fügt eine Funktion hinzu.
 
 Daneben liegen die Specs der ersten Ausbaustufe — `note-management-ui.md`,
 `speaker-naming.md`, `auto-detect-consent.md`, `release-and-signing.md` und die
@@ -90,8 +101,10 @@ Gelten für alle Specs und werden in jeder vorausgesetzt:
 
 ## Schema-Migrationen
 
-Alle neuen Spalten folgen dem idempotenten `migrateAddColumn`-Muster in
-`RecordingStore.ensureOpen()`. Über alle Specs hinweg kamen hinzu:
+Seit v1.1.0 laufen sie **nummeriert** über `PRAGMA user_version` in `SQLiteConnection`
+— das frühere idempotente `migrateAddColumn` in `RecordingStore.ensureOpen()` verwarf
+jeden Fehler außer dem erwarteten und meldete ihn später als „no such column" aus einer
+fremden Query. Über alle Specs hinweg kamen hinzu:
 
 - `recordings.word_count INTEGER` (Spec 01)
 - `recordings.source_app TEXT` (Spec 03, auch von der Statistik genutzt — ein Name, eine
@@ -101,6 +114,9 @@ Alle neuen Spalten folgen dem idempotenten `migrateAddColumn`-Muster in
 - `recordings.engine TEXT`, `recordings.latency_ms INTEGER`, `recordings.enhanced INTEGER`
 - neue Tabelle `chat_messages` (Spec 02)
 - neue Tabelle `dictionary_candidates` (Spec 06)
+- `recordings.calendar_event_title TEXT`, `recordings.attendees TEXT` — Kalendertitel
+  und Teilnehmerliste lagen nur im Frontmatter, also verlor sie jedes Umbenennen
+- FTS5-Tabelle `segments_fts` über `segments.text`, trigger-synchronisiert
 
 Alle neuen Spalten sind nullable und werden **nicht** rückwirkend befüllt: die
 Bestandsdaten hatten diese Werte nie, und eine geschätzte Zahl in einer Statistik ist

@@ -26,7 +26,7 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [13](13-ios-capture-companion.md) | **iOS-Capture-Companion** — das iPhone nimmt auf, der Mac transkribiert | ~7 Tage | iCloud-Entitlement bei Developer-ID-Verteilung | 📋 Entwurf |
 | [14](14-ios-vollport.md) | **Notable für iOS/iPadOS** — eigenständiger Client, On-Device-ASR, CloudKit-Sync | ~4 Wochen | ASR-Tempo auf dem Telefon, CloudKit ohne Ausweichweg | 📋 Entwurf |
 | 15–19 | **Textverbesserung, Aufbewahrung, Notch-HUD, Textbausteine, Statistik-Ausbau** — als GitHub-Issues #1–#5 geschrieben, nicht als Datei | — | — | gebaut, archiviert in `notable-issues-archiv-20260902.md` |
-| [20](20-modellverwaltung.md) | **Modellverwaltung** — 1,1 GB Modelle sichtbar, reparierbar, an die App-Version gebunden | S + M | Verzeichnisnamen gehören FluidAudio, nicht uns | Stufe 1 gebaut, Stufe 2 offen |
+| [20](20-modellverwaltung.md) | **Modellverwaltung** — 1,1 GB Modelle sichtbar, reparierbar, an die App-Version gebunden | S + M–L | FluidAudio lädt von `resolve/main` — es gibt keine Revision | Stufe 1 gebaut, Stufe 2 neu gefasst und offen |
 | [21](21-spool-format-und-speicherplatz.md) | **Spool-Format & sichtbarer Speicherplatz** — Int16 statt Float32, ALAC im Archiv, die Zahl endlich sichtbar | S + S–M + S | ein Formatfehler zerstört die Notfallkopie | gebaut |
 | [22](22-oberflaeche-entdoppeln.md) | **Oberfläche entdoppeln** — eine Implementierung je Begriff, eine Datei je Einstellungsseite | M | reiner Umbau ohne Testkriterium außer „vorher genauso" | gebaut |
 

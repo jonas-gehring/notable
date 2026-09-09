@@ -16,11 +16,14 @@ Drei Aufrufe laden Modelle, alle erst zur Laufzeit und alle von HuggingFace:
 | `VadManager()` | `MeetingPipeline.swift:152` | dito |
 | `WhisperKit(model:)` | `WhisperTranscriber.swift:66` | WhisperKit-eigener Cache |
 
-- **Notable pinnt die Paket-Version, nicht die Modell-Revision.** `project.yml` sagt
-  `FluidAudio: from: 0.15.0` (aufgelöst auf 0.15.5) und `WhisperKit: from: 0.9.0`.
-  *Welches* HF-Repo in welcher Revision dahinter liegt, entscheidet die Bibliothek. Ein
-  Modellwechsel passiert also, wenn FluidAudio ihn beschließt, beim nächsten kalten
-  Cache, ohne Ankündigung und ohne dass irgendwo steht, was vorher da war.
+- **Es gibt überhaupt keine Modell-Revision.** `project.yml` sagt
+  `FluidAudio: from: 0.15.0` (aufgelöst auf 0.15.5) und `WhisperKit: from: 0.9.0` —
+  das sind Paket-Versionen. *Welches* HF-Repo dahinter liegt, entscheidet die
+  Bibliothek; in welchem Stand, entscheidet niemand: `ModelRegistry.swift:57` lädt
+  von `<baseURL>/<repoPath>/**resolve/main**/<filePath>`. Wer nach dem Repo pusht,
+  ändert damit, was eine frische Installation bekommt — jederzeit, ohne
+  Versionssprung, und auch bei exakt gepinnter FluidAudio-Version. Der naheliegende
+  billige Ausweg („dann pinn eben `exactVersion`") trägt hier also nicht.
 - **Es gibt keine Integritätsprüfung.** `AsrModels.modelsExist(at:version:)`
   (`ParakeetTranscriber.swift:27`) prüft *Anwesenheit*, nicht Vollständigkeit. Ein
   abgebrochener Download hinterlässt ein Verzeichnis, das „existiert".
@@ -42,6 +45,12 @@ Drei Aufrufe laden Modelle, alle erst zur Laufzeit und alle von HuggingFace:
 
   Das `-coreml`-Suffix ist eine Namensänderung zwischen zwei FluidAudio-Versionen.
   Weder FluidAudio noch Notable entfernt den alten Satz — er bleibt liegen, für immer.
+
+- **Der Ordner heißt `FluidAudio`, nicht `Notable`.** Er trägt den Namen einer
+  Bibliothek, von der der Nutzer nie gehört hat, weil
+  `MLModelConfigurationUtils.defaultModelsDirectory()` das so entscheidet und
+  Notable nie ein Ziel übergeben hat — obwohl `AsrModels.downloadAndLoad(to:)`
+  und `DiarizerModels.load(from:)` eines entgegennehmen. Siehe [§3.4](#der-ordner-heißt-dann-notable).
 
 - Daneben liegen 724 MB `~/.cache/huggingface/hub` mit `aufklarer/Parakeet-*` vom
   2026-06-19. **Das stammt nicht aus Notable** (`git log --all -S"aufklarer"` ist leer),
@@ -92,24 +101,109 @@ löschen ist irreversibel.
 **Ein unvollständiges Modell darf neu geladen werden** — Verzeichnis weg, Slot neu
 laden. Das ist heute nur über „App löschen und neu installieren" erreichbar.
 
-### 3.4 Stufe 2 — Modelle ans Release hängen
+### 3.4 Stufe 2 — eigener Bezug, eigener Ordner, kein aufgeblähtes Release
 
-Die eigentliche Antwort auf „kann das nicht nativ über die App":
+Der ursprüngliche Entwurf hier lautete „die CoreML-Bundles als Assets an jedes
+`Notable-x.y.z`-Release hängen". Das ist verworfen: rund ein Gigabyte an jeder
+Veröffentlichung, auch an einem Patch, der eine Textzeile ändert.
 
-- Die CoreML-Bundles werden als Assets neben `Notable-x.y.z.zip` ans GitHub-Release
-  gehängt und über **denselben Pfad geladen wie das App-Update** — inklusive der
-  Signatur-/Team-ID-Prüfung aus `UpdateInstaller.verifySignature`.
-- Damit ist die Modell-Revision an die App-Version gebunden: ein Modellwechsel ist ein
-  Release, kein stiller Nebeneffekt eines Paket-Updates.
-- HuggingFace fällt als Laufzeit-Abhängigkeit weg. Das ist kein Datenschutzgewinn (es
-  ging nie Audio dorthin, nur ein GET), sondern ein Reproduzierbarkeits-Gewinn: heute
-  kann derselbe App-Build auf zwei Rechnern zwei verschiedene Modelle benutzen.
-- **Nicht** ins `.app`-Bundle einbacken: 1,1 GB App, jede Notarisierung um eine
+#### Warum es überhaupt sein muss
+
+`ModelRegistry.swift:57` in FluidAudio baut die Download-URL so:
+
+```swift
+let urlString = "\(baseURL)/\(repoPath)/resolve/main/\(filePath)"
+```
+
+**`resolve/main`.** Es gibt keine Revision, nirgends. Wer nach
+`FluidInference/parakeet-tdt-0.6b-v3-coreml` pusht, ändert damit, was eine
+frische Notable-Installation bekommt — jederzeit, ohne Versionssprung, auch bei
+exakt gepinnter FluidAudio-Version. Der naheliegende billige Ausweg („dann pinn
+eben `exactVersion`") trägt also nicht: die Paketversion sagt nichts darüber,
+welche Gewichte hinter dem Namen liegen.
+
+#### Der Weg
+
+1. **Ein eigenes, selten wechselndes Modell-Release** am selben Repo, Tag etwa
+   `models-2026.09`, mit den Bundles als Assets. Es wird veröffentlicht, wenn
+   sich die Modelle ändern — nicht, wenn sich die App ändert. Die App-Releases
+   bleiben so klein, wie sie sind.
+2. **Der Tag und eine SHA-256 je Datei stehen im App-Build.** Damit ist die
+   Modellfassung an die App-Version gebunden: ein Modellwechsel ist ein Release,
+   kein stiller Nebeneffekt eines fremden Pushes.
+3. **Notable lädt selbst**, auf Anforderung, nur für die gewählte Engine — genau
+   wie heute, nur von woanders — und übergibt FluidAudio fertige Dateien. Die
+   download-freien Einstiegspunkte gibt es alle:
+
+   | | Weg ohne Download |
+   |---|---|
+   | Parakeet | `AsrModels.load(from: directory)` |
+   | Diarisierung | `DiarizerModels.load(localSegmentationModel:localEmbeddingModel:)` — dokumentiert mit „No models are downloaded" |
+   | VAD | `VadManager(config:vadModel: MLModel)` |
+   | Whisper | `WhisperKit(modelFolder:, download: false)` |
+
+#### Der Ordner heißt dann Notable
+
+Heute liegen die Modelle unter `~/Library/Application Support/**FluidAudio**/Models`,
+weil `MLModelConfigurationUtils.defaultModelsDirectory()` das so entscheidet und
+Notable nie ein Ziel übergeben hat. Seit Whisper nach `Notable/Models` lädt, ist
+der Bestand sogar auf zwei Wurzeln verteilt — die schlechteste aller Fassungen.
+
+Das ist **keine Frage von Stufe 2**: `AsrModels.downloadAndLoad(to:)` und
+`AsrModels.download(to:)` nehmen ein Verzeichnis entgegen, `DiarizerModels`
+ebenso. Ein Zielverzeichnis zu übergeben ist eine Zeile. Was dazugehört, ist ein
+einmaliges Verschieben des vorhandenen Verzeichnisses, damit niemand 461 MB neu
+lädt, nur weil ein Ordner umbenannt wurde — und ein Rückfall auf „dann eben neu
+laden", falls das Verschieben scheitert.
+
+Danach gilt: **alles, was Notable auf die Platte legt, liegt unter `Notable/`.**
+Ein Anwendungsunterordner, der den Namen einer Bibliothek trägt, die der Nutzer
+nicht kennt, ist auch dann falsch, wenn die Bibliothek ihn angelegt hat.
+
+#### Integrität: nicht über `verifySignature`
+
+Der frühere Entwurf schrieb, die Assets würden „über denselben Pfad geladen wie
+das App-Update — inklusive der Signatur-/Team-ID-Prüfung aus
+`UpdateInstaller.verifySignature`". Das trägt nicht.
+`UpdateInstaller.swift:205` macht `codesign --verify --deep --strict` auf ein
+**App-Bundle** und vergleicht dessen `TeamIdentifier` mit dem der installierten
+App. Ein `.mlmodelc` ist keine Software, sondern Gewichte; es gibt dort keine
+Team-ID zu vergleichen.
+
+Die passende Antwort ist eine **SHA-256 je Datei, im App-Build festgeschrieben**,
+nach dem Download verglichen, und bei Abweichung: verwerfen, nicht laden. Das ist
+strikt mehr, als HuggingFace heute liefert — dort wird gar nichts geprüft.
+
+#### Was es nicht ist
+
+- **Kein Datenschutzgewinn.** Dorthin ging nie Audio, nur ein GET. Es geht um
+  Reproduzierbarkeit und darum, nicht von einem fremden `main` abzuhängen.
+- **Kein Ende der HuggingFace-Beziehung.** Die Dateien stammen weiterhin von
+  dort; sie werden einmal geholt und ans Modell-Release gehängt. Weg ist die
+  Abhängigkeit *im laufenden Betrieb*.
+- **Nicht ins `.app`-Bundle einbacken.** 1,1 GB App, jede Notarisierung um eine
   Größenordnung länger, und jeder Patch lädt alles neu.
 
-Stufe 2 ist eine eigene Entscheidung — sie bedeutet Release-Assets von rund einem
-Gigabyte und macht `scripts/release.sh` zum Modell-Publisher. Stufe 1 ist unabhängig
-davon sinnvoll und geht ihr voraus.
+#### Verworfene Abkürzung
+
+`ModelRegistry.baseURL` ist öffentlich überschreibbar und ausdrücklich „for a
+different model registry or mirror" gedacht — eine Zeile beim Start, und alles
+andere bliebe. Nur müsste der Spiegel die HuggingFace-Pfadform *und* deren
+Listing-API (`api/models/…`) nachbilden, und GitHub Pages scheidet mit rund
+einem Gigabyte an seinem Größenlimit aus. Ein eigener Host wäre wieder etwas,
+das am Leben gehalten werden muss. Für ein Werkzeug mit einem Nutzer ist das
+der schlechtere Tausch.
+
+#### Aufwand
+
+**Nicht M, sondern M–L.** Der Kern ist nicht der Bezug, sondern dass Notable das
+Herunterladen übernimmt: Fortschrittsanzeige (Onboarding und Engine-Picker
+zeigen sie und hängen daran), Wiederaufnahme nach Abbruch, atomares Ablegen,
+und das Ablegen im Layout, das FluidAudio erwartet. Letzteres ist entschärft,
+weil `ModelInventory` die erwarteten Dateinamen bereits aus `ModelNames` liest
+statt sie zu raten — die Layout-Kenntnis kommt aus der Bibliothek.
+
+Stufe 2 ist eine eigene Entscheidung und Stufe 1 geht ihr voraus.
 
 ## 4. Integration
 
@@ -135,6 +229,13 @@ davon sinnvoll und geht ihr voraus.
 - **Stufe 2 verschiebt eine Abhängigkeit, sie entfernt sie nicht.** Statt HuggingFace
   ist GitHub der Single Point of Failure. Für ein persönliches Werkzeug, dessen Updates
   ohnehin von dort kommen, ist das der bessere Tausch — aber es ist einer.
+- **Der eigene Downloader ist der eigentliche Risikoträger.** FluidAudios Version
+  kann wiederaufnehmen, meldet Fortschritt und legt korrekt ab; unsere muss das
+  alles neu können, und ein Fehler darin trifft den ersten Start eines neuen
+  Nutzers — den Moment, in dem die App am wenigsten Vertrauen hat.
+- **Das Verschieben des Modellordners darf nichts verlieren.** Scheitert es, ist
+  der richtige Ausgang „neu laden", nicht „halb hier, halb dort". Ein Modell an
+  zwei Orten ist genau der Zustand, gegen den Stufe 1 angeschrieben ist.
 
 ## 6. Abnahme
 
@@ -146,8 +247,14 @@ davon sinnvoll und geht ihr voraus.
   nach Bestätigung entfernt; ein benutzter wird es nie.
 - `ModelInventoryTests` deckt alle vier Zustände gegen ein temporäres Verzeichnis ab —
   ohne echte Modelle.
-- Stufe 2: ein Release trägt die Modell-Assets, ein frischer Start lädt sie von dort,
-  und `codesign`-Prüfung greift auf demselben Weg wie beim App-Update.
+- Stufe 2: ein frischer Start lädt die Modelle vom Modell-Release, nicht von
+  HuggingFace; eine manipulierte Datei fällt an der SHA-256 durch und wird
+  verworfen statt geladen.
+- Stufe 2: nach einem Update liegt kein Modell mehr unter `FluidAudio/`, und der
+  Bestand wurde verschoben, nicht neu geladen.
+- Stufe 2: ein Netzwerkabbruch mitten im Download endet in einem Zustand, den der
+  nächste Versuch fortsetzen oder sauber verwerfen kann — nie in einem
+  Verzeichnis, das `modelsExist` für vollständig hält.
 
 ## 7. Stand (2026-09-09)
 
@@ -175,5 +282,24 @@ Drei Dinge sind anders gekommen, als hier stand:
   bestehender Download dort bleibt liegen und ist von Notable aus nicht lesbar; das
   ist der Preis und er ist einmalig.
 
-**Stufe 2 ist nicht gebaut** und bleibt eine eigene Entscheidung: sie hängt rund ein
-Gigabyte an jedes Release und macht `scripts/release.sh` zum Modell-Publisher.
+**Stufe 2 ist nicht gebaut** und wurde am 2026-09-09 neu gefasst (§3.4). Der
+ursprüngliche Entwurf — Modelle als Assets an jedes App-Release — ist verworfen:
+rund ein Gigabyte an jeder Veröffentlichung, auch an einem Patch, der eine
+Textzeile ändert. Stattdessen ein eigenes, selten wechselndes Modell-Release,
+das die App per Tag und SHA-256 festnagelt, während sie weiterhin selbst und auf
+Anforderung nur das gewählte Modell lädt.
+
+Zwei Dinge sind dabei aufgefallen, die den früheren Text widerlegen:
+
+- **`resolve/main`** — es gibt gar keine Modell-Revision, nirgends. Der Text hier
+  behauptete, ein Modellwechsel passiere, „wenn FluidAudio ihn beschließt";
+  tatsächlich beschließt niemand etwas, und auch eine exakt gepinnte
+  Paketversion hilft nicht.
+- **`UpdateInstaller.verifySignature` taugt nicht für Gewichte** — es prüft eine
+  Code-Signatur und eine Team-ID an einem App-Bundle. Die Integrität muss über
+  SHA-256 laufen.
+
+Der Modellordner heißt weiterhin `FluidAudio` (§1). Das ist unabhängig von
+Stufe 2 behebbar — `AsrModels.downloadAndLoad(to:)` nimmt ein Verzeichnis
+entgegen —, gehört aber sinnvollerweise in denselben Durchgang: Stufe 2 fasst
+den Bezug ohnehin an, und den Bestand zweimal zu verschieben wäre albern.

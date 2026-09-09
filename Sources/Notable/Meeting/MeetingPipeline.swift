@@ -149,7 +149,7 @@ enum MeetingPipeline {
         let sampleRate = PCMDownsampler.targetSampleRate
 
         // One VAD manager for both tracks — it was being loaded twice.
-        let vad = (micSamples.isEmpty && systemSamples.isEmpty) ? nil : try await VadManager()
+        let vad = (micSamples.isEmpty && systemSamples.isEmpty) ? nil : try await VadManager(modelDirectory: ModelInventory.applicationRoot)
 
         // Mic track → utterances of "Ich".
         var micSegments: [(TimeInterval, TimeInterval)] = []
@@ -189,7 +189,7 @@ enum MeetingPipeline {
             }
 
             if !compact.isEmpty {
-                let models = try await DiarizerModels.downloadIfNeeded()
+                let models = try await DiarizerModels.downloadIfNeeded(to: ModelInventory.directory(.diarizer))
                 let diarizer = DiarizerManager(config: Self.diarizerConfig(expectedSpeakers: expectedSpeakers))
                 diarizer.initialize(models: models)
                 defer { diarizer.cleanup() }

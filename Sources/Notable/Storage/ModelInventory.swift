@@ -79,7 +79,7 @@ enum ModelInventory {
         let byDirectory = Dictionary(known.map { ($0.directory, $0) }, uniquingKeysWith: { first, _ in first })
 
         return entries
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { isModelDirectory($0) }
             .map { url -> Entry in
                 let directory = url.lastPathComponent
                 let bytes = SpoolInventory.size(of: url, fileManager: fileManager)
@@ -110,7 +110,7 @@ enum ModelInventory {
         ) else { return [] }
 
         return entries
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { isModelDirectory($0) }
             .map { url in
                 let directory = url.lastPathComponent
                 let size = WhisperModelSize.allCases.first { directory == whisperDirectory(for: $0) }
@@ -124,6 +124,15 @@ enum ModelInventory {
                 )
             }
             .sorted { ($0.state.order, -$0.bytes) < ($1.state.order, -$1.bytes) }
+    }
+
+    /// A directory, and not a hidden one. WhisperKit keeps a `.cache` folder
+    /// next to its models; listing that as a model — and then offering to
+    /// delete it as orphaned — would be confidently wrong about something the
+    /// library owns.
+    private static func isModelDirectory(_ url: URL) -> Bool {
+        guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return false }
+        return !url.lastPathComponent.hasPrefix(".")
     }
 
     // MARK: - Removal
@@ -168,7 +177,7 @@ enum ModelInventory {
     /// with named files missing — and only the one belonging to the engine
     /// being retried.
     @discardableResult
-    static func discardIncomplete(for engine: ASREngineID, root: URL = fluidAudioRoot) -> [String] {
+    static func discardIncomplete(for engine: ASREngineID, root: URL = modelsRoot) -> [String] {
         let directories: [String]
         switch engine {
         case .parakeetV3: directories = [Repo.parakeetV3.folderName]
@@ -187,8 +196,46 @@ enum ModelInventory {
 
     // MARK: - The live inventory
 
-    /// Where FluidAudio keeps its models: `~/Library/Application Support/FluidAudio/Models`.
-    static var fluidAudioRoot: URL { MLModelConfigurationUtils.defaultModelsDirectory() }
+    // MARK: - Where the models live
+
+    /// `~/Library/Application Support/Notable`.
+    ///
+    /// Everything Notable puts on the disk lives under here. That was not true
+    /// for the models: FluidAudio's `defaultModelsDirectory()` decides on
+    /// `Application Support/FluidAudio/Models`, and Notable simply never passed
+    /// a destination — although every one of the four load calls takes one. So
+    /// the largest thing the app wrote to disk sat in a folder named after a
+    /// library the user has never heard of. See ``ModelStorageMigration``.
+    static var applicationRoot: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Notable", isDirectory: true)
+    }
+
+    /// `…/Notable/Models` — the directory that holds one folder per model.
+    static var modelsRoot: URL { applicationRoot.appendingPathComponent("Models", isDirectory: true) }
+
+    /// One model's own directory.
+    ///
+    /// **The four FluidAudio entry points want three different levels**, which
+    /// is worth writing down once rather than rediscovering at each call site:
+    /// `AsrModels.downloadAndLoad(to:)` and `DiarizerModels.downloadIfNeeded(to:)`
+    /// want *this* (the model's own folder), `StreamingUnifiedAsrManager.loadModels(to:)`
+    /// wants ``modelsRoot`` and appends the folder itself, and
+    /// `VadManager(modelDirectory:)` wants ``applicationRoot`` and appends
+    /// `"Models"` itself.
+    static func directory(_ repo: Repo) -> URL {
+        modelsRoot.appendingPathComponent(repo.folderName, isDirectory: true)
+    }
+
+    /// Where FluidAudio put the models before Notable started telling it where
+    /// to put them: `~/Library/Application Support/FluidAudio/Models`.
+    ///
+    /// Nothing reads this any more. It is still scanned, so that whatever the
+    /// migration could not move stays visible and removable instead of turning
+    /// into a gigabyte nobody can see — which is the exact failure this whole
+    /// spec is about.
+    static var legacyRoot: URL { MLModelConfigurationUtils.defaultModelsDirectory() }
 
     /// Where Notable tells WhisperKit to keep its models.
     ///
@@ -197,11 +244,7 @@ enum ModelInventory {
     /// folder most likely to be synced to a cloud drive. Neither is a place for
     /// a gigabyte of model weights, and a settings page that triggers a
     /// Documents permission dialog just to count them would be worse still.
-    static var whisperDownloadBase: URL {
-        FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Notable/Models", isDirectory: true)
-    }
+    static var whisperDownloadBase: URL { modelsRoot }
 
     static var whisperRoot: URL {
         whisperDownloadBase
@@ -260,7 +303,10 @@ enum ModelInventory {
         let whisperInUse: Set<String> = engine == .whisper
             ? [whisperDirectory(for: .current)]
             : []
-        return scan(root: fluidAudioRoot, known: knownModels, inUse: inUseDirectories(engine: engine))
+        return scan(root: modelsRoot, known: knownModels, inUse: inUseDirectories(engine: engine))
+            // With no known names, every directory in the old root comes back
+            // orphaned — which is exactly what it is: nothing loads from there.
+            + scan(root: legacyRoot, known: [], inUse: [])
             + scanWhisper(root: whisperRoot, inUse: whisperInUse)
     }
 }

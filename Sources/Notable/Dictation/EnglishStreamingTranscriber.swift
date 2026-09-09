@@ -69,7 +69,9 @@ final class EnglishStreamingTranscriber: @unchecked Sendable {
 
     /// Downloads (first run) and loads the CoreML models.
     func prepare() async throws {
-        try await manager.loadModels()
+        // This one wants the *parent* and appends the model folder itself —
+        // see `ModelInventory.directory(_:)` for the three levels involved.
+        try await manager.loadModels(to: ModelInventory.modelsRoot)
     }
 
     /// Call before each utterance — clears window and transcript state.

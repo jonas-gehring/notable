@@ -104,6 +104,9 @@ targets:
       # scan is pure — a directory listing in, classified entries out — so it
       # is tested against a temporary folder rather than a gigabyte of weights.
       - path: Sources/Notable/Storage/ModelInventory.swift
+      # The one-time move out of Application Support/FluidAudio. Pure file work
+      # and the kind that must not lose a gigabyte, so it is tested.
+      - path: Sources/Notable/Storage/ModelStorageMigration.swift
       # The four disk items and the threshold above which the menu says so.
       - path: Sources/Notable/Storage/StorageFootprint.swift
       - path: Sources/Notable/Summarization/SummarizationProvider.swift

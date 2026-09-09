@@ -29,15 +29,18 @@ final class StorageFootprintTests: XCTestCase {
         XCTAssertFalse(footprint.deservesMention)
     }
 
-    /// The models are the largest item and the one that was missing; a
-    /// footprint built from an inventory has to actually carry them.
-    func testModelsComeFromTheInventory() {
+    /// The models are the largest item and the one that was missing. The byte
+    /// figure is the *directory*, not the sum of the classified rows —
+    /// WhisperKit keeps tokenizers and a cache beside its model folders, and a
+    /// total that quietly omits them would be wrong against `du`.
+    func testModelCountComesFromTheInventoryAndBytesFromTheDisk() {
         let entries = [
             ModelInventory.Entry(name: "A", url: URL(fileURLWithPath: "/tmp/a"), bytes: 461, state: .inUse, missing: []),
             ModelInventory.Entry(name: "B", url: URL(fileURLWithPath: "/tmp/b"), bytes: 581, state: .available, missing: []),
         ]
         let footprint = StorageFootprint.measure(modelEntries: entries)
-        XCTAssertEqual(footprint.models.bytes, 1_042)
         XCTAssertEqual(footprint.models.count, 2)
+        XCTAssertNotEqual(footprint.models.bytes, 1_042,
+                          "die Zeilen sind die Aufstellung, nicht die Messung")
     }
 }

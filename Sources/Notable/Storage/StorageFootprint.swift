@@ -45,7 +45,15 @@ struct StorageFootprint: Sendable, Equatable {
         var footprint = StorageFootprint()
         footprint.meetingAudio = Item(bytes: archive.reduce(0) { $0 + $1.byteSize }, count: archive.count)
         footprint.failedRecordings = Item(bytes: failed.reduce(0) { $0 + $1.byteSize }, count: failed.count)
-        footprint.models = Item(bytes: modelEntries.reduce(0) { $0 + $1.bytes }, count: modelEntries.count)
+        // The *directories*, not the sum of the classified rows. WhisperKit
+        // keeps tokenizers and a cache beside its model folders; adding up the
+        // rows would quietly under-report by whatever the library keeps that
+        // Notable does not classify. The number here has to match `du`.
+        footprint.models = Item(
+            bytes: [ModelInventory.modelsRoot, ModelInventory.legacyRoot]
+                .reduce(0) { $0 + SpoolInventory.size(of: $1, fileManager: fileManager) },
+            count: modelEntries.count
+        )
         footprint.database = Item(bytes: databaseBytes(fileManager: fileManager), count: nil)
         return footprint
     }

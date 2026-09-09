@@ -299,7 +299,16 @@ Zwei Dinge sind dabei aufgefallen, die den früheren Text widerlegen:
   Code-Signatur und eine Team-ID an einem App-Bundle. Die Integrität muss über
   SHA-256 laufen.
 
-Der Modellordner heißt weiterhin `FluidAudio` (§1). Das ist unabhängig von
-Stufe 2 behebbar — `AsrModels.downloadAndLoad(to:)` nimmt ein Verzeichnis
-entgegen —, gehört aber sinnvollerweise in denselben Durchgang: Stufe 2 fasst
-den Bezug ohnehin an, und den Bestand zweimal zu verschieben wäre albern.
+**Der Ordner ist vorgezogen und gebaut** (2026-09-09, nach der ursprünglichen
+Fassung dieses Abschnitts). Alle vier Ladeaufrufe bekommen jetzt ein Ziel unter
+`Application Support/Notable/Models`, und `ModelStorageMigration` verschiebt den
+Bestand einmal beim Start — ein Rename innerhalb eines Volumes, also wird nichts
+neu geladen. Gelöscht wird nichts: was nicht verschoben werden kann, bleibt
+liegen und wird weiter gescannt, damit es in der Belegungs-Seite als verwaist
+und entfernbar auftaucht statt zu einem unsichtbaren Gigabyte zu werden.
+
+Dabei ist aufgefallen, dass `WhisperTranscriberTests` beim Testen **3 GB**
+Whisper-Modelle lädt (large-v3 allein 2,9 GB). Das tat es vorher auch, nur nach
+`~/Documents/huggingface` — dorthin sieht niemand, und es ist der Ordner, den
+Leute in die Cloud synchronisieren. Jetzt liegt es dort, wo die Belegungs-Seite
+es nennt. Ob der Test 2,9 GB wert ist, ist eine eigene Frage.

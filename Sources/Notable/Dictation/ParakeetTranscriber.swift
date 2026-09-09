@@ -3,7 +3,7 @@ import Foundation
 
 /// Parakeet TDT v3 (multilingual, 25 European languages) via FluidAudio —
 /// CoreML on the Neural Engine. Models are downloaded from HuggingFace on
-/// first use and cached locally.
+/// first use and cached under ``ModelInventory/modelsRoot``.
 final class ParakeetTranscriber: TranscriptionEngine, @unchecked Sendable {
     let displayName = "Parakeet TDT v3 (lokal, CoreML/ANE)"
 
@@ -16,7 +16,9 @@ final class ParakeetTranscriber: TranscriptionEngine, @unchecked Sendable {
     /// `progress` is FluidAudio's own download reporting, forwarded verbatim —
     /// Notable never downloads anything itself, it only listens.
     func prepare(progress: ProgressHandler? = nil) async throws {
-        let models = try await AsrModels.downloadAndLoad(progressHandler: progress)
+        let models = try await AsrModels.downloadAndLoad(
+            to: ModelInventory.directory(.parakeetV3), progressHandler: progress
+        )
         try await manager.loadModels(models)
         decoderLayers = await manager.decoderLayerCount
     }
@@ -24,7 +26,7 @@ final class ParakeetTranscriber: TranscriptionEngine, @unchecked Sendable {
     /// Are the v3 weights already on disk? Authoritative — it is FluidAudio's own
     /// check against the files it needs, not a guess at a directory name.
     static var modelsArePresent: Bool {
-        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory(for: .v3), version: .v3)
+        AsrModels.modelsExist(at: ModelInventory.directory(.parakeetV3), version: .v3)
     }
 
     /// Incremental session for long dictations (carried decoder state).

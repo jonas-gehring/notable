@@ -55,6 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let container = AppContainer.shared
+        // Before anything loads a model: the weights used to live in a folder
+        // named after a library the user never chose. A rename inside one
+        // volume, so with nothing to do this costs a `fileExists`.
+        ModelStorageMigration.run()
         container.dictation.start()
 
         // Notification Center is the consent surface (Spec 09) — the delegate must

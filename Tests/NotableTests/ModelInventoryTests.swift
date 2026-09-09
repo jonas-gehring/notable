@@ -23,7 +23,7 @@ final class ModelInventoryTests: XCTestCase {
         }
     }
 
-    private let known = [
+    fileprivate let known = [
         ModelInventory.Known(directory: "asr", name: "ASR", requiredFiles: ["Encoder.mlmodelc", "Decoder.mlmodelc"]),
         ModelInventory.Known(directory: "vad", name: "VAD", requiredFiles: ["vad.mlmodelc"]),
     ]
@@ -174,5 +174,23 @@ extension ModelInventoryTests {
 
     func testWhisperIsNeverDiscardedBecauseItCannotBeProvenBroken() {
         XCTAssertTrue(ModelInventory.discardIncomplete(for: .whisper, root: root).isEmpty)
+    }
+}
+
+// MARK: - Was kein Modell ist
+
+extension ModelInventoryTests {
+    /// WhisperKit keeps a `.cache` folder next to its models. Listing it as a
+    /// model — and then offering to delete it as orphaned — would be
+    /// confidently wrong about something the library owns.
+    func testHiddenDirectoriesAreNotModels() throws {
+        try makeModel(".cache", files: ["irgendwas"])
+        try makeModel("vad", files: ["vad.mlmodelc"])
+        XCTAssertEqual(
+            ModelInventory.scan(root: root, known: known, inUse: []).map(\.url.lastPathComponent),
+            ["vad"]
+        )
+        XCTAssertTrue(ModelInventory.scanWhisper(root: root, inUse: [])
+            .allSatisfy { $0.url.lastPathComponent != ".cache" })
     }
 }

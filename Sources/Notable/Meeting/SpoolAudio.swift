@@ -224,6 +224,7 @@ enum SpoolAudio {
         var pending: [Int16] = []
         var mismatch = false
         try forEachChunk(of: data, format: Format.of(source)) { samples in
+            guard !mismatch else { return }
             var offset = 0
             while offset < samples.count {
                 if pending.isEmpty {

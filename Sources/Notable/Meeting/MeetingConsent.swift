@@ -28,22 +28,32 @@ enum MeetingIdentity {
         identityKey != unknownWebKey && identityKey != "unknown"
     }
 
+    /// The web services, their keys, their names, and how a window title gives
+    /// them away — one row per service, because the alternative was a `switch`
+    /// for the title and a second `switch` for the name.
+    private static let services: [(key: String, display: String, contains: [String], prefixes: [String])] = [
+        ("web:google-meet", "Google Meet", ["meet.google.com"], ["meet – ", "meet - "]),
+        ("web:zoom", "Zoom", ["zoom meeting"], []),
+        ("web:teams", "Microsoft Teams", ["microsoft teams"], []),
+    ]
+
     /// Maps a browser window title to `(stable key, display name)`, or `nil` when
     /// the title carries no call evidence. Matching mirrors
     /// `MeetingDetector.detectBrowserMeeting` and is the single source of truth
     /// for both the display string and the storage key.
     static func webService(forWindowTitle title: String) -> (key: String, display: String)? {
         let lowered = title.lowercased()
-        if lowered.contains("meet.google.com") || lowered.hasPrefix("meet – ") || lowered.hasPrefix("meet - ") {
-            return ("web:google-meet", "Google Meet")
-        }
-        if lowered.contains("zoom meeting") {
-            return ("web:zoom", "Zoom")
-        }
-        if lowered.contains("microsoft teams") {
-            return ("web:teams", "Microsoft Teams")
-        }
-        return nil
+        guard let service = services.first(where: { service in
+            service.contains.contains(where: lowered.contains)
+                || service.prefixes.contains(where: lowered.hasPrefix)
+        }) else { return nil }
+        return (service.key, service.display)
+    }
+
+    /// The name behind a `web:` key, for anything that has the key but never saw
+    /// the window title — the remembered-consent list, for one.
+    static func displayName(forKey key: String) -> String? {
+        services.first { $0.key == key }?.display
     }
 }
 

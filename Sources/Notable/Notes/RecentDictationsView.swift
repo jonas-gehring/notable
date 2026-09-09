@@ -62,10 +62,7 @@ struct RecentDictationsView: View {
                         : "")
                 )
             } else {
-                List(items) { item in
-                    RecentDictationRow(item: item)
-                }
-                .listStyle(.inset)
+                RecentDictationsList(items: items)
             }
         }
         .frame(minWidth: 480, minHeight: 360)
@@ -83,101 +80,4 @@ struct RecentDictationsView: View {
 
     /// One value that changes whenever we must re-query.
     private var reloadKey: String { "\(window.rawValue)-\(reloadToken)" }
-}
-
-private struct RecentDictationRow: View {
-    let item: RecordingStore.ActivityItem
-    @State private var copied = false
-    @State private var correcting = false
-    @State private var draft = ""
-
-    private var text: String { (item.snippet ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    private var durationLabel: String? {
-        guard let duration = item.duration, duration >= 1 else { return nil }
-        let total = Int(duration.rounded())
-        return total >= 60
-            ? String(localized: "\(total / 60) min \(total % 60) s")
-            : String(localized: "\(total) s")
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "mic")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(item.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    if let durationLabel { Text("· \(durationLabel)") }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                Text(text.isEmpty ? "(kein Text)" : text)
-                    .font(.callout)
-                    .lineLimit(4)
-                    .textSelection(.enabled)
-            }
-
-            Spacer(minLength: 8)
-
-            VStack(spacing: 4) {
-                // No "Einfügen" here on purpose: clicking a button in this
-                // window makes the window key, so the synthesized ⌘V lands in
-                // Notable itself. Copying is the honest action from a window;
-                // pasting belongs to the menu, where the target app is still
-                // frontmost.
-                Button(copied ? "Kopiert" : "Kopieren") {
-                    guard !text.isEmpty else { return }
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                    copied = true
-                }
-                .buttonStyle(.link)
-                .disabled(text.isEmpty)
-
-                Button("Korrigieren…") {
-                    draft = text
-                    correcting = true
-                }
-                .buttonStyle(.link)
-                .disabled(text.isEmpty)
-            }
-        }
-        .padding(.vertical, 4)
-        .sheet(isPresented: $correcting) { correctionSheet }
-    }
-
-    /// Lets the user fix a mis-heard dictation; the word-level diff is fed to
-    /// `PersonalDictionary.recordCorrection` so Notable learns. The text is NOT
-    /// re-inserted anywhere — it already landed in its target app.
-    private var correctionSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Diktat korrigieren")
-                .font(.headline)
-            Text("Notable lernt daraus, welche Wörter es falsch hört, und schlägt sie in den Einstellungen als Wörterbuch-Eintrag vor. Der Text wird nicht erneut eingefügt.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            TextEditor(text: $draft)
-                .font(.body)
-                .frame(minHeight: 120)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
-            HStack {
-                Spacer()
-                Button("Abbrechen") { correcting = false }
-                Button("Lernen") {
-                    for pair in WordDiff.substitutions(from: text, to: draft) {
-                        PersonalDictionary.recordCorrection(heard: pair.heard, corrected: pair.corrected)
-                    }
-                    correcting = false
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines) == text)
-            }
-        }
-        .padding(16)
-        .frame(width: 440)
-    }
 }

@@ -138,3 +138,21 @@ für den Notfall aufbewahrt.
 - „Belegung" nennt vier Posten und ihre Summe stimmt mit `du -sh` auf beiden
   Verzeichnissen plus Modellen überein.
 - Die Menüzeile erscheint oberhalb der Schwelle und verschwindet nach dem Aufräumen.
+
+## 7. Stand (2026-09-09)
+
+**Alle drei Stufen sind gebaut.** Das Format steht in der Endung (`SpoolAudio.Format`),
+neue Aufnahmen schreiben `mic.i16`/`system.i16`, `mic.pcm` bleibt lesbar, das Archiv
+wird beim Verschieben nach ALAC umgeschrieben und die Belegungs-Seite nennt vier Posten
+mit Summe. Die Menüzeile erscheint ab 5 GB und führt auf genau diese Seite.
+
+Zwei Korrekturen an dem, was hier stand:
+
+- **Der Rundungsfehler ist 1,5·10⁻⁵, nicht 3·10⁻⁵.** Die Spec rechnete mit Abschneiden;
+  gerundet wird halbiert. An der Aussage ändert das nichts — er bleibt vier
+  Größenordnungen unter `TrackSilence.peakThreshold`, und ein Test hält fest, dass das
+  Stille-Urteil sich an keiner Stelle ändert.
+- **Unendlich muss an den Anschlag, nicht auf Null.** Beim Schreiben der Umrechnung
+  hatte ich `isFinite` als Wächter gesetzt, womit `+∞` bei 0 landete — der lauteste
+  Sample einer Aufnahme wäre zu Stille geworden. Nur NaN darf auf Null; der Test hat
+  es gefunden.

@@ -61,6 +61,40 @@ final class RealtimeCaptureTests: XCTestCase {
         XCTAssertEqual(middle, 0.5, accuracy: 0.05)
     }
 
+    /// The same hand-off, spooling in the format a real meeting writes.
+    ///
+    /// `RealtimeCaptureTests` only ever used a `.pcm` URL, so the IO-proc path
+    /// and the Int16 spool — the two things a meeting actually combines — were
+    /// each tested alone and never together. This path has still never run
+    /// against a real call, which is precisely why it should not also be the
+    /// untested combination.
+    func testTheRealtimePathSpoolsInTheFormatAMeetingWrites() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rt-\(UUID().uuidString).\(SpoolAudio.current.fileExtension)")
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertEqual(url.pathExtension, "i16")
+
+        let downsampler = PCMDownsampler()
+        try downsampler.reset(spoolingTo: url)
+        downsampler.beginRealtimeCapture(format: sourceFormat)
+
+        let bufferCount = 50
+        let frames: AVAudioFrameCount = 1024
+        for _ in 0..<bufferCount {
+            downsampler.appendFromIOProc(makeBuffer(frames: frames, value: 0.5).audioBufferList)
+        }
+
+        let samples = downsampler.drain()
+        let expected = Double(bufferCount) * Double(frames) * (16_000.0 / 48_000.0)
+        XCTAssertEqual(Double(samples.count), expected, accuracy: expected * 0.02)
+        XCTAssertEqual(downsampler.droppedBuffers, 0)
+        XCTAssertEqual(samples[samples.count / 2], 0.5, accuracy: 0.05)
+
+        // Two bytes per sample, not four — the whole point of the change.
+        let bytes = try Data(contentsOf: url).count
+        XCTAssertEqual(bytes, samples.count * MemoryLayout<Int16>.size)
+    }
+
     /// `drain()` has to flush the ring first; anything still queued belongs to
     /// this recording, and losing the tail is exactly the silent shortening
     /// this path exists to avoid.

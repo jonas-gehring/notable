@@ -100,6 +100,12 @@ targets:
       # thing that deletes, and it is what the "statistics must not shrink"
       # tests are aimed at.
       - path: Sources/Notable/Storage/RetentionPolicy.swift
+      # What Notable downloaded onto the disk and in what state (Spec 20). The
+      # scan is pure — a directory listing in, classified entries out — so it
+      # is tested against a temporary folder rather than a gigabyte of weights.
+      - path: Sources/Notable/Storage/ModelInventory.swift
+      # The four disk items and the threshold above which the menu says so.
+      - path: Sources/Notable/Storage/StorageFootprint.swift
       - path: Sources/Notable/Summarization/SummarizationProvider.swift
       - path: Sources/Notable/Summarization/SummaryParser.swift
       - path: Sources/Notable/Summarization/AnthropicAPIProvider.swift
@@ -115,12 +121,18 @@ targets:
       - path: Sources/Notable/Support/KeychainStore.swift
       - path: Sources/Notable/Support/ClaudeCodeCLILocator.swift
       - path: Sources/Notable/Support/PCMDownsampler.swift
+      # Every UserDefaults key the interface writes, with the value an unset key
+      # means (Spec 22) — the pair is what stopped drifting apart.
+      - path: Sources/Notable/Support/DefaultsKey.swift
       - path: Sources/Notable/Meeting/MeetingPipeline.swift
       - path: Sources/Notable/Meeting/MeetingDetector.swift
       # MeetingDetector references MeetingIdentityKey; the store + identity mapping
       # are pure, so the unit target compiles them directly (panel/coordinator are
       # @MainActor UI and stay out of the test target).
       - path: Sources/Notable/Meeting/MeetingConsent.swift
+      # The known-meeting-app table, which the detector and the settings pane
+      # both read. It used to be written out in both (Spec 22).
+      - path: Sources/Notable/Meeting/MeetingApps.swift
       # Per-process audio signal behind the call start/end detection (Spec 09).
       # The snapshot type is pure; only the CoreAudio fetch touches hardware.
       - path: Sources/Notable/Meeting/AudioProcessMonitor.swift

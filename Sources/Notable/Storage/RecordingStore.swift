@@ -131,6 +131,16 @@ actor RecordingStore {
     private let databaseURL: URL
     private var connection: SQLiteConnection?
 
+    /// Where the shared database lives. `nonisolated` and static because the
+    /// storage pane needs to *size* the file, which is a question about the
+    /// filesystem and not about the actor's state.
+    nonisolated static var sharedDatabaseURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Notable", isDirectory: true)
+            .appendingPathComponent("notable.sqlite")
+    }
+
     init(directory: URL? = nil) {
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -408,6 +418,10 @@ actor RecordingStore {
         let title: String?
         let snippet: String?
         let markdownPath: String?
+        /// The rule-polished text before an LLM improvement replaced it —
+        /// non-nil only where one actually did. Without it nobody can tell
+        /// after the fact what the model changed.
+        var rawText: String?
 
         /// Recording length when both ends are known.
         var duration: TimeInterval? {
@@ -434,7 +448,8 @@ actor RecordingStore {
         SELECT r.id, r.kind, r.started_at, r.ended_at, r.title, r.markdown_path,
                (SELECT s.text FROM segments s
                 WHERE s.recording_id = r.id AND s.text != ''
-                ORDER BY s.start_seconds ASC LIMIT 1) AS snippet
+                ORDER BY s.start_seconds ASC LIMIT 1) AS snippet,
+               r.raw_text
         FROM recordings r
         WHERE r.started_at >= ?1 AND (?2 IS NULL OR r.kind = ?2)
         ORDER BY r.started_at DESC
@@ -455,7 +470,8 @@ actor RecordingStore {
                     endedAt: s.date(3),
                     title: s.string(4),
                     snippet: s.string(6),
-                    markdownPath: s.string(5)
+                    markdownPath: s.string(5),
+                    rawText: s.string(7)
                 )
             }
         )

@@ -114,7 +114,7 @@ final class StatsModel: ObservableObject {
 
 struct StatsView: View {
     @StateObject private var model = StatsModel()
-    @AppStorage("typingWPM") private var typingWPM = 40.0
+    @AppStorage(DefaultsKey.typingWPM.key) private var typingWPM = DefaultsKey.typingWPM.fallback
     @State private var granularity: Granularity = .week
     @State private var showDetails = false
 
@@ -140,11 +140,10 @@ struct StatsView: View {
         .frame(minWidth: 620, minHeight: 600)
         .task { await reload() }
         .onChange(of: granularity) { _, _ in recompute() }
-        .onChange(of: typingWPM) { _, _ in
-            recompute()
-            // The menu-bar line rests on the same assumption.
-            AppContainer.shared.usage.refreshSoon()
-        }
+        // Only the charts here — the menu-bar line rests on the same
+        // assumption and is refreshed by ``TypingSpeedStepper`` itself, which
+        // is the one place that knows the value changed.
+        .onChange(of: typingWPM) { _, _ in recompute() }
     }
 
     private func reload() async {
@@ -390,12 +389,8 @@ struct StatsView: View {
                     .foregroundStyle(Theme.textSubtle)
             }
             Spacer(minLength: 12)
-            Stepper(value: $typingWPM, in: 20...120, step: 5) {
-                Text("\(Int(typingWPM)) WPM")
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.textEmphasis)
-            }
-            .fixedSize()
+            TypingSpeedStepper(style: .card)
+                .fixedSize()
         }
         .font(.system(size: 13))
         .calCard(padding: 12)

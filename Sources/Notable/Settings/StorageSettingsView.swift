@@ -14,10 +14,15 @@ struct StorageSettingsView: View {
     @AppStorage(RetentionPolicy.Key.dictationAge) private var dictationDays = 0
     @AppStorage(RetentionPolicy.Key.meetingAge) private var meetingDays = 0
     @AppStorage(RetentionPolicy.Key.chatAge) private var chatDays = 0
-    @AppStorage("appStatistics") private var appStatistics = true
+    @AppStorage(DefaultsKey.appStatistics.key) private var appStatistics = DefaultsKey.appStatistics.fallback
 
-    @State private var archive: (count: Int, bytes: Int64)?
-    @State private var failed: (count: Int, bytes: Int64)?
+    @State private var footprint: StorageFootprint?
+    @State private var models: [ModelInventory.Entry] = []
+    @State private var compression: SpoolArchiver.Plan?
+    @State private var compressionResult: SpoolArchiver.Outcome?
+    @State private var isCompressing = false
+    @State private var confirmModelCleanup = false
+    @State private var modelCleanupErrors: [String] = []
     @State private var pending: RetentionPlanner.Plan?
     @State private var lastResult: RetentionRunner.Result?
     @State private var isWorking = false
@@ -33,10 +38,25 @@ struct StorageSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Belegung") {
-                usageRow("Meeting-Audio", archive)
-                usageRow("Fehlgeschlagene Aufnahmen", failed)
+            Section {
+                usageRow("Meeting-Audio", footprint?.meetingAudio, unit: Self.sessions)
+                usageRow("Fehlgeschlagene Aufnahmen", footprint?.failedRecordings, unit: Self.sessions)
+                usageRow("Modelle", footprint?.models, unit: Self.models(_:))
+                usageRow("Datenbank", footprint?.database, unit: nil)
+                LabeledContent("Gesamt") {
+                    Text(footprint.map { byteText($0.total) } ?? "…").bold()
+                }
+            } header: {
+                Text("Belegung")
+            } footer: {
+                Text("""
+                Alle vier Posten, weil zwei davon lange keiner genannt hat — die \
+                Modelle sind der größte, und sie kamen hier nie vor.
+                """)
             }
+
+            modelSection
+            compressionSection
 
             Section {
                 Toggle("Beim Start automatisch aufräumen", isOn: $enabled)
@@ -146,14 +166,140 @@ struct StorageSettingsView: View {
         count == 1 ? String(localized: "1 Sitzung") : String(localized: "\(count) Sitzungen")
     }
 
+    /// "1 Modell" / "7 Modelle" — same reason as ``sessions(_:)``.
+    private static func models(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 Modell") : String(localized: "\(count) Modelle")
+    }
+
     @ViewBuilder
-    private func usageRow(_ title: LocalizedStringKey, _ value: (count: Int, bytes: Int64)?) -> some View {
+    private func usageRow(
+        _ title: LocalizedStringKey,
+        _ value: StorageFootprint.Item?,
+        unit: ((Int) -> String)?
+    ) -> some View {
         LabeledContent(title) {
             if let value {
-                Text("\(byteText(value.bytes)) · \(Self.sessions(value.count))")
+                if let count = value.count, let unit {
+                    Text("\(byteText(value.bytes)) · \(unit(count))")
+                } else {
+                    Text(byteText(value.bytes))
+                }
             } else {
                 Text("wird gemessen…").foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: - Modelle (Spec 20)
+
+    /// The models get rows in the section that already exists, not a tab of
+    /// their own — an eighth settings tab is exactly the growth Spec 22 is
+    /// written against.
+    @ViewBuilder
+    private var modelSection: some View {
+        Section {
+            if models.isEmpty {
+                Text("Noch keine Modelle geladen.").foregroundStyle(.secondary)
+            }
+            ForEach(models) { entry in
+                LabeledContent {
+                    Text(byteText(entry.bytes))
+                } label: {
+                    Text(entry.name)
+                    Text(entry.state == .incomplete && !entry.missing.isEmpty
+                         ? String(localized: "unvollständig — es fehlt \(entry.missing.joined(separator: ", "))")
+                         : entry.state.label)
+                }
+            }
+
+            let plan = ModelInventory.removable(in: models)
+            if !plan.isEmpty {
+                // Same shape as the retention cleanup below: show the plan
+                // first, delete only on confirmation. A gigabyte removed
+                // unasked is irreversible.
+                Button("\(Self.models(plan.entries.count)) entfernen (\(byteText(plan.bytes)))") {
+                    confirmModelCleanup = true
+                }
+                .buttonStyle(.link)
+                .confirmationDialog("Modellordner entfernen?", isPresented: $confirmModelCleanup) {
+                    Button("Entfernen", role: .destructive) { removeModels(plan) }
+                    Button("Abbrechen", role: .cancel) {}
+                } message: {
+                    Text("Ein unvollständiges Modell wird beim nächsten Start neu geladen. Ein verwaistes kennt kein Code-Pfad mehr.")
+                }
+            }
+            if !modelCleanupErrors.isEmpty {
+                Text("Nicht entfernt: \(modelCleanupErrors.joined(separator: "; "))")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text("Modelle")
+        } footer: {
+            Text("""
+            Die Spracherkennung lädt ihre Modelle beim ersten Start von HuggingFace. \
+            Welche Fassung das ist, entscheidet die eingebundene Bibliothek — benennt \
+            sie ein Verzeichnis um, bleibt das alte liegen und steht hier als verwaist.
+            """)
+        }
+    }
+
+    // MARK: - Archiv komprimieren (Spec 21, Stufe 2)
+
+    @ViewBuilder
+    private var compressionSection: some View {
+        if let compression, !compression.isEmpty {
+            Section {
+                Text("\(Self.sessions(compression.sessions)), \(byteText(compression.currentBytes)) → etwa \(byteText(compression.estimatedBytes)).")
+                Button("Archiv jetzt umrechnen…") { compressArchive() }
+                    .disabled(isCompressing)
+                if isCompressing {
+                    Text("Läuft — das kann bei großen Archiven dauern.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Bestand umrechnen")
+            } footer: {
+                Text("""
+                Verlustfrei: dieselben Abtastwerte, weniger Bytes, als .m4a auch von \
+                QuickTime abspielbar. Die Rohspur wird erst gelöscht, nachdem die neue \
+                zurückgelesen und verglichen wurde. Neue Aufnahmen macht das von selbst.
+                """)
+            }
+        }
+        if let compressionResult, compressionResult.compressedTracks > 0 {
+            Section {
+                Text("\(compressionResult.compressedTracks) Spuren umgerechnet, \(byteText(compressionResult.reclaimed)) frei.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !compressionResult.failures.isEmpty {
+                    Text("Nicht umgerechnet: \(compressionResult.failures.joined(separator: "; "))")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private func removeModels(_ plan: ModelInventory.Removal) {
+        Task {
+            // Off the main actor: removing a model directory is a filesystem
+            // walk over up to a gigabyte, and the settings window has no
+            // business freezing for it.
+            modelCleanupErrors = await Task.detached { ModelInventory.remove(plan) }.value
+            await measure()
+        }
+    }
+
+    private func compressArchive() {
+        isCompressing = true
+        Task {
+            compressionResult = await SpoolArchiver.compressAll(in: SpoolStore.archiveURL)
+            isCompressing = false
+            await measure()
         }
     }
 
@@ -170,19 +316,25 @@ struct StorageSettingsView: View {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    /// Measured when the tab opens, never continuously — walking two directories
-    /// of multi-gigabyte files is not something to do on a timer.
+    /// Measured when the tab opens, never continuously — walking four
+    /// directories of multi-gigabyte files is not something to do on a timer.
     private func measure() async {
+        let engine = ASREngineID.current
         let archiveURL = SpoolStore.archiveURL
-        let failedURL = SpoolStore.failedURL
         let measured = await Task.detached {
-            (
-                SpoolInventory.sessions(in: archiveURL),
-                SpoolInventory.sessions(in: failedURL)
+            let models = ModelInventory.current(engine: engine)
+            return (
+                models,
+                StorageFootprint.measure(modelEntries: models),
+                SpoolArchiver.plan(in: archiveURL)
             )
         }.value
-        archive = (measured.0.count, measured.0.reduce(0) { $0 + $1.byteSize })
-        failed = (measured.1.count, measured.1.reduce(0) { $0 + $1.byteSize })
+        models = measured.0
+        footprint = measured.1
+        compression = measured.2
+        // The menu line rests on the same four numbers. Without this it would
+        // still be announcing five gigabytes after they had been cleaned up.
+        AppContainer.shared.storageNotice.update(with: measured.1)
     }
 
     private func clearSourceApps() {

@@ -241,7 +241,7 @@ final class MeetingController: ObservableObject {
             // proven capture path as dictation; the toggle re-enables it (with the
             // AudioRecorder output-render fix) for speaker-without-headphones use.
             // See memory `meeting-empty-transcript-capture-bug`.
-            let echoCancellation = UserDefaults.standard.object(forKey: "meetingEchoCancellation") as? Bool ?? false
+            let echoCancellation = DefaultsKey.meetingEchoCancellation.value()
             try micRecorder.start(spoolingTo: currentSpool?.micURL, voiceProcessing: echoCancellation)
             if echoCancellation, let reason = micRecorder.voiceProcessingError {
                 warnings.append(String(localized: "ohne Echo-Unterdrückung (\(reason)) — bei Lautsprecher-Ton kann die Gegenseite doppelt im Transkript landen"))
@@ -273,7 +273,7 @@ final class MeetingController: ObservableObject {
         // Live notes open for business: the buffer is bound to this recording's
         // spool from here until stop() consumes it.
         liveNotes.begin(startedAt: startedAt, title: currentEvent?.title ?? String(localized: "Meeting"), spool: currentSpool)
-        if UserDefaults.standard.object(forKey: "openNotesOnMeetingStart") as? Bool ?? true {
+        if DefaultsKey.openNotesOnMeetingStart.value() {
             // Non-activating: the notes window floats above the call anyway, and
             // yanking focus out of Zoom the moment a meeting is detected is not
             // something a detector should do.
@@ -387,6 +387,8 @@ final class MeetingController: ObservableObject {
             summaryRetry = outcome.retry
         }
         AppContainer.shared.usage.refreshSoon()
+        // A meeting is the only thing that moves the disk figure by gigabytes.
+        AppContainer.shared.storageNotice.refreshSoon()
 
         guard outcome.producedTranscript else {
             // No speech recognized despite a recording — almost always a capture
@@ -462,8 +464,7 @@ final class MeetingController: ObservableObject {
         processingCount += 1
         statusMessage = String(localized: "Verarbeite Aufnahme…")
 
-        let providerID = UserDefaults.standard.string(forKey: "summarizationProvider")
-            ?? SummarizationProviderID.anthropicAPI.rawValue
+        let providerID = DefaultsKey.summarizationProvider.value()
         try? notesFolder.ensureExists()
         let folderURL = notesFolder.folderURL
 
@@ -527,8 +528,7 @@ final class MeetingController: ObservableObject {
         statusMessage = String(localized: "Stelle unterbrochene Aufnahme wieder her…")
         try? notesFolder.ensureExists()
         let folderURL = notesFolder.folderURL
-        let providerID = UserDefaults.standard.string(forKey: "summarizationProvider")
-            ?? SummarizationProviderID.anthropicAPI.rawValue
+        let providerID = DefaultsKey.summarizationProvider.value()
         let event: CalendarMonitor.EventMatch? = meta.eventTitle.map {
             CalendarMonitor.EventMatch(title: $0, eventIdentifier: meta.eventID ?? "")
         }
@@ -563,7 +563,7 @@ final class MeetingController: ObservableObject {
     /// the moment the user is somewhere else entirely — the meeting just ended
     /// and the note (or the failure) is ready. Click opens the note.
     private func notifyReady(title: String, body: String, noteURL: URL?) {
-        guard UserDefaults.standard.object(forKey: "notifyOnMeetingReady") as? Bool ?? true else { return }
+        guard DefaultsKey.notifyOnMeetingReady.value() else { return }
         NotificationCenterService.shared.postMeetingReady(
             id: "meeting-ready-\(UUID().uuidString)",
             title: title,
@@ -593,8 +593,7 @@ final class MeetingController: ObservableObject {
         guard let payload = summaryRetry, processingCount == 0 else { return }
         processingCount += 1
         statusMessage = String(localized: "Erzeuge Zusammenfassung…")
-        let providerID = UserDefaults.standard.string(forKey: "summarizationProvider")
-            ?? SummarizationProviderID.anthropicAPI.rawValue
+        let providerID = DefaultsKey.summarizationProvider.value()
 
         Task {
             do {
@@ -655,7 +654,7 @@ final class MeetingController: ObservableObject {
     /// path as its one argument. Best-effort and off the main thread, with a
     /// hard timeout so a hanging script can't wedge the app. No path set ⇒ no-op.
     static func runMeetingHook(noteURL: URL) {
-        let path = (UserDefaults.standard.string(forKey: "meetingHookPath") ?? "")
+        let path = DefaultsKey.meetingHookPath.value()
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) else { return }
         Task.detached {
@@ -679,7 +678,7 @@ final class MeetingController: ObservableObject {
     /// streaming-only (no batch `transcribe(samples:)`), so it can't do per-segment
     /// meeting ASR and falls back to Parakeet v3.
     nonisolated static func meetingTranscriber() async throws -> any TranscriptionEngine {
-        guard UserDefaults.standard.bool(forKey: "meetingUseDictationEngine") else {
+        guard DefaultsKey.meetingUseDictationEngine.value() else {
             return try await ParakeetModelCache.shared.transcriber()
         }
         switch ASREngineID.current {
@@ -751,7 +750,7 @@ final class MeetingController: ObservableObject {
         // (attendee-anchored, conservative LLM relabel). Best-effort: any failure
         // leaves "Sprecher n" untouched; "Ich" is never relabelled. Only
         // transcript text + attendee names leave the device — same stance as
-        // summarization. Default-on, switchable via "speakerNamingEnabled".
+        // summarization. Default-on, switchable via `DefaultsKey.speakerNamingEnabled`.
         //
         // Not attempted when the mic was stumm: the transcript is then one side
         // of a conversation, and the only name it attests is usually the local
@@ -760,7 +759,7 @@ final class MeetingController: ObservableObject {
         // confident wrong name.
         let named: [MeetingTranscriptSegment]
         if !segments.isEmpty, !micSilent,
-           UserDefaults.standard.object(forKey: "speakerNamingEnabled") as? Bool ?? true {
+           DefaultsKey.speakerNamingEnabled.value() {
             let mapping = await SpeakerNameResolver.resolve(
                 segments: segments,
                 attendees: event?.attendeeNames ?? [],

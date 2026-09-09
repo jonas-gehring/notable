@@ -250,6 +250,12 @@ final class DictationController: ObservableObject {
     /// the selected engine; saying so out loud is cheaper than relying on it.
     func retryLoad(_ engine: ASREngineID) {
         guard engine == ASREngineID.current else { return }
+        // An aborted download leaves a directory that FluidAudio's presence
+        // check calls "there", so clearing the task alone would re-read the
+        // same broken slot forever. This is the only thing that makes the
+        // button mean anything — and it only ever touches a directory the
+        // inventory can prove is incomplete.
+        ModelInventory.discardIncomplete(for: engine)
         switch engine {
         case .parakeetV3: engineTask = nil
         case .unifiedEnglish: streamTask = nil
@@ -284,11 +290,7 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private var bootstrapEnabled: Bool {
-        UserDefaults.standard.object(forKey: "bootstrapModel") == nil
-            ? true
-            : UserDefaults.standard.bool(forKey: "bootstrapModel")
-    }
+    private var bootstrapEnabled: Bool { DefaultsKey.bootstrapModel.value() }
 
     /// Loads Whisper Tiny alongside the chosen model when that one is missing, so
     /// a cold first launch is dictatable in about a minute instead of after a
@@ -433,7 +435,7 @@ final class DictationController: ObservableObject {
 
         timerTicks = 0
         silentTicks = 0
-        idleTimeoutSeconds = UserDefaults.standard.double(forKey: "dictationIdleTimeout")
+        idleTimeoutSeconds = DefaultsKey.dictationIdleTimeout.value()
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.appState.captureState == .recording else { return }
@@ -522,7 +524,7 @@ final class DictationController: ObservableObject {
 
     /// Plays a short system sound cue if enabled (Spec 08 C). Off by default.
     private func playCue(_ name: String) {
-        guard UserDefaults.standard.bool(forKey: "dictationSounds") else { return }
+        guard DefaultsKey.dictationSounds.value() else { return }
         NSSound(named: name)?.play()
     }
 
@@ -532,14 +534,10 @@ final class DictationController: ObservableObject {
         // Freeze the target app now: the overlay is non-activating, so the
         // frontmost app is still the field the user dictated into (Spec 03).
         let targetBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let appContextEnabled = UserDefaults.standard.object(forKey: "appContextFormatting") == nil
-            ? true
-            : UserDefaults.standard.bool(forKey: "appContextFormatting")
+        let appContextEnabled = DefaultsKey.appContextFormatting.value()
         // Separate switch from the formatting one: a user may well want per-app
         // polishing without a per-app tally of where he dictates.
-        let appStatisticsEnabled = UserDefaults.standard.object(forKey: "appStatistics") == nil
-            ? true
-            : UserDefaults.standard.bool(forKey: "appStatistics")
+        let appStatisticsEnabled = DefaultsKey.appStatistics.value()
         // NOT `endEscInterception()` here: the tap stays until the task below
         // is done, so Esc can still abort a long enhancement. Every exit path
         // ends it — the short-clip return, the task's `defer`, and `cancel`.

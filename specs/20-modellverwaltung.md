@@ -148,3 +148,32 @@ davon sinnvoll und geht ihr voraus.
   ohne echte Modelle.
 - Stufe 2: ein Release trägt die Modell-Assets, ein frischer Start lädt sie von dort,
   und `codesign`-Prüfung greift auf demselben Weg wie beim App-Update.
+
+## 7. Stand (2026-09-09)
+
+**Stufe 1 ist gebaut.** `ModelInventory` klassifiziert beide Modellwurzeln, die
+Belegungs-Seite zeigt jedes Modell mit Zustand und Größe, verwaiste und
+unvollständige lassen sich nach Bestätigung entfernen. `ModelInventoryTests` deckt
+alle vier Zustände gegen ein temporäres Verzeichnis ab.
+
+Drei Dinge sind anders gekommen, als hier stand:
+
+- **Die `config.json` taugt nicht als Manifest.** Gemessen: in *jedem*
+  Modellverzeichnis steht buchstäblich `{}`. Die Vollständigkeitsprüfung liest
+  stattdessen FluidAudios eigene `ModelNames.ASR.requiredModelsV3()`,
+  `ModelNames.Diarizer.requiredModels`, `ModelNames.VAD.requiredModels` und
+  `ModelNames.ParakeetUnified.requiredModels(variant:)`.
+- **Die Namensliste ist keine eigene mehr.** Sie kommt aus `Repo.folderName`. Damit
+  erledigt sich Risiko §5 weitgehend: benennt FluidAudio ein Verzeichnis um, wandert
+  „aktuell" von selbst mit, und der alte Ordner wird von allein verwaist — genau
+  das, was `silero-vad-coreml` und `speaker-diarization-coreml` passiert ist.
+- **WhisperKit lud nach `~/Documents/huggingface`.** Stand in keiner Spec, ist aber
+  der Ordner hinter einer eigenen TCC-Abfrage und der, den Leute in die Cloud
+  synchronisieren — für bis zu 1,5 GB Modellgewichte der falsche Ort, und eine
+  Einstellungsseite, die zum Zählen einen Dokumente-Dialog auslöst, wäre schlimmer.
+  `downloadBase` zeigt jetzt auf `Application Support/Notable/Models`. Ein
+  bestehender Download dort bleibt liegen und ist von Notable aus nicht lesbar; das
+  ist der Preis und er ist einmalig.
+
+**Stufe 2 ist nicht gebaut** und bleibt eine eigene Entscheidung: sie hängt rund ein
+Gigabyte an jedes Release und macht `scripts/release.sh` zum Modell-Publisher.

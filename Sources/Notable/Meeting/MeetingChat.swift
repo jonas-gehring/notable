@@ -97,7 +97,7 @@ struct MeetingChatView: View {
     let recording: RecordingStore.Recording
     @StateObject private var controller: MeetingChatController
     @State private var confirmClear = false
-    @AppStorage("summarizationProvider") private var providerID = SummarizationProviderID.anthropicAPI.rawValue
+    @AppStorage(DefaultsKey.summarizationProvider.key) private var providerID = DefaultsKey.summarizationProvider.fallback
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
 

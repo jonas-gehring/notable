@@ -38,24 +38,20 @@ struct TextPolisher: Sendable {
         /// the tests can set a profile without touching global state.
         var spokenLanguages: [String] = SpokenLanguages.default
 
+        /// Reads the five polish switches.
+        ///
+        /// Each `DefaultsEntry` carries the value an unset key means, and that
+        /// value is the same one the property above declares — `PolishOptionsTests`
+        /// pins the pair, because a switch whose "off" and whose "never touched"
+        /// disagree is a bug nobody would look for here.
         static func fromDefaults() -> Options {
             let defaults = UserDefaults.standard
             var options = Options()
-            if defaults.object(forKey: "polishRemoveFillers") != nil {
-                options.removeFillers = defaults.bool(forKey: "polishRemoveFillers")
-            }
-            if defaults.object(forKey: "polishApplyITN") != nil {
-                options.applyITN = defaults.bool(forKey: "polishApplyITN")
-            }
-            if defaults.object(forKey: "polishFuzzyDictionary") != nil {
-                options.applyFuzzyDictionary = defaults.bool(forKey: "polishFuzzyDictionary")
-            }
-            if defaults.object(forKey: "polishParagraphs") != nil {
-                options.paragraphs = defaults.bool(forKey: "polishParagraphs")
-            }
-            if defaults.object(forKey: "polishStructureCommands") != nil {
-                options.structureCommands = defaults.bool(forKey: "polishStructureCommands")
-            }
+            options.removeFillers = DefaultsKey.polishRemoveFillers.value(defaults)
+            options.applyITN = DefaultsKey.polishApplyITN.value(defaults)
+            options.applyFuzzyDictionary = DefaultsKey.polishFuzzyDictionary.value(defaults)
+            options.paragraphs = DefaultsKey.polishParagraphs.value(defaults)
+            options.structureCommands = DefaultsKey.polishStructureCommands.value(defaults)
             options.dictionary = PersonalDictionary.load()
             options.replacements = SmartReplace.load()
             options.spokenLanguages = SpokenLanguages.load(defaults)

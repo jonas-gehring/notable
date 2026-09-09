@@ -36,7 +36,7 @@ final class UsageSummary: ObservableObject {
               let rows = try? await store.usageRows(from: today.start, to: today.end)
         else { return }
 
-        let typingWPM = UserDefaults.standard.object(forKey: "typingWPM") as? Double ?? 40
+        let typingWPM = DefaultsKey.typingWPM.value()
         let totals = UsageMetrics.totals(rows.map(UsageRow.init), typingWPM: typingWPM)
         line = UsageMetrics.menuLine(totals, label: String(localized: "Heute"))
     }

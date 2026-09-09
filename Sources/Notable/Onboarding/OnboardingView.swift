@@ -10,8 +10,8 @@ struct OnboardingView: View {
     @EnvironmentObject private var dictation: DictationController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("didCompleteOnboarding") private var didComplete = false
-    @AppStorage("onboardingPage") private var pageRaw = 0
+    @AppStorage(DefaultsKey.didCompleteOnboarding.key) private var didComplete = DefaultsKey.didCompleteOnboarding.fallback
+    @AppStorage(DefaultsKey.onboardingPage.key) private var pageRaw = DefaultsKey.onboardingPage.fallback
     @AppStorage(HotkeySpec.storageKey) private var hotkeyRaw = HotkeySpec.rightOption.rawValue
 
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()

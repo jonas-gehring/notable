@@ -127,3 +127,31 @@ Jeder Schritt einzeln committet, `xcodebuild … test` dazwischen.
   einer angepasst werden, war es kein reiner Umbau — dann gehört die Änderung in einen
   eigenen Commit mit eigener Begründung.
 - Jede der sieben Seiten wurde einmal geöffnet und zeigt dieselben Abschnitte wie vorher.
+
+## 7. Stand (2026-09-09)
+
+**Gebaut, in der Reihenfolge aus §4.** Gemessen danach:
+
+| | vorher | nachher |
+|---|---|---|
+| `SettingsView.swift` | 898 Zeilen | 76 |
+| größte Datei in `Settings/` | 898 | 358 (`StorageSettingsView`, gewachsen durch Spec 20/21) |
+| `@AppStorage("…")`-Literale | 30 | 0 |
+| Bundle-ID eines Meeting-Clients an zwei Stellen | ja | nein |
+
+`enum Section` heißt `Pane` und beschattet `SwiftUI.Section` nicht mehr;
+`IconSettingsView` heißt `MenuBarSettingsView`, weil die Seite mehr ist als ein
+Symbolwähler. Kein bestehender Test musste für diesen Umbau angepasst werden.
+
+Zwei Dinge, die §2 gestreift haben und deshalb hier stehen:
+
+- **Der Einstellungs-Abschnitt „Letzte Diktate" kann jetzt Kopieren und
+  Korrigieren.** Das ist eine Fähigkeit, die er vorher nicht hatte — sie folgt aus
+  dem gemeinsamen Zeilen-Layout und nicht aus einer eigenen Entscheidung, und §3.2
+  hatte sie so vorgesehen („kann aber dasselbe"). Das „verbessert"-Abzeichen läuft
+  in dieselbe Richtung und ist jetzt auch im Fenster zu sehen.
+- **`RecordingStore.recentDictations` bleibt.** `DictationHistory` und fünf Tests
+  benutzen es; es zu entfernen wäre der Umbau gewesen, den §5 verbietet.
+
+Was diese Spec **nicht** getan hat: einen Schalter gestrichen. Die Zahl steht bei 28,
+und die Regel aus §3.4 gilt ab jetzt, nicht rückwirkend.

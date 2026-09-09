@@ -25,6 +25,10 @@ final class AppContainer {
     lazy var updateInstaller = UpdateInstaller(isRecording: { [unowned self] in self.meeting.state.isRecording })
     let dictationHistory = DictationHistory()
     let usage = UsageSummary()
+    let storageNotice = StorageNotice()
+    /// Which settings pane to show. Set before opening the window, so a menu
+    /// item can lead to the page it is about instead of to "Allgemein".
+    let settingsRoute = SettingsRoute()
 
     /// SwiftUI's `openWindow` is only reachable from a `View`. `MenuBarLabel` is
     /// alive for the whole app lifetime, so it parks the action here — that is
@@ -139,6 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             await container.usage.refresh()
+            // After the spool recovery above, so the number is the one that is
+            // actually on the disk now rather than the one from before.
+            await container.storageNotice.refresh()
         }
 
         // Retention (issue #2). Deliberately **after** the spool recovery above:
@@ -236,6 +243,7 @@ struct NotableApp: App {
                 .environmentObject(AppContainer.shared.updateInstaller)
                 .environmentObject(AppContainer.shared.dictationHistory)
                 .environmentObject(AppContainer.shared.usage)
+                .environmentObject(AppContainer.shared.storageNotice)
                 .environmentObject(AppContainer.shared.liveNotes)
         } label: {
             MenuBarLabel(symbol: menuSymbol)
@@ -312,7 +320,7 @@ struct NotableApp: App {
 struct MenuBarLabel: View {
     let symbol: String
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("didCompleteOnboarding") private var didComplete = false
+    @AppStorage(DefaultsKey.didCompleteOnboarding.key) private var didComplete = DefaultsKey.didCompleteOnboarding.fallback
 
     var body: some View {
         Image(systemName: symbol)
@@ -348,9 +356,10 @@ struct MenuContentView: View {
     @EnvironmentObject private var updateInstaller: UpdateInstaller
     @EnvironmentObject private var history: DictationHistory
     @EnvironmentObject private var usage: UsageSummary
+    @EnvironmentObject private var storageNotice: StorageNotice
     @EnvironmentObject private var liveNotes: LiveNotesController
-    @AppStorage("showNextMeeting") private var showNextMeeting = true
-    @AppStorage("showUsageInMenu") private var showUsageInMenu = true
+    @AppStorage(DefaultsKey.showNextMeeting.key) private var showNextMeeting = DefaultsKey.showNextMeeting.fallback
+    @AppStorage(DefaultsKey.showUsageInMenu.key) private var showUsageInMenu = DefaultsKey.showUsageInMenu.fallback
 
     /// The header must never say "Bereit" while a meeting is being recorded —
     /// meeting state lives outside `appState.captureState`.
@@ -388,6 +397,15 @@ struct MenuContentView: View {
         // entirely on a day with nothing to report (see UsageMetrics.menuLine).
         if showUsageInMenu, let usageLine = usage.line {
             Text(usageLine)
+        }
+        // Only above the threshold, and it leads somewhere: the page where the
+        // retention rules are switched on. The line is a way to the decision,
+        // never a substitute for it.
+        if let storageLine = storageNotice.line {
+            Button(storageLine) {
+                AppContainer.shared.settingsRoute.requested = .storage
+                open("settings")
+            }
         }
 
         Divider()

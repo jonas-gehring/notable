@@ -630,3 +630,40 @@
 "„Systemsprache“ folgt der Sprachreihenfolge in den Systemeinstellungen; kennt Notable die Sprache nicht, zeigt es English." = "“System language” follows the language order in System Settings; if Notable does not speak that language, it shows English.";
 "⌘⌥1–6 formatiert · ⌘⏎ hakt ab · ⌘T stempelt" = "⌘⌥1–6 formats · ⌘⏎ ticks off · ⌘T timestamps";
 "⚠︎ %@" = "⚠︎ %@";
+
+/* MARK: - Modelle und Speicherplatz (Specs 20 und 21) */
+
+"in Benutzung" = "in use";
+"vorhanden, nicht gewählt" = "present, not selected";
+"unvollständig" = "incomplete";
+"verwaist" = "orphaned";
+"Parakeet TDT v3 — Diktat und Meetings" = "Parakeet TDT v3 — dictation and meetings";
+"Sprechertrennung" = "Speaker separation";
+"Spracherkennung im Audiosignal (VAD)" = "Speech detection in the audio (VAD)";
+
+"Die Rohspur ließ sich nicht lesen." = "The raw track could not be read.";
+"Die komprimierte Spur stimmt nicht mit der Rohspur überein." = "The compressed track does not match the raw one.";
+
+"Gesamt" = "Total";
+"Modelle" = "Models";
+"1 Modell" = "1 model";
+"%lld Modelle" = "%lld models";
+"Noch keine Modelle geladen." = "No models downloaded yet.";
+"unvollständig — es fehlt %@" = "incomplete — missing %@";
+"%@ entfernen (%@)" = "Remove %@ (%@)";
+"Modellordner entfernen?" = "Remove model folders?";
+"Entfernen" = "Remove";
+"Ein unvollständiges Modell wird beim nächsten Start neu geladen. Ein verwaistes kennt kein Code-Pfad mehr." = "An incomplete model is downloaded again on the next launch. An orphaned one is known to no code path any more.";
+"Nicht entfernt: %@" = "Not removed: %@";
+"Alle vier Posten, weil zwei davon lange keiner genannt hat — die Modelle sind der größte, und sie kamen hier nie vor." = "All four items, because for a long time nobody named two of them — the models are the largest, and they never appeared here at all.";
+"Die Spracherkennung lädt ihre Modelle beim ersten Start von HuggingFace. Welche Fassung das ist, entscheidet die eingebundene Bibliothek — benennt sie ein Verzeichnis um, bleibt das alte liegen und steht hier als verwaist." = "Speech recognition downloads its models from HuggingFace on first launch. Which revision that is, is decided by the library — when it renames a directory, the old one stays behind and shows up here as orphaned.";
+
+"Bestand umrechnen" = "Convert what is there";
+"Archiv jetzt umrechnen…" = "Convert archive now…";
+"Läuft — das kann bei großen Archiven dauern." = "Running — this can take a while for large archives.";
+"%@, %@ → etwa %@." = "%@, %@ → about %@.";
+"%lld Spuren umgerechnet, %@ frei." = "%lld tracks converted, %@ freed.";
+"Nicht umgerechnet: %@" = "Not converted: %@";
+"Verlustfrei: dieselben Abtastwerte, weniger Bytes, als .m4a auch von QuickTime abspielbar. Die Rohspur wird erst gelöscht, nachdem die neue zurückgelesen und verglichen wurde. Neue Aufnahmen macht das von selbst." = "Lossless: the same samples, fewer bytes, and as an .m4a playable in QuickTime too. The raw track is deleted only after the new one has been read back and compared. New recordings do this by themselves.";
+
+"Notable belegt %@ — aufräumen…" = "Notable is using %@ — clean up…";

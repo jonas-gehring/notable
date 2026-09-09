@@ -16,7 +16,7 @@ struct NoteListView: View {
     @State private var draftNotes = ""
     @State private var busy = false
     @State private var chatNote: RecordingStore.Recording?
-    @AppStorage("summarizationProvider") private var providerID = SummarizationProviderID.anthropicAPI.rawValue
+    @AppStorage(DefaultsKey.summarizationProvider.key) private var providerID = DefaultsKey.summarizationProvider.fallback
 
     var body: some View {
         Group {

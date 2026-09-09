@@ -70,7 +70,8 @@ final class MeetingDetector: ObservableObject {
     /// Dedicated apps run (almost) only while calling; browsers and ambient apps
     /// (Slack) make noise all day. The tier decides both priority and how
     /// permissive the *end* signal may be.
-    enum Tier: Sendable, Equatable { case dedicated, browser, ambient }
+    /// Lives in ``MeetingApps`` with the table it classifies.
+    typealias Tier = MeetingApps.Tier
 
     struct Candidate: Equatable, Sendable {
         /// Human-facing display string, e.g. "Zoom" or "Google Meet (Google Chrome)".
@@ -99,16 +100,6 @@ final class MeetingDetector: ObservableObject {
     /// `MeetingController` uses it to decide whether a manually started recording
     /// belongs to the call and should end with it.
     var isCallActive: Bool { stateMachine.isActive }
-
-    private static let meetingApps: [(bundleID: String, name: String, tier: Tier)] = [
-        ("us.zoom.xos", "Zoom", .dedicated),
-        ("com.microsoft.teams2", "Microsoft Teams", .dedicated),
-        ("com.microsoft.teams", "Microsoft Teams", .dedicated),
-        ("com.apple.FaceTime", "FaceTime", .dedicated),
-        ("Cisco-Systems.Spark", "Webex", .dedicated),
-        ("com.webex.meetingmanager", "Webex", .dedicated),
-        ("com.tinyspeck.slackmacgap", "Slack", .ambient),
-    ]
 
     /// Browsers, with the `kCGWindowOwnerName` used to read their window titles
     /// and the process bundle ids that actually carry their audio.
@@ -198,7 +189,7 @@ final class MeetingDetector: ObservableObject {
     /// A call is a *known app holding the microphone*, in tier order.
     private static func detectInCallCandidate(snapshot: AudioProcessSnapshot) -> Candidate? {
         func firstApp(_ tier: Tier) -> Candidate? {
-            for app in meetingApps where app.tier == tier {
+            for app in MeetingApps.native where app.tier == tier {
                 if snapshot.inputEntry(bundleID: app.bundleID) != nil {
                     return Candidate(sourceName: app.name, identityKey: app.bundleID,
                                      processBundleIDs: [app.bundleID], tier: tier)
@@ -258,7 +249,7 @@ final class MeetingDetector: ObservableObject {
     private static func detectRunningAppCandidate() -> Candidate? {
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         func firstRunning(_ tier: Tier) -> Candidate? {
-            meetingApps
+            MeetingApps.native
                 .first { $0.tier == tier && running.contains($0.bundleID) }
                 .map { Candidate(sourceName: $0.name, identityKey: $0.bundleID,
                                  processBundleIDs: [$0.bundleID], tier: tier) }

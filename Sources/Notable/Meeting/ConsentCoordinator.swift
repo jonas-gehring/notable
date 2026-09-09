@@ -14,7 +14,7 @@ import Foundation
 final class ConsentCoordinator {
     /// Mirrors the current auto-record default key so behaviour with the toggle off
     /// matches the pre-consent guard in `AppDelegate`.
-    static let autoRecordDefaultsKey = "autoRecordMeetings"
+    static let autoRecordDefaultsKey = DefaultsKey.autoRecordMeetings.key
 
     private enum CallStatus {
         case idle

@@ -63,7 +63,13 @@ final class WhisperTranscriber: TranscriptionEngine, @unchecked Sendable {
     /// first `transcribe`; safe to call from a background task at launch.
     func prepare() async throws {
         // The convenience init downloads (download: true) and loads the model.
-        pipe = try await WhisperKit(model: modelName)
+        //
+        // `downloadBase` is not optional here. WhisperKit's default is
+        // `~/Documents/huggingface` — the user's Documents folder, behind its
+        // own TCC prompt and the folder most likely to be synced to a cloud
+        // drive. Up to 1,5 GB of model weights belong in Application Support
+        // next to FluidAudio's, where the storage pane can also count them.
+        pipe = try await WhisperKit(model: modelName, downloadBase: ModelInventory.whisperDownloadBase)
     }
 
     func transcribe(samples: [Float], sampleRate: Int) async throws -> String {

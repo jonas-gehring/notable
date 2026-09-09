@@ -26,9 +26,9 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [13](13-ios-capture-companion.md) | **iOS-Capture-Companion** — das iPhone nimmt auf, der Mac transkribiert | ~7 Tage | iCloud-Entitlement bei Developer-ID-Verteilung | 📋 Entwurf |
 | [14](14-ios-vollport.md) | **Notable für iOS/iPadOS** — eigenständiger Client, On-Device-ASR, CloudKit-Sync | ~4 Wochen | ASR-Tempo auf dem Telefon, CloudKit ohne Ausweichweg | 📋 Entwurf |
 | 15–19 | **Textverbesserung, Aufbewahrung, Notch-HUD, Textbausteine, Statistik-Ausbau** — als GitHub-Issues #1–#5 geschrieben, nicht als Datei | — | — | gebaut, archiviert in `notable-issues-archiv-20260902.md` |
-| [20](20-modellverwaltung.md) | **Modellverwaltung** — 1,1 GB Modelle sichtbar, reparierbar, an die App-Version gebunden | S + M | Verzeichnisnamen gehören FluidAudio, nicht uns | 📋 Entwurf |
-| [21](21-spool-format-und-speicherplatz.md) | **Spool-Format & sichtbarer Speicherplatz** — Int16 statt Float32, ALAC im Archiv, die Zahl endlich sichtbar | S + S–M + S | ein Formatfehler zerstört die Notfallkopie | 📋 Entwurf |
-| [22](22-oberflaeche-entdoppeln.md) | **Oberfläche entdoppeln** — eine Implementierung je Begriff, eine Datei je Einstellungsseite | M | reiner Umbau ohne Testkriterium außer „vorher genauso" | 📋 Entwurf |
+| [20](20-modellverwaltung.md) | **Modellverwaltung** — 1,1 GB Modelle sichtbar, reparierbar, an die App-Version gebunden | S + M | Verzeichnisnamen gehören FluidAudio, nicht uns | Stufe 1 gebaut, Stufe 2 offen |
+| [21](21-spool-format-und-speicherplatz.md) | **Spool-Format & sichtbarer Speicherplatz** — Int16 statt Float32, ALAC im Archiv, die Zahl endlich sichtbar | S + S–M + S | ein Formatfehler zerstört die Notfallkopie | gebaut |
+| [22](22-oberflaeche-entdoppeln.md) | **Oberfläche entdoppeln** — eine Implementierung je Begriff, eine Datei je Einstellungsseite | M | reiner Umbau ohne Testkriterium außer „vorher genauso" | gebaut |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
 
@@ -38,6 +38,14 @@ nennt, davon rund die Hälfte reines Format. Sie sind unabhängig voneinander un
 dieser Reihenfolge sinnvoll: 21 gibt sofort Platz zurück, 20 macht den zweitgrößten
 Posten überhaupt erst sichtbar, 22 ist Pflege ohne sichtbaren Effekt. Keine von ihnen
 fügt eine Funktion hinzu.
+
+Umgesetzt am 2026-09-09, mit drei Abweichungen, die beim Bauen sichtbar wurden und in
+den Specs selbst nachgetragen sind: die `config.json` der Modelle ist leer, also kommt
+die Vollständigkeitsprüfung aus FluidAudios eigenem `ModelNames`; ebenso die Liste der
+aktuellen Verzeichnisnamen, was das Hauptrisiko von Spec 20 weitgehend erledigt. Und
+WhisperKit lud seine Modelle nach `~/Documents` — davon stand in keiner Spec etwas.
+**Offen ist Stufe 2 von Spec 20** (Modelle als Release-Assets): eine eigene
+Entscheidung, weil sie rund ein Gigabyte an jedes Release hängt.
 
 Daneben liegen die Specs der ersten Ausbaustufe — `note-management-ui.md`,
 `speaker-naming.md`, `auto-detect-consent.md`, `release-and-signing.md` und die

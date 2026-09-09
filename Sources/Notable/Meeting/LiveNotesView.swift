@@ -21,7 +21,7 @@ struct LiveNotesView: View {
     @EnvironmentObject private var notes: LiveNotesController
     @EnvironmentObject private var meeting: MeetingController
     @StateObject private var editor = NotesEditorProxy()
-    @AppStorage("meetingNotesFloating") private var floating = true
+    @AppStorage(DefaultsKey.meetingNotesFloating.key) private var floating = DefaultsKey.meetingNotesFloating.fallback
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

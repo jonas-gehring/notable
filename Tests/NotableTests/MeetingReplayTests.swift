@@ -28,6 +28,12 @@ final class MeetingReplayTests: XCTestCase {
             print("REPLAY \(session.lastPathComponent)")
             print("  vorher:  \(Self.statistics(result.raw))")
             print("  nachher: \(Self.statistics(result.cleaned))")
+            let distances = SpeakerClusterCleanup.splinterDistances(result.raw)
+                .map { entry in
+                    let distance = entry.distance.map { String(format: "%.2f", $0) } ?? "–"
+                    return "\(entry.label):\(distance)@\(String(format: "%.1f", entry.duration))s"
+                }
+            print("  Splitter-Distanzen (Schwelle \(SpeakerClusterCleanup.reassignDistance)): \(distances.joined(separator: " "))")
         }
     }
 

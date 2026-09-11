@@ -371,3 +371,29 @@ geratene Adapter** — Stufe 0 misst, erst dann entstehen sie.
   (`TEST_RUNNER_NOTABLE_REPLAY=1 xcodebuild … -only-testing:NotableTests/MeetingReplayTests`).
 - **Weg B (Texterkennung)** und die Meldung „Adapter liefert seit drei Meetings nichts"
   — beide setzen einen Adapter voraus.
+
+### 9.1 Gemessen: Stufe 1 auf dem echten Archiv (2026-09-11)
+
+`MeetingReplayTests` über die neun archivierten Meetings, mit der Kosinus-Distanz
+jedes Splitter-Segments zum nächsten großen Cluster:
+
+| Meeting | vorher | nachher | Distanzen der Splitter |
+|---|---|---|---|
+| FB7B… (Payhawk-Form) | 1: 1155 s, 5: 245 s, 3: 40 s, 4: 5 s, 2: 1 s | unverändert bis auf 2 Segmente | 0,58 – 0,85 |
+| B64A… | 3: 1284 s, 1: 1016 s, 2: 12 s, 6/4/5: 0–1 s | unverändert | 0,76 – 0,89 |
+| 1B2D… | 1: 414 s, 2: 6 s (9 Segmente) | unverändert | 0,81 – 1,04 |
+| 3862…, 71D9…, C901… | je ein Splitter | unverändert | 0,77 – 0,83 |
+
+**Befund:** Bei Segmenten unter etwa einer Sekunde trägt das Embedding keinen
+verwertbaren Hinweis — die Distanzen liegen fast alle zwischen 0,75 und 1,0, wo 1,0
+„orthogonal" heißt. Mit der Startschwelle 0,6 bewirkt Stufe 1 praktisch nichts, und
+die **Abnahme „Payhawk: höchstens drei Labels" ist nicht erfüllt** (weiter fünf).
+
+Eine Schwelle um 0,9 erfüllte sie — aber dann entschiede nicht mehr die Stimme,
+sondern „zur nächsten großen Stimme", und bei zwei großen Stimmen ist „nächste" bei
+diesen Abständen Zufall. Das widerspricht „lieber anonym als falsch". Die Schwelle
+bleibt deshalb 0,6; die Frage steht in `CLAUDE.md` unter „Open decisions".
+
+Nebenbefund: „neu durchnummerieren nach erstem Auftreten" macht aus der Hauptstimme
+„Sprecher 2", wenn ein 0,7-s-Splitter vor ihr spricht (FB7B…). Regelkonform, liest
+sich aber falsch.

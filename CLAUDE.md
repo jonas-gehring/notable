@@ -109,4 +109,4 @@ Test-suite notes: `ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `Englis
 
 New ones go here — do not resolve them unilaterally, ask.
 
-- None at the moment. The three listed here until 2026-09-11 were answered that day and are recorded under *Settled decisions*.
+- **Splinter cleanup threshold** (Spec 24 §9.1, measured 2026-09-11). On the real archive, splinter segments sit 0.58–1.04 (cosine) from the nearest large cluster — below about a second, the embedding carries no usable signal. At the starting value 0.6 Stufe 1 changes almost nothing and the acceptance "Payhawk: at most three labels" fails (still five). Around 0.9 it would pass, but the assignment would then be "join the nearest large voice" rather than a voice match, which with two large voices is a guess. Options: keep 0.6 (safe, near no-op), loosen to ~0.9 (fewer labels, some wrong), or change the rule (e.g. only merge when there is exactly one large voice, or fold sub-second splinters into an unnamed "?" instead of a numbered speaker). Also open: numbering by first appearance can make the main voice "Sprecher 2".

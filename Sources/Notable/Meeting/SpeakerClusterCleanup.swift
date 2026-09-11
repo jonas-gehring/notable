@@ -40,9 +40,7 @@ enum SpeakerClusterCleanup {
         let large = largeLabels(durations)
         var result = segments
         if !large.isEmpty, large.count < durations.count {
-            let centroids: [(label: String, vector: [Float])] = large.sorted().compactMap { label in
-                centroid(of: segments.filter { $0.label == label }).map { (label, $0) }
-            }
+            let centroids = largeCentroids(segments, large: large)
             for index in result.indices where !large.contains(result[index].label) {
                 guard let vector = normalized(result[index].embedding),
                       let nearest = centroids
@@ -80,7 +78,27 @@ enum SpeakerClusterCleanup {
         }
     }
 
+    /// For measuring the threshold on real meetings (`MeetingReplayTests`):
+    /// every splinter segment's cosine distance to the nearest large cluster,
+    /// `nil` where it carries no usable embedding.
+    static func splinterDistances(_ segments: [Segment]) -> [(label: String, duration: TimeInterval, distance: Float?)] {
+        let large = largeLabels(totals(segments))
+        let centroids = largeCentroids(segments, large: large)
+        return segments.filter { !large.contains($0.label) }.map { segment in
+            let distance = normalized(segment.embedding).flatMap { vector in
+                centroids.map { 1 - dot($0.vector, vector) }.min()
+            }
+            return (segment.label, segment.duration, distance)
+        }
+    }
+
     // MARK: - Vectors
+
+    private static func largeCentroids(_ segments: [Segment], large: Set<String>) -> [(label: String, vector: [Float])] {
+        large.sorted().compactMap { label in
+            centroid(of: segments.filter { $0.label == label }).map { (label, $0) }
+        }
+    }
 
     /// Mean of the L2-normalised segment embeddings, weighted by quality.
     private static func centroid(of segments: [Segment]) -> [Float]? {

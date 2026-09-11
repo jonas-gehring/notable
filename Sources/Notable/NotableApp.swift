@@ -74,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // A recording started by hand *during* a detected call ends with the call.
         container.meeting.isCallActive = { container.detector.isCallActive }
+        // The call's own microphone is the one to record (Spec 23).
+        container.meeting.callProcess = {
+            container.detector.callProcess.map { (name: $0.sourceName, bundleIDs: $0.processBundleIDs) }
+        }
         // Detection no longer records directly — it asks. The coordinator honours a
         // remembered choice or shows the non-activating consent prompt; only "Ja"
         // (or a remembered "immer") calls startAutomatically. The autoRecordMeetings
@@ -430,6 +434,11 @@ struct MenuContentView: View {
         Button(liveNotes.isActive ? "Notizen zum Meeting…" : "Meeting-Notizen…") { open("meetingNotes") }
         if let next = nextEvent {
             Text("Nächstes: \(Self.nextEventLabel(next))")
+        }
+        // Which microphone is being recorded. Whoever reads "MacBook Pro
+        // Microphone" with the lid shut needs no further diagnosis (Spec 23).
+        if meeting.state.isRecording, let device = meeting.inputDeviceName {
+            Text("Mikrofon: \(device)")
         }
         if let message = meeting.statusMessage {
             Text(message)

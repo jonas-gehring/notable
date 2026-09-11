@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import os
 
@@ -84,6 +85,28 @@ final class MeetingController: ObservableObject {
     private var currentEvent: CalendarMonitor.EventMatch?
     private var currentSpool: SpoolStore.Session?
 
+    /// The call a recording sits next to, from the detector (Spec 23): its name
+    /// for the warnings, its process bundle ids for the device it records from.
+    var callProcess: () -> (name: String, bundleIDs: [String])? = { nil }
+    /// Which microphone is being recorded, for the menu line.
+    @Published private(set) var inputDeviceName: String?
+    /// The device the running capture is on, and by which rule — a switch
+    /// needs both (`InputDevicePolicy.shouldSwitch`).
+    private var inputChoice: (id: UInt32, reason: InputDevicePolicy.Reason)?
+    /// Every device decision of the running capture, mirrored into `meta.json`.
+    private var diagnosticsLog: [CaptureDiagnostics] = []
+    private var deviceMonitor: Timer?
+    /// A proposed switch waits for one confirming tick, so a device that
+    /// flickers in and out of the call's list does not cut the track twice.
+    private var pendingSwitchID: UInt32?
+    /// Our own switch restarts the engine, which can post a configuration
+    /// change of its own; that echo is not news.
+    private var ignoreConfigurationChangesUntil = Date.distantPast
+    /// The watchdog moves to another device at most once per recording.
+    private var selfHealed = false
+    /// The known-silent warning is said once, not every two seconds.
+    private var warnedKnownSilent = false
+
     init(notesFolder: NotesFolderManager, calendar: CalendarMonitor, liveNotes: LiveNotesController) {
         self.notesFolder = notesFolder
         self.calendar = calendar
@@ -91,12 +114,7 @@ final class MeetingController: ObservableObject {
         micRecorder.onConfigurationChange = { [weak self] in
             Task { @MainActor in
                 guard let self, self.state.isRecording else { return }
-                do {
-                    try self.micRecorder.resume()
-                    self.statusMessage = String(localized: "Audiogerät gewechselt — Aufnahme fortgesetzt.")
-                } catch {
-                    self.statusMessage = String(localized: "Audiogerät gewechselt — Mikrofonspur ab hier unvollständig.")
-                }
+                self.handleMicConfigurationChange()
             }
         }
         observeWake()
@@ -212,13 +230,13 @@ final class MeetingController: ObservableObject {
             guard capture != .idle else { return } // stop() already consumed the event
             currentEvent = granted ? calendar.currentEvent() : nil
             if let title = currentEvent?.title { liveNotes.updateTitle(title) }
+            // Read-modify-write: the capture diagnostics are already in there.
             if let spool = currentSpool {
-                let meta = SpoolStore.Meta(
-                    startedAt: recordingStartedFallback(spool: spool),
-                    eventTitle: currentEvent?.title,
-                    eventID: currentEvent?.eventIdentifier
-                )
-                try? JSONEncoder().encode(meta).write(to: spool.metaURL, options: .atomic)
+                let event = currentEvent
+                SpoolStore.updateMeta(spool) {
+                    $0.eventTitle = event?.title
+                    $0.eventID = event?.eventIdentifier
+                }
             }
         }
 
@@ -229,6 +247,12 @@ final class MeetingController: ObservableObject {
         // Degradations are collected, not overwritten — losing echo cancellation
         // AND system audio are two separate things the user must both hear.
         var warnings: [String] = []
+
+        // Which microphone (Spec 23): the call's own device, or the default —
+        // unless that is the built-in mic behind a closed lid.
+        let (context, callApp) = inputContext()
+        let choice = InputDevicePolicy.choose(context)
+        let wishedDevice = choice.device?.name ?? "?"
 
         do {
             // Echo cancellation (VPIO): without headphones the remote voices come
@@ -242,9 +266,13 @@ final class MeetingController: ObservableObject {
             // AudioRecorder output-render fix) for speaker-without-headphones use.
             // See memory `meeting-empty-transcript-capture-bug`.
             let echoCancellation = DefaultsKey.meetingEchoCancellation.value()
-            try micRecorder.start(spoolingTo: currentSpool?.micURL, voiceProcessing: echoCancellation)
+            try micRecorder.start(spoolingTo: currentSpool?.micURL, voiceProcessing: echoCancellation,
+                                  device: choice.device?.id)
             if echoCancellation, let reason = micRecorder.voiceProcessingError {
                 warnings.append(String(localized: "ohne Echo-Unterdrückung (\(reason)) — bei Lautsprecher-Ton kann die Gegenseite doppelt im Transkript landen"))
+            }
+            if let reason = micRecorder.deviceError {
+                warnings.append(String(localized: "auf dem Standard-Mikrofon statt „\(wishedDevice)“ (\(reason))"))
             }
         } catch {
             statusMessage = String(localized: "Meeting-Start fehlgeschlagen: \(error.localizedDescription)")
@@ -253,6 +281,10 @@ final class MeetingController: ObservableObject {
             currentSpool = nil
             return
         }
+        selfHealed = false
+        warnedKnownSilent = false
+        diagnosticsLog = []
+        adopt(choice, context: context, callApp: callApp, event: "start")
 
         // System audio is the point of meeting capture — but a denied tap
         // permission should not lose the meeting. Record mic-only, loudly.
@@ -267,8 +299,15 @@ final class MeetingController: ObservableObject {
         if !warnings.isEmpty {
             statusMessage = String(localized: "Aufnahme läuft eingeschränkt: ") + warnings.joined(separator: "; ") + "."
         }
+        // Nothing but the built-in microphone behind a closed lid: it records
+        // zeros, and that is known now — not after the 20 s the watchdog waits.
+        if choice.isKnownSilent {
+            warnedKnownSilent = true
+            statusMessage = knownSilentMessage() + (statusMessage.map { " " + $0 } ?? "")
+        }
         capture = .recording(since: startedAt)
         startMicWatchdog()
+        startDeviceMonitor()
 
         // Live notes open for business: the buffer is bound to this recording's
         // spool from here until stop() consumes it.
@@ -322,9 +361,8 @@ final class MeetingController: ObservableObject {
                 }
                 guard Date() >= deadline else { return }
                 self.stopMicWatchdog()
-                self.statusMessage = String(localized: "Mikrofon liefert nur Stille — deine eigene Stimme wird nicht aufgezeichnet.")
-                    + " "
-                    + String(localized: "Mikrofon-Berechtigung für Notable prüfen (Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon).")
+                if self.healSilentMic() { return }
+                self.statusMessage = self.knownSilentMessage()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -341,14 +379,184 @@ final class MeetingController: ObservableObject {
     /// actionable while it runs.
     private static let micSilenceGrace: TimeInterval = 20
 
-    /// startedAt from the existing meta, so the async calendar update does
-    /// not shift the recording's timestamp.
-    private func recordingStartedFallback(spool: SpoolStore.Session) -> Date {
-        if let data = try? Data(contentsOf: spool.metaURL),
-           let meta = try? JSONDecoder().decode(SpoolStore.Meta.self, from: data) {
-            return meta.startedAt
+    // MARK: - Which microphone (Spec 23)
+
+    nonisolated static var micAuthorized: Bool {
+        AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    }
+
+    /// The live silence warning: the fact, then the cause as far as it is
+    /// known. It used to blame the permission unconditionally — for a month of
+    /// silent calls the permission was granted and the lid was closed.
+    private func knownSilentMessage() -> String {
+        String(localized: "Mikrofon liefert nur Stille — deine eigene Stimme wird nicht aufgezeichnet.")
+            + (SilenceDiagnosis.cause(of: diagnosticsLog.last, micAuthorized: Self.micAuthorized).map { " " + $0 } ?? "")
+    }
+
+    /// What `InputDevicePolicy` decides from, read fresh — devices come and go
+    /// during a call.
+    private func inputContext() -> (context: InputDevicePolicy.Context, callApp: String?) {
+        let call = callProcess()
+        let context = InputDevicePolicy.Context(
+            devices: AudioDevices.inputDevices(),
+            defaultInputID: AudioDevices.defaultInputID,
+            pinnedUID: DefaultsKey.inputDeviceUID.value(),
+            callDeviceIDs: call.map { AudioProcessMonitor.inputDeviceIDs(ofBundleIDs: $0.bundleIDs) } ?? [],
+            lidClosed: AudioDevices.isLidClosed()
+        )
+        return (context, call?.name)
+    }
+
+    /// Records what the capture is now pointed at — for the menu line, for the
+    /// next switch decision, and in the spool.
+    private func adopt(
+        _ choice: InputDevicePolicy.Choice,
+        context: InputDevicePolicy.Context,
+        callApp: String?,
+        event: String
+    ) {
+        // A device the input unit refused leaves the engine on its default;
+        // the record must name that one, not the wish.
+        let refused = micRecorder.deviceID == nil
+        let recorded = refused ? AudioDevices.defaultInputID.flatMap(AudioDevices.describe) : choice.device
+        inputChoice = recorded.map { (id: $0.id, reason: refused ? .systemDefault : choice.reason) }
+        inputDeviceName = recorded?.name
+        pendingSwitchID = nil
+
+        func describe(_ id: UInt32?) -> CaptureDiagnostics.Device? {
+            id.flatMap(AudioDevices.describe).map { CaptureDiagnostics.Device($0) }
         }
-        return Date()
+        diagnosticsLog.append(CaptureDiagnostics(
+            at: Date(),
+            event: event,
+            recorded: recorded.map { CaptureDiagnostics.Device($0) },
+            reason: choice.reason.rawValue,
+            defaultInput: describe(context.defaultInputID),
+            defaultOutput: describe(AudioDevices.defaultOutputID),
+            lidClosed: context.lidClosed,
+            callApp: callApp,
+            callInputDevices: context.callDeviceIDs.compactMap { describe($0) },
+            echoCancellation: micRecorder.voiceProcessing
+        ))
+        if let spool = currentSpool {
+            let log = diagnosticsLog
+            SpoolStore.updateMeta(spool) { $0.diagnostics = log }
+        }
+    }
+
+    /// Moves the running capture to `choice`. The track stays wall-clock long:
+    /// `resume` pads the gap, as after any route change.
+    private func switchMic(
+        to choice: InputDevicePolicy.Choice,
+        context: InputDevicePolicy.Context,
+        callApp: String?,
+        event: String
+    ) -> Bool {
+        guard let device = choice.device else { return false }
+        ignoreConfigurationChangesUntil = Date().addingTimeInterval(1.5)
+        do {
+            try micRecorder.resume(device: device.id)
+        } catch {
+            statusMessage = String(localized: "Audiogerät gewechselt — Mikrofonspur ab hier unvollständig.")
+            return false
+        }
+        adopt(choice, context: context, callApp: callApp, event: event)
+        return true
+    }
+
+    /// A route change — device unplugged, AirPods connected. Until Spec 23 this
+    /// resumed on whatever the default was, which with the lid closed meant
+    /// resuming into silence.
+    private func handleMicConfigurationChange() {
+        guard Date() >= ignoreConfigurationChangesUntil else { return }
+        let (context, callApp) = inputContext()
+        let choice = InputDevicePolicy.choose(context)
+        if InputDevicePolicy.shouldSwitch(from: inputChoice, to: choice, in: context), let target = choice.device {
+            if switchMic(to: choice, context: context, callApp: callApp, event: "configurationChange") {
+                statusMessage = String(localized: "Audiogerät gewechselt — Aufnahme läuft über „\(target.name)“.")
+            }
+            return
+        }
+        do {
+            try micRecorder.resume()
+            statusMessage = String(localized: "Audiogerät gewechselt — Aufnahme fortgesetzt.")
+        } catch {
+            statusMessage = String(localized: "Audiogerät gewechselt — Mikrofonspur ab hier unvollständig.")
+        }
+    }
+
+    /// Re-evaluates the microphone every two seconds while recording: the call
+    /// app switching devices, a headset arriving, the pin changing, the lid
+    /// closing.
+    ///
+    /// A poll rather than listeners on the call's process objects: those come
+    /// and go with the process list, and re-registering them on every change is
+    /// more machinery than a two-second lag is worth. Unplugging does not wait
+    /// for it — that arrives as a configuration change.
+    private func startDeviceMonitor() {
+        stopDeviceMonitor()
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.capture != .idle else {
+                    self?.stopDeviceMonitor()
+                    return
+                }
+                self.reevaluateInputDevice()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        deviceMonitor = timer
+    }
+
+    private func stopDeviceMonitor() {
+        deviceMonitor?.invalidate()
+        deviceMonitor = nil
+        pendingSwitchID = nil
+    }
+
+    private func reevaluateInputDevice() {
+        let (context, callApp) = inputContext()
+        let choice = InputDevicePolicy.choose(context)
+        if InputDevicePolicy.shouldSwitch(from: inputChoice, to: choice, in: context), let target = choice.device {
+            // A capture that is certainly deaf moves at once; anything else
+            // waits for one confirming tick.
+            let current = inputChoice.flatMap { chosen in context.devices.first { $0.id == chosen.id } }
+            let urgent = current.map { InputDevicePolicy.isDisconnected($0, lidClosed: context.lidClosed) } ?? true
+            guard urgent || pendingSwitchID == target.id else {
+                pendingSwitchID = target.id
+                return
+            }
+            if switchMic(to: choice, context: context, callApp: callApp, event: "switch") {
+                warnedKnownSilent = false
+                statusMessage = String(localized: "Mikrofon gewechselt auf „\(target.name)“.")
+            }
+            return
+        }
+        pendingSwitchID = nil
+        // The lid closed mid-call over the built-in mic, with nowhere to go.
+        if choice.isKnownSilent, choice.device?.id == inputChoice?.id, !warnedKnownSilent {
+            warnedKnownSilent = true
+            adopt(choice, context: context, callApp: callApp, event: "lidClosed")
+            statusMessage = knownSilentMessage()
+        }
+    }
+
+    /// The watchdog heard 20 s of nothing. If another live device exists, move
+    /// there without asking — a correction of Notable's own choice, not a reach
+    /// outside it — and say what is missing.
+    private func healSilentMic() -> Bool {
+        guard !selfHealed, let current = inputChoice else { return false }
+        let (full, callApp) = inputContext()
+        var others = full
+        others.devices.removeAll { $0.id == current.id }
+        others.callDeviceIDs.removeAll { $0 == current.id }
+        let choice = InputDevicePolicy.choose(others)
+        guard let target = choice.device, !choice.isKnownSilent else { return false }
+        selfHealed = true
+        guard switchMic(to: choice, context: full, callApp: callApp, event: "selfHeal") else { return false }
+        statusMessage = String(localized: "Mikrofon gewechselt auf „\(target.name)“ — die ersten 20 s fehlen.")
+        startMicWatchdog()
+        return true
     }
 
     /// The note production started by the most recent `stop()`.
@@ -441,6 +649,15 @@ final class MeetingController: ObservableObject {
         guard case .recording(let startedAt) = capture else { return }
 
         stopMicWatchdog()
+        stopDeviceMonitor()
+        let diagnostics = diagnosticsLog.last
+        if let name = inputDeviceName {
+            UserDefaults.standard.set(name, forKey: DefaultsKey.lastMeetingInputDevice.key)
+        }
+        diagnosticsLog = []
+        inputChoice = nil
+        inputDeviceName = nil
+        warnedKnownSilent = false
         // Both tracks are padded to the wall clock before they are read, so
         // they end at the same length no matter which one lost time and why.
         micRecorder.padGapToWallClock()
@@ -486,7 +703,8 @@ final class MeetingController: ObservableObject {
                     folderURL: folderURL,
                     event: event,
                     userNotes: userNotes,
-                    spool: spool
+                    spool: spool,
+                    diagnostics: diagnostics
                 )
                 handle(outcome: note, spool: spool, userNotes: userNotes, recovered: false)
             } catch {
@@ -542,7 +760,8 @@ final class MeetingController: ObservableObject {
                     folderURL: folderURL,
                     event: event,
                     userNotes: recoveredNotes,
-                    spool: session
+                    spool: session,
+                    diagnostics: meta.diagnostics?.last
                 )
                 handle(outcome: note, spool: session, userNotes: recoveredNotes, recovered: true)
             } catch {
@@ -701,7 +920,9 @@ final class MeetingController: ObservableObject {
         userNotes: String? = nil,
         /// Only so the "note written" marker can be dropped into it — see
         /// `SpoolStore.markNoteWritten`. Nothing else here touches the spool.
-        spool: SpoolStore.Session? = nil
+        spool: SpoolStore.Session? = nil,
+        /// The capture's last device decision, for the silence warning.
+        diagnostics: CaptureDiagnostics? = nil
     ) async throws -> NoteOutcome {
         // Transcribe + diarize (detached — CoreML work must not block main).
         // Parakeet v3 is shared with dictation's cache (no second copy of the
@@ -731,8 +952,10 @@ final class MeetingController: ObservableObject {
         case (true, true):
             captureWarning = String(localized: "Beide Spuren waren stumm — es wurde nichts aufgezeichnet.")
         case (true, false):
+            // The cause, not a guess: the permission is named only when it is
+            // actually missing (`SilenceDiagnosis`).
             captureWarning = String(localized: "Mikrofon war stumm — deine eigene Stimme fehlt im Transkript.")
-                + " " + String(localized: "Mikrofon-Berechtigung für Notable prüfen.")
+                + (SilenceDiagnosis.cause(of: diagnostics, micAuthorized: micAuthorized).map { " " + $0 } ?? "")
         case (false, true):
             captureWarning = String(localized: "System-Audio war stumm — die Gegenseite fehlt im Transkript.")
                 + " " + String(localized: "Berechtigung „System-Audio-Aufnahme“ prüfen.")

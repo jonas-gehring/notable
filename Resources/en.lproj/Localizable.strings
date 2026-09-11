@@ -667,3 +667,23 @@
 "Verlustfrei: dieselben Abtastwerte, weniger Bytes, als .m4a auch von QuickTime abspielbar. Die Rohspur wird erst gelöscht, nachdem die neue zurückgelesen und verglichen wurde. Neue Aufnahmen macht das von selbst." = "Lossless: the same samples, fewer bytes, and as an .m4a playable in QuickTime too. The raw track is deleted only after the new one has been read back and compared. New recordings do this by themselves.";
 
 "Notable belegt %@ — aufräumen…" = "Notable is using %@ — clean up…";
+
+/* Spec 23 — das Mikrofon folgt dem Call */
+"nur mit dem Standard-Eingang des Systems möglich" = "only possible with the system's default input";
+"Eingabegerät nicht setzbar." = "The input device could not be set.";
+"Eingabegerät nicht verwendbar (OSStatus %lld)." = "Input device not usable (OSStatus %lld).";
+"Deckel geschlossen — das eingebaute Mikrofon ist dann abgeschaltet." = "Lid closed — the built-in microphone is switched off while it is.";
+"Externes Mikrofon oder Headset verbinden." = "Connect an external microphone or a headset.";
+"%@ benutzt „%@“." = "%@ is using “%@”.";
+"Notable hört „%@“, %@ benutzt „%@“." = "Notable is hearing “%@”, %@ is using “%@”.";
+"Aufgenommen wurde „%@“." = "Recorded from “%@”.";
+"auf dem Standard-Mikrofon statt „%@“ (%@)" = "on the default microphone instead of “%@” (%@)";
+"Audiogerät gewechselt — Aufnahme läuft über „%@“." = "Audio device changed — now recording from “%@”.";
+"Mikrofon gewechselt auf „%@“." = "Switched microphone to “%@”.";
+"Mikrofon gewechselt auf „%@“ — die ersten 20 s fehlen." = "Switched microphone to “%@” — the first 20 s are missing.";
+"Mikrofon: %@" = "Microphone: %@";
+"Eingabegerät" = "Input device";
+"Automatisch" = "Automatic";
+"Festgelegtes Gerät (nicht verbunden)" = "Pinned device (not connected)";
+"Zuletzt aufgenommen von" = "Last recorded from";
+"Automatisch: das Gerät, das der Call selbst benutzt, sonst der Systemstandard — außer dem eingebauten Mikrofon bei geschlossenem Deckel, das dann abgeschaltet ist. Ein Bluetooth-Headset wird für Meetings nur übernommen, wenn es schon aufnimmt, damit die Wiedergabe nicht in den Headset-Modus springt. Gilt auch fürs Diktat." = "Automatic: the device the call itself is using, otherwise the system default — except the built-in microphone with the lid closed, which is switched off then. For meetings a Bluetooth headset is only taken over when it is already recording, so playback does not drop into headset mode. Applies to dictation too.";

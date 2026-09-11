@@ -209,6 +209,48 @@ weil eine stumme Spur schlimmer ist als ein Echo.
   arbeiten mit 16 kHz); der Formatwechsel beim Umschalten löst die bestehende
   `AVAudioEngineConfigurationChange` aus.
 
+## 5a. Stand des Baus (2026-09-11)
+
+Stufen 0, 1 und 2 sind gebaut, mit diesen Messungen und Abweichungen:
+
+- **`kAudioProcessPropertyDevices` liefert tatsächlich Geräte-IDs pro Prozess** —
+  gemessen für die Ausgabeseite (`devOut=[73]`, MacBook-Lautsprecher). Die Eingabeseite
+  in einem echten Teams-/Chromium-Call ist noch **nicht** gemessen; das Hauptrisiko aus
+  §5 ist damit kleiner, aber nicht erledigt. Liefert sie nichts, greifen Regeln 3–5.
+- **Zustand bei der Messung bestätigt die Hypothese:** `AppleClamshellState = 1`,
+  Standard-Eingang `MacBook Pro Microphone`, kein externes Mikrofon angeschlossen.
+- **VPIO mit anderem Gerät:** der VPIO-Unit nimmt `CurrentDevice` ohne Fehler an
+  und meldet danach ein 9-Kanal-Format (deinterleaved) — kein Fehler, den man fangen
+  könnte, und kein Signal, dem man trauen kann. Deshalb läuft VPIO **nur auf dem
+  Standard-Eingang**; sonst ist es für diese Aufnahme aus, und die bestehende Warnung
+  nennt den Grund. Ein VPIO, das eine frühere Aufnahme an der Engine gelassen hat, wird
+  jetzt auch wieder abgeschaltet.
+- **Continuity wie Bluetooth: nur, wenn es schon aufnimmt.** Die Spec reihte
+  Continuity ohne diese Bedingung ein. Ein iPhone-Mikrofon zu öffnen weckt ein anderes
+  Gerät — dieselbe Art Eingriff nach außen wie der Headset-Modus der AirPods.
+- **Diktat darf ein ruhendes Headset öffnen (Regel 5 in `InputDevicePolicy`)**, aber
+  nur, wenn sonst nur das abgeschaltete eingebaute Mikrofon bliebe: das Diktat wurde
+  per Taste verlangt, und die Alternative ist eine Aufnahme aus Nullen. Bleibt auch
+  dann nichts, **startet das Diktat nicht** und sagt, warum — statt nach dem Loslassen
+  „nichts erkannt" zu melden.
+- **Während der Aufnahme: Abfrage alle 2 s statt Listener an den Prozessobjekten.**
+  Diese kommen und gehen mit der Prozessliste; sie bei jeder Änderung neu zu
+  registrieren ist mehr Mechanik, als 2 s Verzug wert sind. Ein Wechsel wartet auf
+  einen bestätigenden Takt (Entprellung), außer das aktuelle Gerät ist weg oder
+  sicher stumm. Abstecken kommt weiter sofort über `AVAudioEngineConfigurationChange`.
+- **Wechsel sind klebrig** (`InputDevicePolicy.shouldSwitch`): verschwindet das Gerät
+  des Calls aus der Liste — etwa weil stummgeschaltet —, bleibt die Aufnahme auf dem
+  Headset. Gewechselt wird nur auf Beleg: Gerät weg oder stumm, Festlegung geändert,
+  der Call meldet ein *anderes* Gerät, oder der Standard wechselt, während ihm gefolgt
+  wird.
+- **Deckel wird mitten im Call zugeklappt**, ohne Ausweichgerät: Warnung einmal,
+  Eintrag `lidClosed` in `meta.json`.
+- **Stufe 2 ohne Pegel in den Einstellungen:** ein Live-Pegel öffnete das Mikrofon, nur
+  weil eine Einstellungsseite offen ist (oranger Punkt). Die Menüzeile „Mikrofon: …"
+  während der Aufnahme und „Zuletzt aufgenommen von" leisten dasselbe ohne das.
+- **Offen:** der echte Call mit zugeklapptem Deckel (Abnahme unten). Erst er zeigt,
+  ob Teams über `kAudioProcessPropertyDevices` sein Gerät verrät.
+
 ## 6. Abnahme
 
 - Deckel zu, Call über AirPods/Headset: Mikrofonspur nicht stumm, `Ich`-Segmente im

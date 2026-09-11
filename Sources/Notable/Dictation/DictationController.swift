@@ -404,6 +404,19 @@ final class DictationController: ObservableObject {
         }
     }
 
+    /// What `InputDevicePolicy` decides from for a dictation: no call rule, and
+    /// an idle headset is allowed as the last resort (Spec 23). A handful of
+    /// property reads — nothing that shows up against the latency budget.
+    private static func inputContext() -> InputDevicePolicy.Context {
+        InputDevicePolicy.Context(
+            devices: AudioDevices.inputDevices(),
+            defaultInputID: AudioDevices.defaultInputID,
+            pinnedUID: DefaultsKey.inputDeviceUID.value(),
+            lidClosed: AudioDevices.isLidClosed(),
+            allowIdleWireless: true
+        )
+    }
+
     private func beginRecording() {
         guard appState.captureState == .idle else {
             // The PTT machine already advanced on keyDown — resync it, or a
@@ -411,8 +424,18 @@ final class DictationController: ObservableObject {
             ptt.reset()
             return
         }
+        let choice = InputDevicePolicy.choose(Self.inputContext())
+        // Nothing but the built-in microphone behind a closed lid: it is cut off
+        // in hardware and would record zeros. Saying so now beats a silent
+        // "nothing recognized" after the release.
+        guard !choice.isKnownSilent else {
+            ptt.reset()
+            overlay.flashError(String(localized: "Deckel geschlossen — das eingebaute Mikrofon ist dann abgeschaltet.")
+                + " " + String(localized: "Externes Mikrofon oder Headset verbinden."))
+            return
+        }
         do {
-            try recorder.start()
+            try recorder.start(device: choice.device?.id)
         } catch {
             ptt.reset()
             overlay.flashError(String(localized: "Mikrofon nicht verfügbar: \(error.localizedDescription)"))

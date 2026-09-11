@@ -158,6 +158,10 @@ targets:
       # Judges whether a captured track carried audio at all — the shape every
       # meeting-capture regression has taken so far.
       - path: Sources/Notable/Meeting/TrackSilence.swift
+      # Which microphone a recording opens, and the record of why (Spec 23).
+      # SpoolStore.Meta carries the diagnostics, so both are needed here anyway.
+      - path: Sources/Notable/Dictation/InputDevicePolicy.swift
+      - path: Sources/Notable/Meeting/CaptureDiagnostics.swift
       - path: Sources/Notable/Update/UpdateChecker.swift
       - path: Sources/Notable/Update/UpdateInstaller.swift
     dependencies:

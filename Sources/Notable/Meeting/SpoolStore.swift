@@ -10,6 +10,14 @@ enum SpoolStore {
         var startedAt: Date
         var eventTitle: String?
         var eventID: String?
+        /// Which microphone was recorded, and why (Spec 23) — one entry at the
+        /// start and one per device change. Absent from every meta written
+        /// before it existed, and decoded leniently: see `init(from:)`.
+        var diagnostics: [CaptureDiagnostics]? = nil
+
+        fileprivate enum CodingKeys: String, CodingKey {
+            case startedAt, eventTitle, eventID, diagnostics
+        }
     }
 
     /// The two audio tracks a session records. Their base names are fixed; the
@@ -125,6 +133,19 @@ enum SpoolStore {
         return SpoolAudio.read(url)
     }
 
+    /// Read-modify-write of a session's meta.
+    ///
+    /// Two writers touch it — the calendar lookup that lands a moment after the
+    /// start, and the capture diagnostics — and each writing a fresh `Meta`
+    /// would silently drop the other's fields.
+    static func updateMeta(_ session: Session, _ change: (inout Meta) -> Void) {
+        guard let data = try? Data(contentsOf: session.metaURL),
+              var meta = try? JSONDecoder().decode(Meta.self, from: data)
+        else { return }
+        change(&meta)
+        try? JSONEncoder().encode(meta).write(to: session.metaURL, options: .atomic)
+    }
+
     static func remove(_ session: Session) {
         try? FileManager.default.removeItem(at: session.directory)
     }
@@ -168,5 +189,18 @@ enum SpoolStore {
         // so it happens afterwards and out of the way. Failing it leaves the
         // raw tracks in place — the session stays large, nothing is lost.
         SpoolArchiver.compressInBackground(sessionAt: destination)
+    }
+}
+
+extension SpoolStore.Meta {
+    /// Recovery decodes this, so only `startedAt` may fail it. A diagnostics
+    /// entry a later version cannot read is dropped rather than letting the
+    /// whole meta — and with it the meeting — fall out of the orphan scan.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        eventTitle = try container.decodeIfPresent(String.self, forKey: .eventTitle)
+        eventID = try container.decodeIfPresent(String.self, forKey: .eventID)
+        diagnostics = try? container.decodeIfPresent([CaptureDiagnostics].self, forKey: .diagnostics)
     }
 }

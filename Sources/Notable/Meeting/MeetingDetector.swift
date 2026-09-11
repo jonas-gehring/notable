@@ -101,6 +101,12 @@ final class MeetingDetector: ObservableObject {
     /// belongs to the call and should end with it.
     var isCallActive: Bool { stateMachine.isActive }
 
+    /// The call a recording belongs next to: the latched one while a call is
+    /// confirmed, otherwise whichever app holds the microphone right now — so
+    /// a manual start during a call that is not confirmed yet still finds the
+    /// device the call is using (Spec 23).
+    var callProcess: Candidate? { activeCandidate ?? currentCandidate }
+
     /// Browsers, with the `kCGWindowOwnerName` used to read their window titles
     /// and the process bundle ids that actually carry their audio.
     ///

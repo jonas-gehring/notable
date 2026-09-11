@@ -1,4 +1,6 @@
+import AudioToolbox
 import AVFoundation
+import CoreAudio
 import Foundation
 
 /// Microphone capture into a 16 kHz mono Float32 buffer.
@@ -28,6 +30,16 @@ final class AudioRecorder: @unchecked Sendable {
     /// so, because the transcript will then contain the speaker bleed.
     private(set) var voiceProcessingError: String?
 
+    /// The input device this recorder opens (Spec 23). `nil` leaves the engine
+    /// on whatever it defaults to — the system default input, which is exactly
+    /// what recorded a month of 0.0 with the lid closed. Kept across `resume()`,
+    /// so a route change does not quietly hand the capture back to that default.
+    private(set) var deviceID: AudioDeviceID?
+
+    /// Set when the chosen device could not be set on the input unit. The
+    /// capture then runs on the engine's default and the caller must say so.
+    private(set) var deviceError: String?
+
     /// RMS of the latest audio chunk, for the overlay level meter.
     var level: Float { downsampler.currentLevel }
 
@@ -41,10 +53,16 @@ final class AudioRecorder: @unchecked Sendable {
     /// visible from the outside.
     func padGapToWallClock() { downsampler.padGapToWallClock() }
 
-    func start(spoolingTo spoolURL: URL? = nil, voiceProcessing: Bool = false) throws {
+    func start(
+        spoolingTo spoolURL: URL? = nil,
+        voiceProcessing: Bool = false,
+        device: AudioDeviceID? = nil
+    ) throws {
         try downsampler.reset(spoolingTo: spoolURL)
         self.voiceProcessing = voiceProcessing
         voiceProcessingError = nil
+        deviceError = nil
+        deviceID = device
 
         try installTapAndStart(errorCode: 1)
 
@@ -59,7 +77,12 @@ final class AudioRecorder: @unchecked Sendable {
 
     /// Re-installs the tap and restarts the engine after a route change,
     /// WITHOUT resetting the sample buffer — the recording continues.
-    func resume() throws {
+    ///
+    /// - Parameter device: moves the capture to another input; `nil` keeps the
+    ///   one it was on.
+    func resume(device: AudioDeviceID? = nil) throws {
+        if let device { deviceID = device }
+        deviceError = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         try installTapAndStart(errorCode: 2)
@@ -72,7 +95,18 @@ final class AudioRecorder: @unchecked Sendable {
     private func installTapAndStart(errorCode: Int) throws {
         let input = engine.inputNode
 
-        if voiceProcessing, !input.isVoiceProcessingEnabled {
+        // VPIO only on the system default input. Measured 2026-09-11: the VPIO
+        // unit accepts another `CurrentDevice` without an error and then reports
+        // a nine-channel deinterleaved format — no failure one could catch, and
+        // no signal one could trust. A silent or garbled track is worse than an
+        // echo, so the device wins and the caller warns (Spec 23 §3.2).
+        var wantsVoiceProcessing = voiceProcessing
+        if wantsVoiceProcessing, let deviceID, deviceID != AudioDevices.defaultInputID {
+            wantsVoiceProcessing = false
+            voiceProcessingError = String(localized: "nur mit dem Standard-Eingang des Systems möglich")
+        }
+
+        if wantsVoiceProcessing, !input.isVoiceProcessingEnabled {
             do {
                 // Must happen while the engine is stopped, and before the
                 // format is read — VPIO changes the input format.
@@ -91,10 +125,18 @@ final class AudioRecorder: @unchecked Sendable {
             } catch {
                 // A meeting without echo cancellation is still worth recording —
                 // but the caller has to warn, or the note silently gains a ghost.
-                voiceProcessing = false
+                wantsVoiceProcessing = false
                 voiceProcessingError = error.localizedDescription
             }
+        } else if !wantsVoiceProcessing, input.isVoiceProcessingEnabled {
+            // A previous meeting left VPIO on this engine. It must not follow a
+            // capture that asked for none, nor ride along onto a device it garbles.
+            try? input.setVoiceProcessingEnabled(false)
         }
+        voiceProcessing = wantsVoiceProcessing
+
+        // Before the format is read: the format is the device's.
+        if let deviceID { applyDevice(deviceID, to: input) }
 
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else {
@@ -117,6 +159,32 @@ final class AudioRecorder: @unchecked Sendable {
             // double-install NSException.
             input.removeTap(onBus: 0)
             throw error
+        }
+    }
+
+    /// Points the input unit at `id`. Skipped when it already is — setting the
+    /// same device again costs a reconfiguration on the dictation path for
+    /// nothing.
+    private func applyDevice(_ id: AudioDeviceID, to input: AVAudioInputNode) {
+        guard let unit = input.audioUnit else {
+            deviceError = String(localized: "Eingabegerät nicht setzbar.")
+            deviceID = nil
+            return
+        }
+        var current = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        if AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                                kAudioUnitScope_Global, 0, &current, &size) == noErr,
+           current == id {
+            return
+        }
+        var device = id
+        let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                                          kAudioUnitScope_Global, 0, &device,
+                                          UInt32(MemoryLayout<AudioDeviceID>.size))
+        if status != noErr {
+            deviceError = String(localized: "Eingabegerät nicht verwendbar (OSStatus \(Int(status))).")
+            deviceID = nil
         }
     }
 

@@ -14,6 +14,9 @@ struct MeetingsSettingsView: View {
     @AppStorage(DefaultsKey.openNotesOnMeetingStart.key) private var openNotesOnStart = DefaultsKey.openNotesOnMeetingStart.fallback
     @AppStorage(DefaultsKey.meetingNotesFloating.key) private var notesFloating = DefaultsKey.meetingNotesFloating.fallback
     @AppStorage(DefaultsKey.meetingHookPath.key) private var meetingHookPath = DefaultsKey.meetingHookPath.fallback
+    @AppStorage(DefaultsKey.inputDeviceUID.key) private var inputDeviceUID = DefaultsKey.inputDeviceUID.fallback
+    @AppStorage(DefaultsKey.lastMeetingInputDevice.key) private var lastInputDevice = DefaultsKey.lastMeetingInputDevice.fallback
+    @State private var inputDevices: [AudioDeviceInfo] = []
 
     /// Which engine a meeting will actually use given the toggle — Unified can't
     /// batch-transcribe, so it resolves to Parakeet v3.
@@ -33,6 +36,28 @@ struct MeetingsSettingsView: View {
                 Toggle("Benachrichtigen, wenn die Notiz fertig ist", isOn: $notifyOnReady)
             } footer: {
                 Text("Sobald Zoom, Teams, Webex, FaceTime, Slack oder ein Browser-Call das Mikrofon öffnet, meldet sich Notable per Benachrichtigung: »Aufnehmen«, »Immer für diese App« oder »Später«. Aufgezeichnet wird erst nach »Aufnehmen«. Endet der Call, stoppt die Aufnahme automatisch, die Notiz wird erzeugt und zusammengefasst. Ohne Benachrichtigungsrecht erscheint stattdessen ein kleines Fenster oben rechts.")
+            }
+
+            Section {
+                Picker("Eingabegerät", selection: $inputDeviceUID) {
+                    Text("Automatisch").tag("")
+                    ForEach(inputDevices, id: \.uid) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                    if !inputDeviceUID.isEmpty, !inputDevices.contains(where: { $0.uid == inputDeviceUID }) {
+                        Text("Festgelegtes Gerät (nicht verbunden)").tag(inputDeviceUID)
+                    }
+                }
+                if !lastInputDevice.isEmpty {
+                    LabeledContent("Zuletzt aufgenommen von", value: lastInputDevice)
+                }
+            } header: {
+                Text("Mikrofon")
+            } footer: {
+                Text("Automatisch: das Gerät, das der Call selbst benutzt, sonst der Systemstandard — außer dem eingebauten Mikrofon bei geschlossenem Deckel, das dann abgeschaltet ist. Ein Bluetooth-Headset wird für Meetings nur übernommen, wenn es schon aufnimmt, damit die Wiedergabe nicht in den Headset-Modus springt. Gilt auch fürs Diktat.")
+            }
+            .onAppear {
+                inputDevices = AudioDevices.inputDevices().filter { $0.transport != .aggregate }
             }
 
             Section {

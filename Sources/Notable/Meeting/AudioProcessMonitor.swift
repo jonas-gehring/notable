@@ -101,7 +101,44 @@ enum AudioProcessMonitor {
         return AudioProcessSnapshot(entries: entries, isAvailable: true)
     }
 
+    /// The input devices a call's processes are recording from
+    /// (`kAudioProcessPropertyDevices`, input scope, macOS 14+) — the device
+    /// the user chose *in the call app*, which is not necessarily the system
+    /// default Notable used to inherit (Spec 23).
+    ///
+    /// Empty when CoreAudio does not say; `InputDevicePolicy` then falls back
+    /// to its other rules, which alone already solve the closed-lid case.
+    static func inputDeviceIDs(ofBundleIDs bundleIDs: [String], excluding ownPID: pid_t = getpid()) -> [AudioObjectID] {
+        guard !bundleIDs.isEmpty, let processIDs = processObjectIDs() else { return [] }
+        var found: [AudioObjectID] = []
+        for objectID in processIDs {
+            guard let bundle = bundleID(of: objectID),
+                  bundleIDs.contains(where: { AudioProcessSnapshot.matches(bundle, $0) }),
+                  pid(of: objectID) != ownPID,
+                  flag(objectID, kAudioProcessPropertyIsRunningInput)
+            else { continue }
+            for device in inputDevices(of: objectID) where !found.contains(device) {
+                found.append(device)
+            }
+        }
+        return found
+    }
+
     // MARK: - CoreAudio plumbing
+
+    private static func inputDevices(of objectID: AudioObjectID) -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyDevices,
+            mScope: kAudioObjectPropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(objectID, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: AudioObjectID(kAudioObjectUnknown),
+                                  count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(objectID, &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids
+    }
 
     private static func processObjectIDs() -> [AudioObjectID]? {
         var address = AudioObjectPropertyAddress(

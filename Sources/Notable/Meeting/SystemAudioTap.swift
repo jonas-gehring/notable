@@ -2,6 +2,7 @@ import AudioToolbox
 import AVFoundation
 import CoreAudio
 import Foundation
+import os
 
 /// Captures the *other* participants: a global CoreAudio process tap
 /// (macOS 14.4+) mixed down and resampled to 16 kHz mono. Requires the
@@ -37,6 +38,9 @@ final class SystemAudioTap: @unchecked Sendable {
     private var ioProcID: AudioDeviceIOProcID?
     private var tapFormat: AVAudioFormat?
     private var deviceListener: AudioObjectPropertyListenerBlock?
+    /// Sits on the current default output *device* — see `bindRateListener()`.
+    private var rateListener: AudioObjectPropertyListenerBlock?
+    private var rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
     private var isCapturing = false
     private var rebuildInFlight = false
 
@@ -55,6 +59,7 @@ final class SystemAudioTap: @unchecked Sendable {
     /// short by the whole sleep and every later segment was stamped early.
     func rebuildAfterInterruption() {
         guard isCapturing, !rebuildInFlight else { return }
+        bindRateListener()
         teardown()
         attemptRebuild(remaining: Self.rebuildAttempts)
     }
@@ -178,35 +183,69 @@ final class SystemAudioTap: @unchecked Sendable {
     /// device changes mid-meeting (AirPods connect …), buffers would be
     /// misinterpreted — rebuild the capture chain against the new device.
     private func installDeviceListener() {
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+        let rebuild: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self, self.isCapturing, !self.rebuildInFlight else { return }
             self.teardown()
             self.attemptRebuild(remaining: Self.rebuildAttempts)
         }
-        deviceListener = listener
+        // A new default output also moves the rate listener onto that device.
+        let outputChanged: AudioObjectPropertyListenerBlock = { [weak self] count, addresses in
+            self?.bindRateListener()
+            rebuild(count, addresses)
+        }
+        deviceListener = outputChanged
+        rateListener = rebuild
 
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &address, .main, listener
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, .main, outputChanged
         )
-
-        // The *same* device changing its sample rate needs the same rebuild:
-        // the tap's stream format was fixed when it was created, so from that
-        // moment every buffer would be read at the wrong rate — and no
-        // default-output-device change is posted for it.
-        var rateAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &rateAddress, .main, listener
-        )
+        if status != noErr {
+            Self.log.error("Listener für das Ausgabegerät nicht registriert (OSStatus \(status, privacy: .public))")
+        }
+        bindRateListener()
     }
+
+    /// The *same* device changing its sample rate needs the same rebuild: the
+    /// tap's stream format was fixed when it was created, so from that moment
+    /// every buffer would be read at the wrong rate — and no
+    /// default-output-device change is posted for it.
+    ///
+    /// `kAudioDevicePropertyNominalSampleRate` belongs to a *device*. It used to
+    /// be registered on the system object, where that property does not exist,
+    /// with the return value ignored — so it never fired and nothing said so
+    /// (Spec 23 §1.4). It now sits on the current default output and moves
+    /// with it.
+    private func bindRateListener() {
+        unbindRateListener()
+        guard let rateListener, let device = AudioDevices.defaultOutputID else { return }
+        var address = Self.rateAddress
+        let status = AudioObjectAddPropertyListenerBlock(device, &address, .main, rateListener)
+        if status == noErr {
+            rateListenerDevice = device
+        } else {
+            Self.log.error("Samplerate-Listener nicht registriert (OSStatus \(status, privacy: .public))")
+        }
+    }
+
+    private func unbindRateListener() {
+        guard let rateListener, rateListenerDevice != kAudioObjectUnknown else { return }
+        var address = Self.rateAddress
+        AudioObjectRemovePropertyListenerBlock(rateListenerDevice, &address, .main, rateListener)
+        rateListenerDevice = AudioObjectID(kAudioObjectUnknown)
+    }
+
+    private static let rateAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyNominalSampleRate,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "systemAudio")
 
     /// Neuaufbau nach Device-Wechsel, mit Retries: das neue Default-Device ist
     /// oft erst einen Moment später tappable. Downsampler/Spool bleiben
@@ -249,14 +288,8 @@ final class SystemAudioTap: @unchecked Sendable {
         AudioObjectRemovePropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &address, .main, deviceListener
         )
-        var rateAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject), &rateAddress, .main, deviceListener
-        )
+        unbindRateListener()
+        rateListener = nil
         self.deviceListener = nil
     }
 

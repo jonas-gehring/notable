@@ -65,6 +65,11 @@ enum DefaultsKey {
     static let openNotesOnMeetingStart = DefaultsEntry(key: "openNotesOnMeetingStart", fallback: true)
     static let meetingNotesFloating = DefaultsEntry(key: "meetingNotesFloating", fallback: true)
     static let meetingHookPath = DefaultsEntry(key: "meetingHookPath", fallback: "")
+    /// A microphone pinned in Settings, by UID — for meetings and dictation
+    /// alike. Empty means automatic (`InputDevicePolicy`).
+    static let inputDeviceUID = DefaultsEntry(key: "inputDeviceUID", fallback: "")
+    /// Name of the device the last meeting was recorded from, shown in Settings.
+    static let lastMeetingInputDevice = DefaultsEntry(key: "lastMeetingInputDevice", fallback: "")
 
     // MARK: Zusammenfassung
 

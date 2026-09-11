@@ -164,6 +164,10 @@ targets:
       - path: Sources/Notable/Meeting/CaptureDiagnostics.swift
       - path: Sources/Notable/Update/UpdateChecker.swift
       - path: Sources/Notable/Update/UpdateInstaller.swift
+      # When an update may install, and what it leaves for the next launch
+      # (Spec 25). Both pure; the installer asks the first.
+      - path: Sources/Notable/Update/UpdateWindow.swift
+      - path: Sources/Notable/Update/UpdateMarkers.swift
     dependencies:
       - package: FluidAudio
       - package: WhisperKit

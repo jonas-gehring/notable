@@ -17,6 +17,14 @@ final class NotificationCenterService: NSObject {
         case meetingConsent = "meeting.consent"
         case meetingReady = "meeting.ready"
         case dictationEnhanced = "dictation.enhanced"
+        case updateNudge = "update.nudge"
+    }
+
+    /// The one action that installs from a notification, and only on the
+    /// 72-hour nudge (Spec 25 §3.8): by then the user has seen "Update
+    /// verfügbar" and three days of it not happening.
+    enum UpdateAction: String {
+        case installNow = "update.installNow"
     }
 
     enum Action: String {
@@ -36,6 +44,10 @@ final class NotificationCenterService: NSObject {
     /// "Einfügen" on an improved dictation. The text is already on the clipboard;
     /// this only offers to put it in the focused field as well.
     var onPasteEnhanced: (() -> Void)?
+    /// A click on a notification that leads to a settings pane (by raw value).
+    var onOpenSettings: ((String) -> Void)?
+    /// "Jetzt installieren" on the update nudge.
+    var onInstallUpdateNow: (() -> Void)?
 
     private(set) var isAuthorized = false
     /// Cached so the (synchronous) permissions UI can show it without awaiting.
@@ -86,7 +98,13 @@ final class NotificationCenterService: NSObject {
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([consent, consentNoRemember, ready, enhanced])
+        let nudge = UNNotificationCategory(
+            identifier: Category.updateNudge.rawValue,
+            actions: [UNNotificationAction(identifier: UpdateAction.installNow.rawValue, title: String(localized: "Jetzt installieren"), options: [])],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([consent, consentNoRemember, ready, enhanced, nudge])
     }
 
     /// Asks once; afterwards just refreshes the cached status. The cached flag is
@@ -164,6 +182,39 @@ final class NotificationCenterService: NSObject {
         return post(id: "update.available.\(version)", content: content)
     }
 
+    /// After the swap, once (Spec 25 §3.7). Clicking it opens Settings →
+    /// Allgemein, where the release notes of the installed version stand.
+    @discardableResult
+    func postUpdateInstalled(version: String) -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Notable wurde aktualisiert")
+        content.body = String(localized: "Jetzt Version \(version). Was neu ist, steht in den Einstellungen.")
+        content.userInfo = ["settingsPane": "general"]
+        return post(id: "update.installed.\(version)", content: content)
+    }
+
+    /// The swap did not take and the old version was started again. Silence
+    /// here would look exactly like the updater not existing.
+    @discardableResult
+    func postUpdateFailed(target: String, running: String) -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Update nicht installiert")
+        content.body = String(localized: "Notable \(target) ließ sich nicht installieren — es läuft weiter \(running).")
+        content.userInfo = ["settingsPane": "general"]
+        return post(id: "update.failed.\(target)", content: content)
+    }
+
+    /// Three days held back by open windows alone (Spec 25 §3.8).
+    @discardableResult
+    func postUpdateNudge(version: String) -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Update wartet")
+        content.body = String(localized: "Notable \(version) wartet seit drei Tagen auf einen Moment ohne offenes Notable-Fenster.")
+        content.categoryIdentifier = Category.updateNudge.rawValue
+        content.userInfo = ["settingsPane": "general"]
+        return post(id: "update.nudge.\(version)", content: content)
+    }
+
     func withdraw(id: String) {
         if pendingConsentID == id { pendingConsentID = nil }
         let center = UNUserNotificationCenter.current()
@@ -187,13 +238,21 @@ final class NotificationCenterService: NSObject {
 
     // MARK: - Handling
 
-    fileprivate func handle(actionID: String, requestID: String, notePath: String?) {
+    fileprivate func handle(actionID: String, requestID: String, notePath: String?, settingsPane: String?) {
         if let notePath, actionID == UNNotificationDefaultActionIdentifier {
             NSWorkspace.shared.open(URL(fileURLWithPath: notePath))
             return
         }
         if actionID == DictationAction.paste.rawValue {
             onPasteEnhanced?()
+            return
+        }
+        if actionID == UpdateAction.installNow.rawValue {
+            onInstallUpdateNow?()
+            return
+        }
+        if let settingsPane, actionID == UNNotificationDefaultActionIdentifier {
+            onOpenSettings?(settingsPane)
             return
         }
         guard requestID == pendingConsentID, !resolvedConsentIDs.contains(requestID) else { return }
@@ -234,10 +293,12 @@ extension NotificationCenterService: UNUserNotificationCenterDelegate {
     ) async {
         let actionID = response.actionIdentifier
         let requestID = response.notification.request.identifier
-        let notePath = response.notification.request.content.userInfo["notePath"] as? String
+        let userInfo = response.notification.request.content.userInfo
+        let notePath = userInfo["notePath"] as? String
+        let settingsPane = userInfo["settingsPane"] as? String
         await MainActor.run {
             NotificationCenterService.shared.handle(
-                actionID: actionID, requestID: requestID, notePath: notePath
+                actionID: actionID, requestID: requestID, notePath: notePath, settingsPane: settingsPane
             )
         }
     }

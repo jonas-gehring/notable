@@ -36,6 +36,10 @@ struct NoteListView: View {
         }
         .frame(minWidth: 460, minHeight: 360)
         .task { await noteManager.reload() }
+        // An open draft holds an update back — a restart would discard it
+        // (Spec 25). Closing the window discards it anyway, so that clears it.
+        .onChange(of: notesEditingID) { _, id in noteManager.isEditingUserNotes = id != nil }
+        .onDisappear { noteManager.isEditingUserNotes = false }
         .sheet(item: $chatNote) { note in
             MeetingChatView(recording: note)
         }

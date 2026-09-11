@@ -432,7 +432,7 @@
 "Profil löschen?" = "Delete profile?";
 "Protokollstil" = "Transcript style";
 "Prüfe…" = "Checking…";
-"Prüft GitHub-Releases beim Start und dann alle sechs Stunden. Automatisch installiert wird nur, wenn nichts dabei verloren geht: kein laufendes Meeting, kein offenes Notable-Fenster. Vorher wird die Signatur des Downloads geprüft — eine fremd signierte Datei wird nie installiert. Danach startet Notable neu; das dauert etwa eine Sekunde." = "Checks GitHub releases at launch and every six hours after that. It only installs by itself when nothing would be lost: no meeting running, no Notable window open. The download's signature is verified first — a file signed by anyone else is never installed. Notable then restarts, which takes about a second.";
+"Prüft GitHub-Releases beim Start und dann alle sechs Stunden. Ein gefundenes Update wird sofort geladen und seine Signatur geprüft — eine fremd signierte Datei wird nie installiert. Installiert wird im nächsten ruhigen Moment: nie während eines Meetings, einer Notiz in Arbeit, eines Diktats oder offener eigener Notizen. Offene Notable-Fenster halten es nur auf, solange jemand am Mac arbeitet — nach zehn Minuten ohne Eingabe oder bei gesperrtem Bildschirm geht es los, und die Fenster kommen danach zurück. Der Neustart dauert etwa eine Sekunde." = "Checks GitHub releases at launch and then every six hours. A found update is downloaded right away and its signature checked — a file signed by anyone else is never installed. It installs at the next quiet moment: never during a meeting, a note in progress, a dictation or open notes of your own. Open Notable windows only hold it back while someone is working at the Mac — after ten minutes without input or with the screen locked it goes ahead, and the windows come back afterwards. The restart takes about a second.";
 "Prüft GitHub-Releases, höchstens einmal am Tag. „Installieren“ lädt die neue Version, ersetzt Notable in /Applications und startet neu." = "Checks GitHub releases, at most once a day. “Install” downloads the new version, replaces Notable in /Applications and restarts.";
 "Pulslinie" = "Pulse line";
 "Push-to-talk-Taste" = "Push-to-talk key";
@@ -694,3 +694,24 @@
 "Checkliste (⌘⌥6)" = "Checklist (⌘⌥6)";
 "Einrücken (⌘])" = "Indent (⌘])";
 "Ausrücken (⌘[)" = "Outdent (⌘[)";
+
+/* Spec 25 — Updates, die sich tatsächlich installieren */
+"ein Meeting wird aufgenommen" = "a meeting is being recorded";
+"eine Meeting-Notiz wird erstellt" = "a meeting note is being produced";
+"ein Diktat läuft" = "a dictation is in progress";
+"eigene Notizen sind in Bearbeitung" = "your own notes are being edited";
+"ein Notable-Fenster ist in Benutzung" = "a Notable window is in use";
+"Update gerade nicht möglich — %@." = "Update not possible right now — %@.";
+"Beende nach Fertigstellung der Notiz …" = "Quitting once the note is finished …";
+"Jetzt installieren" = "Install now";
+"Notable wurde aktualisiert" = "Notable was updated";
+"Jetzt Version %@. Was neu ist, steht in den Einstellungen." = "Now version %@. What’s new is in Settings.";
+"Update nicht installiert" = "Update not installed";
+"Notable %@ ließ sich nicht installieren — es läuft weiter %@." = "Notable %@ could not be installed — %@ keeps running.";
+"Update wartet" = "Update waiting";
+"Notable %@ wartet seit drei Tagen auf einen Moment ohne offenes Notable-Fenster." = "Notable %@ has been waiting three days for a moment without an open Notable window.";
+"%@ wartet auf einen ruhigen Moment — gerade: %@." = "%@ is waiting for a quiet moment — right now: %@.";
+"Zuletzt aktualisiert" = "Last updated";
+"Neu in %@" = "New in %@";
+"automatisch" = "automatically";
+"von Hand" = "by hand";

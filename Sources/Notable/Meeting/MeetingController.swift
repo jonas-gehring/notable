@@ -572,6 +572,19 @@ final class MeetingController: ObservableObject {
         await processingTask?.value
     }
 
+    /// Until every note in the making is written — recovered ones included,
+    /// which `processingTask` does not hold. ⌘Q waits on this (Spec 25 §3.4).
+    func awaitProcessingFinished() async {
+        while processingCount > 0 {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
+    /// The menu line while a quit waits for a note.
+    func announceQuitAfterProcessing() {
+        statusMessage = String(localized: "Beende nach Fertigstellung der Notiz …")
+    }
+
     /// Everything that happens once a note has been produced — for a stopped
     /// meeting and for a recovered one alike.
     ///

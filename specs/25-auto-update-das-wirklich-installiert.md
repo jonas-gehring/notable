@@ -184,3 +184,35 @@ Weil der Build-Rechner jedes Release vorab installiert, gibt es sonst keinen Bew
   Netzwerkprüfung installiert.
 - Offenes Notizen-Fenster + 10 min Leerlauf: Update installiert, Fenster ist danach
   wieder da.
+
+## 7. Stand des Baus (2026-09-11)
+
+3.1–3.9 sind gebaut. Abweichungen und was offen ist:
+
+- **`scripts/test-update.sh` ist geschrieben, aber nicht gelaufen.** Es ersetzt
+  `/Applications/Notable.app`, und die Installation ist auf später gestellt. Damit
+  fehlt der eine Beweis, um den es in 3.9 geht — bis zu diesem Lauf ist der Pfad
+  getestet, aber nicht nachgewiesen. Zwei Annahmen prüft erst er: dass App Transport
+  Security `http://127.0.0.1` durchlässt, und dass SwiftUI das `NSWindow` einer
+  `Window`-Szene nach deren id benennt (davon hängt das Wiederherstellen der Fenster
+  ab; abgeglichen wird per Präfix).
+- **Vorbereiten ist sichtbar.** Das Vorab-Laden setzt dieselben Phasen wie der Knopf;
+  das Menü zeigt „Update wird geladen…", und ein kaputtes Release steht sofort als
+  „Update fehlgeschlagen" da. Wiederholt wird mit dem 6-h-Takt, nicht jede Minute.
+- **Die Signatur wird beim Tausch noch einmal geprüft** — zwischen Vorbereiten und
+  ruhigem Moment können Stunden liegen.
+- **Auch ein misslungener Tausch wird gemeldet** („Update nicht installiert — es läuft
+  weiter 1.1.1"). Die Spec sah nur die Erfolgsmeldung vor; ohne die zweite sähe ein
+  Fehlschlag genauso aus wie ein Updater, den es nicht gibt.
+- **„Jetzt installieren" in einer Mitteilung** widerspricht der früheren Regel in
+  `NotificationCenterService` (nie aus einer Mitteilung installieren). Es gibt die
+  Aktion nur beim 72-h-Hinweis, und sie läuft über den manuellen Pfad mit allen
+  harten Sperren.
+- **Die Release-Notes der installierten Version werden gemerkt**, damit die Mitteilung
+  „aktualisiert" wirklich zu ihnen führt („Neu in …" unter „Zuletzt aktualisiert").
+- **⌘Q wartet auf jede Notiz**, auch auf wiederhergestellte, mit der Menüzeile
+  „Beende nach Fertigstellung der Notiz …". Ein erzwungenes Beenden gibt es dafür
+  nicht.
+- Leerlauf und Bildschirmsperre kommen ohne Berechtigung aus
+  (`CGEventSource.secondsSinceLastEventType`, `CGSessionCopyCurrentDictionary`); sie
+  sind nicht automatisch getestet, nur die Tabelle, die sie speisen.

@@ -125,6 +125,15 @@ struct GeneralSettingsView: View {
                     }
                     .frame(maxHeight: 160)
                 }
+                // Why it has not installed itself yet (Spec 25 §3.8) — waiting
+                // used to be silent, which read as "there is no updater".
+                if let reason = updateInstaller.waitReason,
+                   updateInstaller.prepared?.versionString == update.versionString,
+                   updateInstaller.phase == .idle {
+                    Text("\(update.versionString) wartet auf einen ruhigen Moment — gerade: \(reason.label).")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
                 installRow(update)
             } else {
                 LabeledContent("Aktuelle Version") {
@@ -145,6 +154,21 @@ struct GeneralSettingsView: View {
                     Text(error).font(.callout).foregroundStyle(.red)
                 }
             }
+            if let last = UpdateMarkers.lastUpdate() {
+                LabeledContent("Zuletzt aktualisiert") {
+                    Text(lastUpdateLabel(last)).foregroundStyle(.secondary)
+                }
+                // Where the "aktualisiert" notification leads: what changed.
+                if updateChecker.available == nil, !last.notes.isEmpty {
+                    DisclosureGroup("Neu in \(last.version)") {
+                        Text(ReleaseNotes.attributed(last.notes))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
             Toggle("Automatisch nach Updates suchen", isOn: automaticChecks)
             Toggle("Updates automatisch installieren", isOn: $automaticInstall)
                 .disabled(!updateChecker.automaticChecks)
@@ -152,11 +176,14 @@ struct GeneralSettingsView: View {
             Text("Updates")
         } footer: {
             Text("""
-            Prüft GitHub-Releases beim Start und dann alle sechs Stunden. Automatisch \
-            installiert wird nur, wenn nichts dabei verloren geht: kein laufendes Meeting, \
-            kein offenes Notable-Fenster. Vorher wird die Signatur des Downloads geprüft — \
-            eine fremd signierte Datei wird nie installiert. Danach startet Notable neu; \
-            das dauert etwa eine Sekunde.
+            Prüft GitHub-Releases beim Start und dann alle sechs Stunden. Ein gefundenes \
+            Update wird sofort geladen und seine Signatur geprüft — eine fremd signierte \
+            Datei wird nie installiert. Installiert wird im nächsten ruhigen Moment: nie \
+            während eines Meetings, einer Notiz in Arbeit, eines Diktats oder offener \
+            eigener Notizen. Offene Notable-Fenster halten es nur auf, solange jemand am \
+            Mac arbeitet — nach zehn Minuten ohne Eingabe oder bei gesperrtem Bildschirm \
+            geht es los, und die Fenster kommen danach zurück. Der Neustart dauert etwa \
+            eine Sekunde.
             """)
         }
     }
@@ -213,6 +240,11 @@ struct GeneralSettingsView: View {
 
     private var currentVersionString: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+    }
+
+    private func lastUpdateLabel(_ record: UpdateMarkers.Record) -> String {
+        let how = record.unattended ? String(localized: "automatisch") : String(localized: "von Hand")
+        return "\(record.version) · " + record.at.formatted(date: .abbreviated, time: .shortened) + " — " + how
     }
 
     private var lastCheckedLabel: String {

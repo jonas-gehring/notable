@@ -19,10 +19,19 @@ final class AppContainer {
     lazy var notes = NoteManager(notesFolder: notesFolder)
     lazy var consent = ConsentCoordinator(meeting: meeting)
     let updateChecker = UpdateChecker()
-    /// `lazy` because it asks the meeting controller whether a capture is
-    /// running — an installer that quits the app mid-meeting would hand the
-    /// recording to crash recovery for nothing.
-    lazy var updateInstaller = UpdateInstaller(isRecording: { [unowned self] in self.meeting.state.isRecording })
+    /// `lazy` because it asks the rest of the app whether quitting now would
+    /// lose anything (`UpdateWindow.hardLock`): a meeting, a note in the making,
+    /// a dictation, an open draft (Spec 25).
+    lazy var updateInstaller: UpdateInstaller = {
+        let installer = UpdateInstaller(busyReason: { [unowned self] in UpdateWindow.hardLock(self.updateInputs()) })
+        installer.beforeQuit = { [unowned self] info, unattended in
+            UpdateMarkers.recordBeforeQuit(
+                from: Self.runningVersion, to: info.version.description, notes: info.notes,
+                unattended: unattended, windows: self.visibleWindowIDs()
+            )
+        }
+        return installer
+    }()
     let dictationHistory = DictationHistory()
     let usage = UsageSummary()
     let storageNotice = StorageNotice()
@@ -46,6 +55,46 @@ final class AppContainer {
         openWindowAction?(id, activate)
     }
 
+    /// False until `MenuBarLabel` has appeared — early in launch, nothing can be
+    /// presented yet.
+    var canPresentWindows: Bool { openWindowAction != nil }
+
+    static var runningVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+    }
+
+    // MARK: - Update moment (Spec 25)
+
+    /// Everything `UpdateWindow` decides from, read fresh.
+    func updateInputs() -> UpdateWindow.Inputs {
+        UpdateWindow.Inputs(
+            isRecording: meeting.state.isRecording,
+            processingNotes: meeting.processingCount,
+            dictationBusy: appState.captureState != .idle,
+            draftOpen: notes.isEditingUserNotes,
+            // `NSApp.windows` includes panels the user never sees (the dictation
+            // overlay, the status item's own window), so only visible, titled
+            // windows count.
+            windowVisible: NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) },
+            idleSeconds: SystemActivity.idleSeconds,
+            screenLocked: SystemActivity.isScreenLocked
+        )
+    }
+
+    /// The window scenes reopened after an update (§3.6). The live notes window
+    /// is not among them: it belongs to a recording, and a recording is a hard
+    /// lock, so it is never open when an update installs.
+    static let restorableWindowIDs = ["notes", "search", "recent", "stats", "settings", "onboarding"]
+
+    /// Which of those are open. SwiftUI names a `Window` scene's `NSWindow` after
+    /// the scene id, possibly with a suffix — hence the prefix match.
+    func visibleWindowIDs() -> [String] {
+        let open = NSApp.windows
+            .filter { $0.isVisible && $0.styleMask.contains(.titled) }
+            .compactMap { $0.identifier?.rawValue }
+        return Self.restorableWindowIDs.filter { id in open.contains { $0 == id || $0.hasPrefix(id + "-") } }
+    }
+
     private init() {}
 }
 
@@ -65,7 +114,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // exist before anything is posted, and the authorization result decides
         // whether the panel fallback is used instead.
         NotificationCenterService.shared.registerCategoriesAndDelegate()
-        Task { await NotificationCenterService.shared.requestAuthorizationIfNeeded() }
+        Task {
+            await NotificationCenterService.shared.requestAuthorizationIfNeeded()
+            // After the authorization is known: posting before it is dropped.
+            Self.announceCompletedUpdate()
+        }
+        restoreWindowsAfterUpdate(UpdateMarkers.consumeRestoreWindows(), attempts: 20)
 
         // Only the legacy fallback path uses the global mic bit; the per-process
         // detector filters our own capture by PID.
@@ -112,9 +166,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.updateChecker.onUpdateFound = { version in
             NotificationCenterService.shared.postUpdateAvailable(version: version)
         }
+        NotificationCenterService.shared.onOpenSettings = { pane in
+            container.settingsRoute.requested = SettingsView.Pane(rawValue: pane)
+            container.presentWindow("settings")
+        }
+        // "Jetzt installieren" on the 72-hour nudge — the manual path, with every
+        // hard lock still in force.
+        NotificationCenterService.shared.onInstallUpdateNow = {
+            guard let found = container.updateChecker.available else { return }
+            Task { await container.updateInstaller.installAndRelaunch(found) }
+        }
         Task {
             await container.updateChecker.checkOnLaunch()
-            await installFoundUpdate()
+            await Self.prepareAndEvaluateUpdate()
         }
         // A menu-bar app runs for weeks; without this, an update found on Monday
         // waits for the next reboot.
@@ -123,7 +187,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { _ in
             Task { @MainActor in
                 await AppContainer.shared.updateChecker.checkPeriodically()
-                await Self.installFoundUpdateIfIdle()
+                await Self.prepareAndEvaluateUpdate()
+            }
+        }
+        // Checking costs a request, waiting costs nothing (Spec 25 §3.2): once
+        // an update is prepared, the moment is judged every minute and whenever
+        // the screens sleep or the session is switched away from.
+        updateMomentTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            Task { @MainActor in await Self.evaluateUpdateMoment() }
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            workspace.addObserver(forName: name, object: nil, queue: .main) { _ in
+                Task { @MainActor in await Self.evaluateUpdateMoment() }
             }
         }
 
@@ -177,17 +253,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Quitting must not kill a running capture.
+    /// Quitting must not lose a meeting or a note.
     ///
     /// ⌘Q, "Notable beenden" and the updater all went straight to
     /// `NSApp.terminate`, which ends the meeting the hard way and leaves the
     /// spool for the next launch to recover. Here the meeting is stopped
-    /// properly first and the quit resumes once its note has been produced.
+    /// properly first, and the quit resumes once **every** note in the making
+    /// is written — a note still being transcribed or summarized used to be cut
+    /// off too, and recovery then repeated minutes of work and paid for an API
+    /// summary twice (Spec 25 §3.4).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let meeting = AppContainer.shared.meeting
-        guard meeting.state.isRecording else { return .terminateNow }
+        guard meeting.state != .idle else { return .terminateNow }
+        guard !terminationPending else { return .terminateLater }
+        terminationPending = true
         Task { @MainActor in
             await meeting.stopAndAwaitNote()
+            if meeting.processingCount > 0 {
+                meeting.announceQuitAfterProcessing()
+                await meeting.awaitProcessingFinished()
+            }
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -195,21 +280,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var retentionTask: Task<Void, Never>?
     private var updateTimer: Timer?
+    private var updateMomentTimer: Timer?
+    private var terminationPending = false
 
-    private func installFoundUpdate() async { await Self.installFoundUpdateIfIdle() }
+    // MARK: - Updates (Spec 25)
 
-    /// Installs a found update by itself, if nothing would be lost by quitting.
+    /// After a network check: download and verify a found update right away,
+    /// then see whether now is the moment.
+    @MainActor
+    private static func prepareAndEvaluateUpdate() async {
+        let container = AppContainer.shared
+        guard let found = container.updateChecker.available,
+              UpdateInstaller.automaticInstallEnabled() else { return }
+        guard await container.updateInstaller.prepare(found) else {
+            log.error("Update \(found.versionString, privacy: .public) ließ sich nicht vorbereiten")
+            return
+        }
+        await evaluateUpdateMoment()
+    }
+
+    /// Installs a prepared update if `UpdateWindow` says nothing would be lost
+    /// and nobody is using a Notable window; otherwise records why not.
     ///
-    /// Every reason not to is in `installUnattended`; here it is only logged.
     /// The user asked for an update that happens, not for a button that offers
     /// one — and the button is still there for whoever turns this off.
     @MainActor
-    private static func installFoundUpdateIfIdle() async {
+    private static func evaluateUpdateMoment() async {
         let container = AppContainer.shared
         guard let found = container.updateChecker.available else { return }
-        if let skipped = await container.updateInstaller.installUnattended(found) {
-            log.notice("Auto-Update übersprungen (\(skipped.rawValue, privacy: .public))")
+        let decision = UpdateWindow.decide(container.updateInputs())
+        guard let skipped = await container.updateInstaller.installUnattended(found, decision: decision) else { return }
+        log.debug("Auto-Update wartet (\(skipped.logLabel, privacy: .public))")
+        guard case .waiting(let reason) = skipped else { return }
+        // Three days held back by open windows alone: ask once (§3.8).
+        let since = UpdateMarkers.waitingSince(found.versionString)
+        if UpdateWindow.shouldNudge(waitingSince: since, now: Date(), reason: reason,
+                                    alreadyNudged: UpdateMarkers.wasNudged(found.versionString)),
+           NotificationCenterService.shared.postUpdateNudge(version: found.versionString) {
+            UpdateMarkers.markNudged(found.versionString)
         }
+    }
+
+    /// Says once that an update happened — or that it did not take (§3.7).
+    @MainActor
+    private static func announceCompletedUpdate() {
+        switch UpdateMarkers.consumeOutcome(running: AppContainer.runningVersion) {
+        case .installed(_, let to):
+            NotificationCenterService.shared.postUpdateInstalled(version: to)
+        case .failed(let target, let running):
+            NotificationCenterService.shared.postUpdateFailed(target: target, running: running)
+        case nil:
+            break
+        }
+    }
+
+    /// Reopens the windows that were open when the update quit the app —
+    /// without activating, so nobody's focus is pulled into Notable (§3.6).
+    /// The window opener registers a moment after launch, hence the retries.
+    private func restoreWindowsAfterUpdate(_ ids: [String], attempts: Int) {
+        guard !ids.isEmpty else { return }
+        let container = AppContainer.shared
+        guard container.canPresentWindows else {
+            guard attempts > 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.restoreWindowsAfterUpdate(ids, attempts: attempts - 1)
+            }
+            return
+        }
+        for id in ids { container.presentWindow(id, activate: false) }
     }
 }
 

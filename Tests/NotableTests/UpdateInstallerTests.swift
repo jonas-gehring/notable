@@ -109,6 +109,46 @@ final class UpdateInstallerTests: XCTestCase {
         XCTAssertEqual(marker(result.dir), "alt", "nach fehlgeschlagenem Kopieren muss die alte App zurück sein")
     }
 
+    /// A failed move leaves the old bundle where it was — and the app has
+    /// already quit. Unattended, a bare `exit 1` meant Notable was simply gone
+    /// until someone noticed; now the script starts the old one again
+    /// (Spec 25 §3.5). A fake `open` on the PATH records what was launched.
+    func testRelaunchesTheOldAppWhenTheMoveFails() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("swap-mv-\(UUID().uuidString)", isDirectory: true)
+        let locked = dir.appendingPathComponent("Applications", isDirectory: true)
+        let dest = locked.appendingPathComponent("Notable.app", isDirectory: true)
+        let staged = dir.appendingPathComponent("new/Notable.app", isDirectory: true)
+        let bin = dir.appendingPathComponent("bin", isDirectory: true)
+        let log = dir.appendingPathComponent("opened.txt")
+        for folder in [dest, staged, bin] { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try "alt".write(to: dest.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+        let fakeOpen = bin.appendingPathComponent("open")
+        try "#!/bin/sh\necho \"$1\" >> '\(log.path)'\n".write(to: fakeOpen, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeOpen.path)
+        let script = dir.appendingPathComponent("swap.sh")
+        try UpdateInstaller.swapScript.write(to: script, atomically: true, encoding: .utf8)
+        // Renaming inside a folder needs write access to that folder.
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+            try? fm.removeItem(at: dir)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path, "999999", staged.path, dest.path]
+        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertNotEqual(process.terminationStatus, 0)
+        XCTAssertEqual(try String(contentsOf: dest.appendingPathComponent("marker"), encoding: .utf8), "alt")
+        XCTAssertEqual(try String(contentsOf: log, encoding: .utf8), dest.path + "\n", "die alte App muss wieder starten")
+    }
+
     /// The script wrote itself into the temp directory and never cleaned up.
     func testRemovesItselfAfterwards() throws {
         let result = try runScript(pid: 999_999)
@@ -147,6 +187,26 @@ final class UpdateInstallerTests: XCTestCase {
         XCTAssertThrowsError(
             try UpdateInstaller.verifySignature(staged: staged.path, matching: Bundle.main.bundlePath)
         )
+    }
+
+    // MARK: - Unattended: only a prepared update, only in a quiet moment
+
+    @MainActor
+    func testUnattendedInstallNeedsAPreparedUpdate() async throws {
+        let suite = "notable-installer-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let info = UpdateInfo(version: SemanticVersion("9.0.0")!, versionString: "v9.0.0", notes: "",
+                              downloadURL: URL(string: "https://example.com/Notable-9.0.0.zip")!,
+                              releaseURL: URL(string: "https://example.com/release")!)
+        let installer = UpdateInstaller()
+
+        let notPrepared = await installer.installUnattended(info, decision: .installNow, defaults: defaults)
+        XCTAssertEqual(notPrepared, .notPrepared, "der ruhige Moment tauscht nur, er lädt nicht")
+
+        defaults.set(false, forKey: UpdateInstaller.automaticInstallKey)
+        let off = await installer.installUnattended(info, decision: .installNow, defaults: defaults)
+        XCTAssertEqual(off, .switchedOff)
     }
 
 }

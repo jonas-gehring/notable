@@ -165,9 +165,9 @@ enum UpdateResolver {
 
 // MARK: - Live checker (network + throttling + publishing)
 
-/// Queries GitHub Releases for a newer build and publishes it. Distribution is
-/// manual (the user re-runs the install step or drags the app), so this only ever
-/// *notifies* — it never downloads or installs anything.
+/// Queries GitHub Releases for a newer build and publishes it. Downloading and
+/// installing is `UpdateInstaller`'s job; this only finds, remembers and
+/// announces.
 @MainActor
 final class UpdateChecker: ObservableObject {
     /// GitHub `owner/repo`. Derived from `git remote -v`
@@ -175,7 +175,13 @@ final class UpdateChecker: ObservableObject {
     static let repo = "jonas-gehring/notable"
 
     /// Published when a strictly-newer release is found; nil otherwise.
-    @Published private(set) var available: UpdateInfo?
+    ///
+    /// **Persisted** (Spec 25 §3.3). It used to live only in memory, and the
+    /// launch check returns early inside its 24-hour throttle — so a restart
+    /// forgot a found update until the next six-hour tick.
+    @Published private(set) var available: UpdateInfo? {
+        didSet { Self.persistPending(available, defaults: defaults) }
+    }
     @Published private(set) var isChecking = false
     @Published private(set) var lastChecked: Date?
     /// Human-readable last-error, for the Settings row. Cleared on success.
@@ -197,7 +203,7 @@ final class UpdateChecker: ObservableObject {
 
     private static let lastCheckKey = "updateLastCheckAt"
     /// The version the user asked not to be reminded about again.
-    static let skippedVersionKey = "updateSkippedVersion"
+    nonisolated static let skippedVersionKey = "updateSkippedVersion"
     /// Whether the launch check runs at all. Defaults to on (see `automaticChecks`).
     static let automaticChecksKey = "updateAutomaticChecks"
     /// The last version we already posted a notification for — so a found update
@@ -228,6 +234,58 @@ final class UpdateChecker: ObservableObject {
         if let ts = defaults.object(forKey: Self.lastCheckKey) as? Double {
             self.lastChecked = Date(timeIntervalSince1970: ts)
         }
+        self.available = Self.restorePending(defaults: defaults, current: self.currentVersion)
+    }
+
+    // MARK: - Remembering a found update
+
+    nonisolated static let pendingKey = "updatePendingVersion"
+
+    private struct PendingRecord: Codable {
+        var tag: String
+        var downloadURL: URL
+        var releaseURL: URL
+        var notes: String
+    }
+
+    nonisolated static func persistPending(_ info: UpdateInfo?, defaults: UserDefaults) {
+        guard let info else {
+            defaults.removeObject(forKey: pendingKey)
+            return
+        }
+        let record = PendingRecord(tag: info.versionString, downloadURL: info.downloadURL,
+                                   releaseURL: info.releaseURL, notes: info.notes)
+        defaults.set(try? JSONEncoder().encode(record), forKey: pendingKey)
+    }
+
+    /// The update found before the last restart — unless the running version
+    /// has caught up (installed by hand, or by the updater) or it was skipped;
+    /// then the record is dropped.
+    nonisolated static func restorePending(defaults: UserDefaults, current: SemanticVersion) -> UpdateInfo? {
+        guard let data = defaults.data(forKey: pendingKey),
+              let record = try? JSONDecoder().decode(PendingRecord.self, from: data),
+              let version = SemanticVersion(record.tag), version > current,
+              defaults.string(forKey: skippedVersionKey) != record.tag
+        else {
+            defaults.removeObject(forKey: pendingKey)
+            return nil
+        }
+        return UpdateInfo(version: version, versionString: record.tag, notes: record.notes,
+                          downloadURL: record.downloadURL, releaseURL: record.releaseURL)
+    }
+
+    /// Debug builds only: `scripts/test-update.sh` points this at a local
+    /// server to run one real unattended update end to end (Spec 25 §3.9). A
+    /// release build always asks GitHub.
+    static let feedOverrideKey = "updateFeedURL"
+
+    private var feedURL: URL? {
+        #if DEBUG
+        if let override = defaults.string(forKey: Self.feedOverrideKey), let url = URL(string: override) {
+            return url
+        }
+        #endif
+        return URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest")
     }
 
     /// Whether the launch check is allowed to run. Absent means on: an updater
@@ -287,7 +345,7 @@ final class UpdateChecker: ObservableObject {
         isChecking = true
         defer { isChecking = false }
 
-        guard let url = URL(string: "https://api.github.com/repos/\(Self.repo)/releases/latest") else {
+        guard let url = feedURL else {
             lastError = String(localized: "Ungültige Repository-URL.")
             return
         }

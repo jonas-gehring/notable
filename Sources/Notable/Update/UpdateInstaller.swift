@@ -39,14 +39,33 @@ final class UpdateInstaller: ObservableObject {
     /// alone is indistinguishable from a hang.
     @Published private(set) var downloadProgress: Double?
 
-    private let session: URLSession
-    /// Whether a meeting is currently being captured. Injected so the installer
-    /// keeps no reference to the meeting controller (and so tests can say no).
-    private let isRecording: @MainActor () -> Bool
+    /// A found update, already downloaded, unpacked and signature-checked
+    /// (Spec 25 §3.2) — the quiet moment then only has to swap it in.
+    struct PreparedUpdate: Equatable {
+        let versionString: String
+        let app: URL
+    }
 
-    init(session: URLSession = .shared, isRecording: @escaping @MainActor () -> Bool = { false }) {
+    @Published private(set) var prepared: PreparedUpdate?
+    /// Why the last unattended attempt waited, for Settings (§3.8). `nil` while
+    /// nothing is waiting.
+    @Published private(set) var waitReason: UpdateWindow.Reason?
+
+    /// Right before the app quits for a swap: writes the markers the next
+    /// launch reads (`UpdateMarkers`). Injected so the installer knows nothing
+    /// about windows or defaults layout.
+    var beforeQuit: (@MainActor (_ info: UpdateInfo, _ unattended: Bool) -> Void)?
+
+    private let session: URLSession
+    /// Whether quitting right now would lose work — `UpdateWindow.hardLock`.
+    /// Injected so the installer keeps no reference to the controllers (and so
+    /// tests can say no). It used to be only "is a meeting recording", which
+    /// let a restart cut through a dictation or a note still being produced.
+    private let busyReason: @MainActor () -> UpdateWindow.Reason?
+
+    init(session: URLSession = .shared, busyReason: @escaping @MainActor () -> UpdateWindow.Reason? = { nil }) {
         self.session = session
-        self.isRecording = isRecording
+        self.busyReason = busyReason
     }
 
     // MARK: - Unattended install
@@ -65,52 +84,89 @@ final class UpdateInstaller: ObservableObject {
         defaults.object(forKey: automaticInstallKey) as? Bool ?? true
     }
 
-    /// Why an unattended install did not happen. Purely for the log — none of
-    /// these is worth interrupting anyone over.
-    enum SkipReason: String {
+    /// Why an unattended install did not happen. For the log and the Settings
+    /// line — none of these is worth interrupting anyone over.
+    enum SkipReason: Equatable {
         case switchedOff
         case busy
-        case recording
-        case windowOpen
         case noZip
+        /// Not downloaded and verified yet; the quiet moment only swaps.
+        case notPrepared
+        case waiting(UpdateWindow.Reason)
+
+        var logLabel: String {
+            switch self {
+            case .switchedOff: "switchedOff"
+            case .busy: "busy"
+            case .noZip: "noZip"
+            case .notPrepared: "notPrepared"
+            case .waiting(let reason): "waiting.\(reason.rawValue)"
+            }
+        }
     }
 
-    /// Installs `info` without asking, but only when nothing would be lost by
-    /// quitting right now.
+    /// Installs `info` without asking — when `decision` says the moment is quiet
+    /// (`UpdateWindow`), and only once the update is prepared.
     ///
-    /// The three guards are the whole design. A capture in flight is obvious. An
-    /// open Notable window is less so and matters just as much: settings being
-    /// edited, a note being read, live notes being typed — a relaunch closes all
-    /// of them, and "the app restarted while I was writing" is exactly the
-    /// experience an automatic update must never produce. Everything else — the
-    /// signature check, the swap script, the guarded rollback — is the same path
-    /// the manual button takes.
+    /// Everything else — the signature check, the swap script, the guarded
+    /// rollback — is the same path the manual button takes.
     @discardableResult
     func installUnattended(
         _ info: UpdateInfo,
+        decision: UpdateWindow.Decision,
         defaults: UserDefaults = .standard,
         bundlePath: String = Bundle.main.bundlePath
     ) async -> SkipReason? {
         guard Self.automaticInstallEnabled(defaults) else { return .switchedOff }
         guard !phase.isBusy else { return .busy }
-        guard !isRecording() else { return .recording }
         guard info.downloadURL.pathExtension.lowercased() == "zip" else { return .noZip }
-        // `NSApp.windows` includes panels the user never sees (the dictation
-        // overlay, the status item's own window), so only visible, titled
-        // windows count as "the user is in the middle of something".
-        let visible = NSApp.windows.contains { $0.isVisible && $0.styleMask.contains(.titled) }
-        guard !visible else { return .windowOpen }
-
-        await installAndRelaunch(info, bundlePath: bundlePath)
+        guard prepared?.versionString == info.versionString else { return .notPrepared }
+        if case .wait(let reason) = decision {
+            waitReason = reason
+            return .waiting(reason)
+        }
+        waitReason = nil
+        await installAndRelaunch(info, bundlePath: bundlePath, unattended: true)
         return nil
     }
 
-    /// Downloads and installs `info`, then quits so the swap script can replace the
-    /// bundle and relaunch. Returns only on failure (success ends in `NSApp.terminate`).
+    /// Downloads, unpacks and **verifies** a found update in the background,
+    /// long before the quiet moment that installs it (Spec 25 §3.2). A broken
+    /// release then shows up now, as a failed phase in the menu, and not at
+    /// three in the morning; the swap itself is then a second's work.
+    ///
+    /// Tried once per call — the caller calls it after each network check, so a
+    /// failure is retried every six hours, not every minute.
+    @discardableResult
+    func prepare(_ info: UpdateInfo, bundlePath: String = Bundle.main.bundlePath) async -> Bool {
+        if let prepared, prepared.versionString == info.versionString,
+           FileManager.default.fileExists(atPath: prepared.app.path) {
+            return true
+        }
+        guard info.downloadURL.pathExtension.lowercased() == "zip", !phase.isBusy else { return false }
+        do {
+            let app = try await fetchAndVerify(info, bundlePath: bundlePath)
+            prepared = PreparedUpdate(versionString: info.versionString, app: app)
+            phase = .idle
+            return true
+        } catch {
+            downloadProgress = nil
+            phase = .failed(error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Installs `info` — the prepared copy if there is one — then quits so the
+    /// swap script can replace the bundle and relaunch. Returns only on failure
+    /// (success ends in `NSApp.terminate`).
     ///
     /// - Parameter bundlePath: the running bundle to replace; defaults to
     ///   `Bundle.main.bundlePath` (wherever Notable is actually installed).
-    func installAndRelaunch(_ info: UpdateInfo, bundlePath: String = Bundle.main.bundlePath) async {
+    func installAndRelaunch(
+        _ info: UpdateInfo,
+        bundlePath: String = Bundle.main.bundlePath,
+        unattended: Bool = false
+    ) async {
         // Only a direct `.zip` asset can be auto-installed. If the update points at
         // the release *page* (no zip attached), fall back to opening the browser.
         guard info.downloadURL.pathExtension.lowercased() == "zip" else {
@@ -118,27 +174,24 @@ final class UpdateInstaller: ObservableObject {
             return
         }
         guard !phase.isBusy else { return }
-        // Quitting mid-meeting kills the capture and leaves the spool to
-        // recovery. An update is never urgent enough for that.
-        guard !isRecording() else {
-            phase = .failed(String(localized: "Update während einer Aufnahme nicht möglich — Meeting zuerst beenden."))
-            return
-        }
+        guard refuseIfBusy() else { return }
 
         do {
-            phase = .downloading
-            downloadProgress = nil
-            let zip = try await download(info.downloadURL)
-            defer { try? FileManager.default.removeItem(at: zip) }
-
-            downloadProgress = nil
-            phase = .unpacking
-            let newApp = try unpack(zip, expectedName: (bundlePath as NSString).lastPathComponent)
-
-            try Self.verifySignature(staged: newApp.path, matching: bundlePath)
+            let newApp: URL
+            if let prepared, prepared.versionString == info.versionString,
+               FileManager.default.fileExists(atPath: prepared.app.path) {
+                // Checked again: hours may lie between preparing and installing.
+                try Self.verifySignature(staged: prepared.app.path, matching: bundlePath)
+                newApp = prepared.app
+            } else {
+                newApp = try await fetchAndVerify(info, bundlePath: bundlePath)
+            }
+            // A download takes seconds, and a dictation may have started in them.
+            guard refuseIfBusy() else { return }
 
             phase = .installing
             try launchSwap(newApp: newApp, dest: bundlePath)
+            beforeQuit?(info, unattended)
 
             // The script is now waiting on our PID. Quit so it can replace us.
             NSApp.terminate(nil)
@@ -148,7 +201,31 @@ final class UpdateInstaller: ObservableObject {
         }
     }
 
+    /// Quitting mid-meeting kills the capture and leaves the spool to recovery;
+    /// quitting mid-note repeats minutes of work and pays a summary twice. An
+    /// update is never urgent enough for either. Returns whether it may go on.
+    private func refuseIfBusy() -> Bool {
+        guard let reason = busyReason() else { return true }
+        phase = .failed(reason == .recording
+            ? String(localized: "Update während einer Aufnahme nicht möglich — Meeting zuerst beenden.")
+            : String(localized: "Update gerade nicht möglich — \(reason.label)."))
+        return false
+    }
+
     // MARK: - Steps
+
+    private func fetchAndVerify(_ info: UpdateInfo, bundlePath: String) async throws -> URL {
+        phase = .downloading
+        downloadProgress = nil
+        let zip = try await download(info.downloadURL)
+        defer { try? FileManager.default.removeItem(at: zip) }
+
+        downloadProgress = nil
+        phase = .unpacking
+        let newApp = try unpack(zip, expectedName: (bundlePath as NSString).lastPathComponent)
+        try Self.verifySignature(staged: newApp.path, matching: bundlePath)
+        return newApp
+    }
 
     private func download(_ url: URL) async throws -> URL {
         var request = URLRequest(url: url)
@@ -351,8 +428,10 @@ final class UpdateInstaller: ObservableObject {
     rm -rf "$dest.old"
     # `|| exit 1`, not `2>/dev/null`: a failed move used to be swallowed, and
     # ditto then *merged* the new bundle into the old one — mixed files, invalid
-    # signature, no way back.
-    mv "$dest" "$dest.old" || { rm -f "$0"; exit 1; }
+    # signature, no way back. The old bundle is untouched here, and the app has
+    # already quit — so start it again. Unattended, a bare `exit 1` meant no
+    # menu-bar item and no dictation until someone noticed.
+    mv "$dest" "$dest.old" || { open "$dest"; rm -f "$0"; exit 1; }
     if /usr/bin/ditto "$newapp" "$dest"; then
       rm -rf "$dest.old" "$newapp"
     else

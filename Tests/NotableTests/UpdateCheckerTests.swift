@@ -92,6 +92,42 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertEqual(info?.version, SemanticVersion("1.2.0"))
     }
 
+    // MARK: - A found update survives a restart (Spec 25 §3.3)
+
+    private func pendingDefaults() -> (UserDefaults, String) {
+        let suite = "notable-update-pending-\(UUID().uuidString)"
+        return (UserDefaults(suiteName: suite)!, suite)
+    }
+
+    private func info(_ tag: String) throws -> UpdateInfo {
+        try XCTUnwrap(UpdateResolver.updateInfo(fromJSON: sampleJSON(tag: tag), current: SemanticVersion("0.0.1")!))
+    }
+
+    func testAFoundUpdateIsRestoredAfterARestart() throws {
+        let (defaults, suite) = pendingDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let found = try info("v1.2.0")
+        UpdateChecker.persistPending(found, defaults: defaults)
+        XCTAssertEqual(UpdateChecker.restorePending(defaults: defaults, current: SemanticVersion("1.1.1")!), found)
+    }
+
+    /// Installed meanwhile — by hand or by the updater: forget it.
+    func testARestoredUpdateThatIsNoLongerNewerIsDropped() throws {
+        let (defaults, suite) = pendingDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        UpdateChecker.persistPending(try info("v1.2.0"), defaults: defaults)
+        XCTAssertNil(UpdateChecker.restorePending(defaults: defaults, current: SemanticVersion("1.2.0")!))
+        XCTAssertNil(defaults.data(forKey: UpdateChecker.pendingKey), "der Eintrag wird gelöscht")
+    }
+
+    func testASkippedVersionIsNotRestored() throws {
+        let (defaults, suite) = pendingDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        UpdateChecker.persistPending(try info("v1.2.0"), defaults: defaults)
+        defaults.set("v1.2.0", forKey: UpdateChecker.skippedVersionKey)
+        XCTAssertNil(UpdateChecker.restorePending(defaults: defaults, current: SemanticVersion("1.1.1")!))
+    }
+
     func testFallsBackToReleasePageWhenNoZip() throws {
         let info = try UpdateResolver.updateInfo(
             fromJSON: sampleJSON(tag: "v1.0.0", withZip: false),

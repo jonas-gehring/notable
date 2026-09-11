@@ -18,6 +18,10 @@ final class NoteManager: ObservableObject {
     /// hundred directory listings while the list draws. It changes only when a
     /// folder is created or a note is moved, both of which end in `reload()`.
     @Published private(set) var projectFolders: [String] = []
+    /// "Eigene Notizen" of a meeting are open for editing in the notes window.
+    /// A restart would throw the unsaved draft away, so an update waits for it
+    /// (`UpdateWindow`, Spec 25).
+    @Published var isEditingUserNotes = false
 
     private let store: RecordingStore
     private let notesFolder: NotesFolderManager

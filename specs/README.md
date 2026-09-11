@@ -29,6 +29,11 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [20](20-modellverwaltung.md) | **Modellverwaltung** — 1,1 GB Modelle sichtbar, reparierbar, an die App-Version gebunden | S + M–L | FluidAudio lädt von `resolve/main` — es gibt keine Revision | Stufe 1 gebaut, Stufe 2 neu gefasst und offen |
 | [21](21-spool-format-und-speicherplatz.md) | **Spool-Format & sichtbarer Speicherplatz** — Int16 statt Float32, ALAC im Archiv, die Zahl endlich sichtbar | S + S–M + S | ein Formatfehler zerstört die Notfallkopie | gebaut |
 | [22](22-oberflaeche-entdoppeln.md) | **Oberfläche entdoppeln** — eine Implementierung je Begriff, eine Datei je Einstellungsseite | M | reiner Umbau ohne Testkriterium außer „vorher genauso" | gebaut |
+| [23](23-mikrofon-folgt-dem-call.md) | **Das Mikrofon folgt dem Call** — aufnehmen, wo man hineinspricht, statt den Systemstandard zu erben | S + M + S | `kAudioProcessPropertyDevices` ist dünn dokumentiert | 📋 Entwurf, **zuerst** |
+| [24](24-sprechererkennung.md) | **Sprechererkennung** — Teilnehmer und aktiver Sprecher vom Call-Bildschirm, Splitter auflösen, Korrektur, die hält | ½ T + S + S–M + M + M | Call-Oberflächen ändern sich mit jedem App-Update | 📋 Entwurf, braucht 23 |
+| [25](25-auto-update-das-wirklich-installiert.md) | **Updates, die sich tatsächlich installieren** — ruhiger Moment statt „kein Fenster offen", nichts vergessen, hinterher sagen | M | ein kaputtes Release installiert sich jetzt wirklich | 📋 Entwurf |
+| [26](26-notizen-einruecken.md) | **Einrücken/Ausrücken in Notizen** — verschachtelte Listen, Tab/⇧Tab, ⌘]/⌘[ | S–M + S | Drift im Markdown-Round-Trip | 📋 Entwurf |
+| [27](27-notizen-ordner-icloud-und-symbol.md) | **Notizen-Ordner** — Notable-Symbol am Ordner, iCloud Drive als Vorgabe für neue Einrichtungen | S (+ S) | TCC beim ersten Zugriff ohne Open-Panel | 📋 Entwurf |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
 
@@ -46,6 +51,21 @@ aktuellen Verzeichnisnamen, was das Hauptrisiko von Spec 20 weitgehend erledigt.
 WhisperKit lud seine Modelle nach `~/Documents` — davon stand in keiner Spec etwas.
 **Offen ist Stufe 2 von Spec 20** (Modelle als Release-Assets): eine eigene
 Entscheidung, weil sie rund ein Gigabyte an jedes Release hängt.
+
+**Zu 23–27:** Fünf Anforderungen vom 2026-09-11, nummeriert in der empfohlenen
+Bau-Reihenfolge, nicht in der Reihenfolge der Liste. Zwei davon erwiesen sich bei der
+Messung als etwas anderes als gedacht:
+
+- *„externes Audio wird nicht erkannt"* ist der gravierendste Befund der Runde: seit
+  dem 12.08. ist die Mikrofonspur in **jedem** Call exakt stumm (Deckel zu, eingebautes
+  Mikrofon ist Standard, der Call benutzt ein anderes Gerät). → 23.
+- *„Sprechererkennung"* ist zum größten Teil eine Folge davon — bei stummem Mikrofon
+  läuft die Benennung absichtlich nicht. → 24 baut auf 23 auf.
+- *„Auto-Install vom Update"* existiert bereits (`installUnattended`, Default an), lief
+  auf diesem Rechner aber nie nachweislich und prüft zwei Zustände nicht, in denen ein
+  Neustart Arbeit vernichtet. → 25.
+
+26 und 27 sind unabhängig und klein. Offene Entscheidungen stehen in 24 §7 und 27 §7.
 
 Daneben liegen die Specs der ersten Ausbaustufe — `note-management-ui.md`,
 `speaker-naming.md`, `auto-detect-consent.md`, `release-and-signing.md` und die

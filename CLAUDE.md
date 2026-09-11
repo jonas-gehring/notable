@@ -102,4 +102,8 @@ Test-suite notes: `ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `Englis
 
 ## Open decisions
 
-None currently. New ones go here — do not resolve them unilaterally, ask.
+New ones go here — do not resolve them unilaterally, ask.
+
+- **Reading the call window for speaker names** (`specs/24` §8): starts on or off? Accessibility needs no new grant (`Paster` already holds it); the OCR fallback needs Screen Recording. Voice profiles are deferred in favour of this — the screen supplies names per call without a biometric store.
+- **Moving existing notes into iCloud Drive** (`specs/27` Stufe 2): without it, a user who moves the folder by hand leaves every stored `markdown_path` pointing at nothing.
+- **Folder icon on a user-chosen folder** (`specs/27` §7): default on, or only on the default folder?

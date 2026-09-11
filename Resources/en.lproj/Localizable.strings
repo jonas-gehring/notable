@@ -731,3 +731,26 @@
 "%lld Notizen und %lld Ordner ziehen nach iCloud Drive › %@. Gespeicherte Pfade werden mitgeführt." = "%lld notes and %lld folders move to iCloud Drive › %@. Stored paths follow them.";
 "Während eines Meetings oder einer Notiz in Arbeit wird nichts verschoben." = "Nothing is moved during a meeting or while a note is being produced.";
 "Das Symbol wird nur gesetzt, wo kein eigenes ist, und beim Wechsel vom alten Ordner wieder entfernt. Andere Geräte zeigen es womöglich nicht — iCloud trägt eigene Ordnersymbole unzuverlässig mit." = "The icon is only set where there is no custom one, and removed from the old folder when you switch. Other devices may not show it — iCloud carries custom folder icons unreliably.";
+
+/* Spec 24 — Sprechererkennung */
+"Dieses Meeting hat keine Sprecher-Labels." = "This meeting has no speaker labels.";
+"Die Zusammenfassung ist noch auf dem alten Stand." = "The summary still has the old names.";
+"Neu zusammenfassen" = "Summarize again";
+"%lld Beiträge · %@" = "%lld turns · %@";
+"fest" = "fixed";
+"Name …" = "Name …";
+"Vorschläge aus Kalender und Call" = "Suggestions from calendar and call";
+"Zusammenführen" = "Merge";
+"mit „%@“" = "with “%@”";
+"vom Bildschirm" = "from the screen";
+"aus dem Gespräch" = "from the conversation";
+"von dir" = "by you";
+"Sprecher benennen" = "Name speakers";
+"Sprecher am Bildschirm erkennen" = "Recognize speakers on screen";
+"Unterstützte Apps" = "Supported apps";
+"noch keine — erst messen" = "none yet — measure first";
+"Call-Fenster jetzt auslesen" = "Read the call window now";
+"Sprechererkennung am Bildschirm" = "Speaker recognition on screen";
+"Liest während einer Aufnahme, der du zugestimmt hast, nur das Fenster des Calls — wer teilnimmt und wer gerade spricht — über die Bedienungshilfen, die Notable fürs Einfügen ohnehin hat. Es wird kein Bild gespeichert, nur Namen und Zeiten. Welche App das hergibt, zeigt erst eine Messung im echten Call: der Knopf schreibt den Aufbau des Call-Fensters als Text nach ~/Library/Logs/Notable/screen-probe." = "During a recording you agreed to, reads only the call's window — who takes part and who is speaking — through Accessibility, which Notable already has for pasting. No image is stored, only names and times. Which app provides this only a measurement in a real call can tell: the button writes the structure of the call window as text to ~/Library/Logs/Notable/screen-probe.";
+"Bedienungshilfen sind für Notable nicht erlaubt." = "Accessibility is not allowed for Notable.";
+"Kein laufender Call erkannt." = "No running call detected.";

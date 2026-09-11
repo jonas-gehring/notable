@@ -60,6 +60,11 @@ enum DefaultsKey {
     static let autoRecordMeetings = DefaultsEntry(key: "autoRecordMeetings", fallback: true)
     static let notifyOnMeetingReady = DefaultsEntry(key: "notifyOnMeetingReady", fallback: true)
     static let speakerNamingEnabled = DefaultsEntry(key: "speakerNamingEnabled", fallback: true)
+    /// Read the call window for who takes part and who is speaking (Spec 24).
+    /// On by default — decided 2026-09-11: Accessibility only, which Notable
+    /// already holds for pasting, read-only, only during a recording the user
+    /// agreed to.
+    static let screenSpeakerRecognition = DefaultsEntry(key: "screenSpeakerRecognition", fallback: true)
     static let meetingEchoCancellation = DefaultsEntry(key: "meetingEchoCancellation", fallback: false)
     static let meetingUseDictationEngine = DefaultsEntry(key: "meetingUseDictationEngine", fallback: false)
     static let openNotesOnMeetingStart = DefaultsEntry(key: "openNotesOnMeetingStart", fallback: true)

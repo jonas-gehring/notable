@@ -1,5 +1,6 @@
 import EventKit
 import Foundation
+import os
 
 /// Read-only EventKit access against the local calendar store: which event
 /// does a recording belong to?
@@ -105,24 +106,41 @@ final class CalendarMonitor: ObservableObject {
     /// are frequently `nil` or noisy (rooms, absentees, mailing lists, bare
     /// email addresses) — degrade gracefully to an empty pool rather than feed
     /// the resolver junk. Deduplicated, order preserved.
+    ///
+    /// Logged per meeting, with a count per reason (Spec 24 §4.1): not one of
+    /// 25 measured meetings had attendees stored, and whether EventKit
+    /// delivered none or this filter dropped them all was unknown. The names
+    /// themselves are logged private.
     private static func attendeeNames(of event: EKEvent) -> [String] {
-        guard let attendees = event.attendees else { return [] }
+        guard let attendees = event.attendees else {
+            log.notice("Teilnehmer: EventKit liefert keine Liste für diesen Termin")
+            return []
+        }
         var seen = Set<String>()
         var names: [String] = []
+        var dropped: [String: Int] = [:]
         for participant in attendees {
-            if participant.isCurrentUser { continue }
+            log.debug("Teilnehmer roh: \(participant.name ?? "–", privacy: .private), Typ \(participant.participantType.rawValue, privacy: .public)")
+            if participant.isCurrentUser { dropped["selbst", default: 0] += 1; continue }
             switch participant.participantType {
-            case .room, .resource, .unknown: continue
+            case .room, .resource, .unknown:
+                dropped["Raum/Ressource/unbekannt", default: 0] += 1
+                continue
             default: break
             }
-            guard let name = participant.name?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !name.isEmpty,
-                  !looksLikeEmailAddress(name)
-            else { continue }
-            if seen.insert(name.lowercased()).inserted { names.append(name) }
+            guard let name = participant.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+                dropped["ohne Namen", default: 0] += 1
+                continue
+            }
+            guard !looksLikeEmailAddress(name) else { dropped["nur E-Mail", default: 0] += 1; continue }
+            if seen.insert(name.lowercased()).inserted { names.append(name) } else { dropped["doppelt", default: 0] += 1 }
         }
+        let reasons = dropped.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+        log.notice("Teilnehmer: \(attendees.count, privacy: .public) roh, \(names.count, privacy: .public) übernommen; verworfen: \(reasons.isEmpty ? "nichts" : reasons, privacy: .public)")
         return names
     }
+
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "calendar")
 
     /// A bare "user@host" with no whitespace — EventKit's fallback when a
     /// participant has no display name. Not a usable person name.

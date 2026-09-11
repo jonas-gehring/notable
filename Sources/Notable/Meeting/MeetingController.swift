@@ -106,6 +106,9 @@ final class MeetingController: ObservableObject {
     private var selfHealed = false
     /// The known-silent warning is said once, not every two seconds.
     private var warnedKnownSilent = false
+    /// Reads the call window while recording (Spec 24). nil when switched off,
+    /// without Accessibility, or when no adapter knows the call app.
+    private var screenObserver: CallScreenObserver?
 
     init(notesFolder: NotesFolderManager, calendar: CalendarMonitor, liveNotes: LiveNotesController) {
         self.notesFolder = notesFolder
@@ -308,6 +311,9 @@ final class MeetingController: ObservableObject {
         capture = .recording(since: startedAt)
         startMicWatchdog()
         startDeviceMonitor()
+        // Who the call shows and who it highlights (Spec 24) — on its own
+        // queue, never in the capture path.
+        screenObserver = callProcess().flatMap { CallScreenObserver.start(bundleIDs: $0.bundleIDs, spool: currentSpool) }
 
         // Live notes open for business: the buffer is bound to this recording's
         // spool from here until stop() consumes it.
@@ -675,6 +681,8 @@ final class MeetingController: ObservableObject {
 
         stopMicWatchdog()
         stopDeviceMonitor()
+        let screen = screenObserver?.stop() ?? []
+        screenObserver = nil
         let diagnostics = diagnosticsLog.last
         if let name = inputDeviceName {
             UserDefaults.standard.set(name, forKey: DefaultsKey.lastMeetingInputDevice.key)
@@ -729,7 +737,8 @@ final class MeetingController: ObservableObject {
                     event: event,
                     userNotes: userNotes,
                     spool: spool,
-                    diagnostics: diagnostics
+                    diagnostics: diagnostics,
+                    screen: screen
                 )
                 handle(outcome: note, spool: spool, userNotes: userNotes, recovered: false)
             } catch {
@@ -786,7 +795,8 @@ final class MeetingController: ObservableObject {
                     event: event,
                     userNotes: recoveredNotes,
                     spool: session,
-                    diagnostics: meta.diagnostics?.last
+                    diagnostics: meta.diagnostics?.last,
+                    screen: SpoolStore.readScreenObservations(session)
                 )
                 handle(outcome: note, spool: session, userNotes: recoveredNotes, recovered: true)
             } catch {
@@ -863,6 +873,7 @@ final class MeetingController: ObservableObject {
                         title: rec.title ?? String(localized: "Meeting"), date: rec.startedAt,
                         calendarEventTitle: rec.calendarEventTitle,
                         attendees: rec.attendees,
+                        participants: rec.participants,
                         segments: loaded.segments.map { ($0.speaker, $0.text) },
                         summary: rec.summary, userNotes: rec.userNotes
                     )
@@ -947,7 +958,9 @@ final class MeetingController: ObservableObject {
         /// `SpoolStore.markNoteWritten`. Nothing else here touches the spool.
         spool: SpoolStore.Session? = nil,
         /// The capture's last device decision, for the silence warning.
-        diagnostics: CaptureDiagnostics? = nil
+        diagnostics: CaptureDiagnostics? = nil,
+        /// What the call window showed, if an adapter read it (Spec 24).
+        screen: [ScreenObservation] = []
     ) async throws -> NoteOutcome {
         // Transcribe + diarize (detached — CoreML work must not block main).
         // Parakeet v3 is shared with dictation's cache (no second copy of the
@@ -955,7 +968,10 @@ final class MeetingController: ObservableObject {
         // The invitation is the best prior available for how many voices the far
         // side has: everyone invited except the local user. Nil when there is no
         // event, or when the list is so small that guessing is worse than not.
-        let expectedSpeakers = Self.expectedRemoteSpeakers(of: event)
+        // The call window, when it was read, beats the calendar: "was there"
+        // rather than "was invited" — and the calendar has been empty for every
+        // meeting measured (Spec 24 §1.2).
+        let expectedSpeakers = ScreenRoster.expectedRemoteSpeakers(screen) ?? Self.expectedRemoteSpeakers(of: event)
         let segments = try await Task.detached(priority: .userInitiated) {
             let transcriber = try await meetingTranscriber()
             return try await MeetingPipeline.process(
@@ -1005,18 +1021,34 @@ final class MeetingController: ObservableObject {
         // user's own — spoken *at* them by the person who is actually talking,
         // which lands that name on the remote speaker. No evidence beats a
         // confident wrong name.
-        let named: [MeetingTranscriptSegment]
-        if !segments.isEmpty, !micSilent,
-           DefaultsKey.speakerNamingEnabled.value() {
-            let mapping = await SpeakerNameResolver.resolve(
-                segments: segments,
-                attendees: event?.attendeeNames ?? [],
-                providerID: providerID,
-                recordingID: recordingID
-            )
-            named = SpeakerNameResolver.applyMapping(segments, mapping: mapping)
-        } else {
-            named = segments
+        //
+        // Sources in order (Spec 24): the screen, then the model — the model
+        // only for labels the screen left open, never onto a name the screen
+        // already gave. The user's own corrections come later and outrank both.
+        var named = segments
+        var labelRecords: [RecordingStore.SpeakerLabelRecord] = []
+        var participants: [String] = []
+        if !segments.isEmpty, !micSilent {
+            let owner = SpeakerNameResolver.ownerNameTokens
+            let fromScreen = ScreenNaming.apply(segments, observations: screen, recordingStart: startedAt, ownerTokens: owner)
+            named = fromScreen.segments
+            participants = fromScreen.participants
+            labelRecords += fromScreen.names.map { .init(cluster: $0.key, name: $0.value, source: .screen) }
+
+            let open = ScreenNaming.unnamedLabels(in: named)
+            if !open.isEmpty, DefaultsKey.speakerNamingEnabled.value() {
+                let mapping = await SpeakerNameResolver.resolve(
+                    segments: named,
+                    attendees: (event?.attendeeNames ?? []) + participants,
+                    providerID: providerID,
+                    recordingID: recordingID
+                )
+                let taken = Set(fromScreen.names.values.map { $0.lowercased() })
+                let usable = mapping.filter { open.contains($0.key) && !taken.contains($0.value.lowercased()) }
+                let applied = SpeakerNameResolver.validated(usable, in: named)
+                named = SpeakerNameResolver.applyMapping(named, mapping: applied)
+                labelRecords += applied.map { .init(cluster: $0.key, name: $0.value, source: .llm) }
+            }
         }
 
         let duration = Double(max(micSamples.count, systemSamples.count))
@@ -1031,6 +1063,7 @@ final class MeetingController: ObservableObject {
             date: startedAt,
             calendarEventTitle: event?.title,
             attendees: event?.attendeeNames ?? [],
+            participants: participants,
             segments: named.map { ($0.speaker, $0.text) },
             summary: nil,
             userNotes: userNotes
@@ -1126,13 +1159,15 @@ final class MeetingController: ObservableObject {
             // re-projection reads it back from here, so a rename no longer
             // drops the `event:` line.
             calendarEventTitle: event?.title,
-            attendees: event?.attendeeNames ?? []
+            attendees: event?.attendeeNames ?? [],
+            participants: participants
         )
         try await RecordingStore.shared.insertMeeting(
             recording,
             segments: named.map {
-                RecordingStore.Segment(speaker: $0.speaker, start: $0.start, end: $0.end, text: $0.text)
-            }
+                RecordingStore.Segment(speaker: $0.speaker, start: $0.start, end: $0.end, text: $0.text, cluster: $0.cluster)
+            },
+            labels: labelRecords
         )
 
         return NoteOutcome(

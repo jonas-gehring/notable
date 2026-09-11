@@ -17,6 +17,23 @@ struct MeetingsSettingsView: View {
     @AppStorage(DefaultsKey.inputDeviceUID.key) private var inputDeviceUID = DefaultsKey.inputDeviceUID.fallback
     @AppStorage(DefaultsKey.lastMeetingInputDevice.key) private var lastInputDevice = DefaultsKey.lastMeetingInputDevice.fallback
     @State private var inputDevices: [AudioDeviceInfo] = []
+    @AppStorage(DefaultsKey.screenSpeakerRecognition.key) private var screenSpeakers = DefaultsKey.screenSpeakerRecognition.fallback
+    @State private var probeMessage: String?
+
+    /// Stufe 0 of Spec 24: one text dump of the running call's window.
+    private func probe() {
+        guard let call = AppContainer.shared.detector.callProcess else {
+            probeMessage = ScreenProbe.ProbeError.noCallApp.errorDescription
+            return
+        }
+        do {
+            let url = try ScreenProbe.dump(bundleIDs: call.processBundleIDs, callName: call.sourceName)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            probeMessage = url.lastPathComponent
+        } catch {
+            probeMessage = error.localizedDescription
+        }
+    }
 
     /// Which engine a meeting will actually use given the toggle — Unified can't
     /// batch-transcribe, so it resolves to Parakeet v3.
@@ -62,6 +79,27 @@ struct MeetingsSettingsView: View {
 
             Section {
                 Toggle("Sprecher anhand genannter Namen benennen", isOn: $speakerNaming)
+            }
+
+            // Spec 24: the call shows who takes part and who is speaking.
+            Section {
+                Toggle("Sprecher am Bildschirm erkennen", isOn: $screenSpeakers)
+                LabeledContent("Unterstützte Apps") {
+                    Text(CallScreenAdapters.all.isEmpty
+                         ? String(localized: "noch keine — erst messen")
+                         : CallScreenAdapters.all.flatMap(\.bundleIDPrefixes).joined(separator: ", "))
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Call-Fenster jetzt auslesen") { probe() }
+                    if let probeMessage {
+                        Text(probeMessage).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                }
+            } header: {
+                Text("Sprechererkennung am Bildschirm")
+            } footer: {
+                Text("Liest während einer Aufnahme, der du zugestimmt hast, nur das Fenster des Calls — wer teilnimmt und wer gerade spricht — über die Bedienungshilfen, die Notable fürs Einfügen ohnehin hat. Es wird kein Bild gespeichert, nur Namen und Zeiten. Welche App das hergibt, zeigt erst eine Messung im echten Call: der Knopf schreibt den Aufbau des Call-Fensters als Text nach ~/Library/Logs/Notable/screen-probe.")
             }
 
             Section {

@@ -68,6 +68,9 @@ actor RecordingStore {
         /// Markdown file is a projection, so anything only in the file is lost
         /// on the next rename.
         var attendees: [String] = []
+        /// Who the call window showed (Spec 24) — separate from `attendees`,
+        /// because "invited" and "was there" are different statements.
+        var participants: [String] = []
     }
 
     struct Segment: Sendable {
@@ -75,6 +78,37 @@ actor RecordingStore {
         var start: TimeInterval
         var end: TimeInterval?
         var text: String
+        /// The label the diarizer minted (Spec 24); `speaker` is what is shown.
+        /// nil on segments written before it existed — nothing is estimated.
+        var cluster: String? = nil
+    }
+
+    /// A name for one cluster, and where it came from (Spec 24).
+    struct SpeakerLabelRecord: Sendable, Equatable {
+        var cluster: String
+        /// nil: anonymous on purpose.
+        var name: String?
+        var source: SpeakerLabel.Source
+    }
+
+    /// One speaker of a meeting, as the correction dialog lists it.
+    struct SpeakerLabel: Sendable, Equatable, Identifiable {
+        enum Source: String, Sendable {
+            case llm
+            case screen
+            case user
+        }
+
+        /// The minted label — or, for a meeting from before Spec 24, the name it shows.
+        var cluster: String
+        var name: String
+        /// nil: never named.
+        var source: Source?
+        var segmentCount: Int
+        var seconds: TimeInterval
+
+        var id: String { cluster }
+        var isLocalUser: Bool { cluster == SpeakerNameResolver.micSpeakerLabel }
     }
 
     /// One recording, reduced to what the statistics layer reads. A struct rather
@@ -210,8 +244,9 @@ actor RecordingStore {
         INSERT INTO recordings
             (id, kind, started_at, ended_at, title, calendar_event_id, markdown_path,
              summary, subtitle, folder, title_is_auto, user_notes, word_count,
-             engine, latency_ms, source_app, enhanced, raw_text, calendar_event_title, attendees)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+             engine, latency_ms, source_app, enhanced, raw_text, calendar_event_title, attendees,
+             participants)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
         """
         try db().run(sql) { s in
             s.bind(1, recording.id)
@@ -234,13 +269,14 @@ actor RecordingStore {
             s.bind(18, recording.rawText)
             s.bind(19, recording.calendarEventTitle)
             s.bind(20, recording.attendees.isEmpty ? nil : recording.attendees.joined(separator: "\n"))
+            s.bind(21, recording.participants.isEmpty ? nil : recording.participants.joined(separator: "\n"))
         }
     }
 
     func insert(_ segment: Segment, recordingID: String) throws {
         let sql = """
-        INSERT INTO segments (recording_id, speaker, start_seconds, end_seconds, text)
-        VALUES (?1, ?2, ?3, ?4, ?5)
+        INSERT INTO segments (recording_id, speaker, start_seconds, end_seconds, text, cluster)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
         """
         try db().run(sql) { s in
             s.bind(1, recordingID)
@@ -248,17 +284,124 @@ actor RecordingStore {
             s.bind(3, segment.start)
             s.bind(4, segment.end)
             s.bind(5, segment.text)
+            s.bind(6, segment.cluster)
         }
     }
 
-    /// Atomic insert of a meeting with all its segments — a partial write
-    /// must not leave orphaned rows.
-    func insertMeeting(_ recording: Recording, segments: [Segment]) throws {
+    /// Atomic insert of a meeting with all its segments and speaker names — a
+    /// partial write must not leave orphaned rows.
+    func insertMeeting(_ recording: Recording, segments: [Segment], labels: [SpeakerLabelRecord] = []) throws {
         try db().transaction {
             try insert(recording)
             for segment in segments {
                 try insert(segment, recordingID: recording.id)
             }
+            try recordSpeakerLabels(labels, recordingID: recording.id)
+        }
+    }
+
+    // MARK: - Speakers (Spec 24, Stufe 4)
+
+    /// Where each name came from. **`user` outranks everything**: an automatic
+    /// source never overwrites a name the user gave — that is what makes a
+    /// correction hold.
+    func recordSpeakerLabels(_ labels: [SpeakerLabelRecord], recordingID: String) throws {
+        let connection = try db()
+        try connection.transaction {
+            for label in labels {
+                try connection.run("""
+                INSERT INTO speaker_labels (recording_id, cluster, name, source) VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(recording_id, cluster) DO UPDATE SET name = excluded.name, source = excluded.source
+                WHERE speaker_labels.source <> 'user' OR excluded.source = 'user'
+                """) { s in
+                    s.bind(1, recordingID)
+                    s.bind(2, label.cluster)
+                    s.bind(3, label.name)
+                    s.bind(4, label.source.rawValue)
+                }
+            }
+        }
+    }
+
+    /// The speakers of a meeting, first appearance first. A meeting from before
+    /// Spec 24 has no clusters; it lists the names it shows.
+    func speakerLabels(for recordingID: String) throws -> [SpeakerLabel] {
+        let connection = try db()
+        let sources = try connection.query(
+            "SELECT cluster, source FROM speaker_labels WHERE recording_id = ?1",
+            bind: { $0.bind(1, recordingID) },
+            row: { (cluster: $0.text(0), source: $0.text(1)) }
+        ).reduce(into: [String: SpeakerLabel.Source]()) { $0[$1.cluster] = SpeakerLabel.Source(rawValue: $1.source) }
+        return try connection.query(
+            """
+            SELECT COALESCE(cluster, speaker) AS label, MAX(speaker), COUNT(*),
+                   SUM(MAX(COALESCE(end_seconds, start_seconds) - start_seconds, 0)), MIN(start_seconds)
+            FROM segments
+            WHERE recording_id = ?1 AND COALESCE(cluster, speaker) IS NOT NULL
+            GROUP BY label ORDER BY MIN(start_seconds)
+            """,
+            bind: { $0.bind(1, recordingID) },
+            row: { s in
+                let cluster = s.text(0)
+                return SpeakerLabel(cluster: cluster, name: s.string(1) ?? cluster, source: sources[cluster],
+                                    segmentCount: s.int(2) ?? 0, seconds: s.double(3) ?? 0)
+            }
+        )
+    }
+
+    /// Names a speaker; an empty name makes them anonymous again (their minted
+    /// label). One transaction; `"Ich"` stays fixed.
+    func renameSpeaker(recordingID: String, cluster: String, to name: String) throws {
+        guard cluster != SpeakerNameResolver.micSpeakerLabel else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let connection = try db()
+        try connection.transaction {
+            try adoptLegacyCluster(cluster, recordingID: recordingID, connection: connection)
+            try connection.run("UPDATE segments SET speaker = ?3 WHERE recording_id = ?1 AND cluster = ?2") { s in
+                s.bind(1, recordingID)
+                s.bind(2, cluster)
+                s.bind(3, trimmed.isEmpty ? cluster : trimmed)
+            }
+            try recordSpeakerLabels([SpeakerLabelRecord(cluster: cluster, name: trimmed.isEmpty ? nil : trimmed, source: .user)],
+                                    recordingID: recordingID)
+        }
+    }
+
+    /// Two labels, one person: `cluster`'s segments join `target` under its name.
+    func mergeSpeaker(recordingID: String, cluster: String, into target: String) throws {
+        let mic = SpeakerNameResolver.micSpeakerLabel
+        guard cluster != target, cluster != mic, target != mic else { return }
+        let connection = try db()
+        try connection.transaction {
+            try adoptLegacyCluster(cluster, recordingID: recordingID, connection: connection)
+            try adoptLegacyCluster(target, recordingID: recordingID, connection: connection)
+            let targetName = try connection.queryOne(
+                "SELECT speaker FROM segments WHERE recording_id = ?1 AND cluster = ?2 LIMIT 1",
+                bind: { $0.bind(1, recordingID); $0.bind(2, target) },
+                row: { $0.string(0) }
+            ) ?? target
+            try connection.run("UPDATE segments SET cluster = ?3, speaker = ?4 WHERE recording_id = ?1 AND cluster = ?2") { s in
+                s.bind(1, recordingID)
+                s.bind(2, cluster)
+                s.bind(3, target)
+                s.bind(4, targetName)
+            }
+            try connection.run("DELETE FROM speaker_labels WHERE recording_id = ?1 AND cluster = ?2") { s in
+                s.bind(1, recordingID)
+                s.bind(2, cluster)
+            }
+            try recordSpeakerLabels([SpeakerLabelRecord(cluster: target, name: targetName == target ? nil : targetName, source: .user)],
+                                    recordingID: recordingID)
+        }
+    }
+
+    /// A meeting from before Spec 24 has no cluster column filled in: the label
+    /// it shows becomes its cluster the moment the user edits it. Not an
+    /// estimate — it is exactly what the note displayed.
+    private func adoptLegacyCluster(_ label: String, recordingID: String, connection: SQLiteConnection) throws {
+        try connection.run("UPDATE segments SET cluster = speaker WHERE recording_id = ?1 AND cluster IS NULL AND speaker = ?2") { s in
+            s.bind(1, recordingID)
+            s.bind(2, label)
         }
     }
 
@@ -272,7 +415,7 @@ actor RecordingStore {
     private static let recordingColumns = """
     id, kind, started_at, ended_at, title, calendar_event_id, markdown_path, summary, \
     subtitle, folder, title_is_auto, user_notes, word_count, engine, latency_ms, \
-    source_app, enhanced, raw_text, calendar_event_title, attendees
+    source_app, enhanced, raw_text, calendar_event_title, attendees, participants
     """
 
     private static func readRecording(_ s: SQLiteConnection.Statement) -> Recording {
@@ -296,7 +439,8 @@ actor RecordingStore {
             enhanced: s.bool(16),
             rawText: s.string(17),
             calendarEventTitle: s.string(18),
-            attendees: s.string(19)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? []
+            attendees: s.string(19)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? [],
+            participants: s.string(20)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? []
         )
     }
 
@@ -325,7 +469,7 @@ actor RecordingStore {
     func segments(for recordingID: String) throws -> [Segment] {
         try db().query(
             """
-            SELECT speaker, start_seconds, end_seconds, text FROM segments
+            SELECT speaker, start_seconds, end_seconds, text, cluster FROM segments
             WHERE recording_id = ?1 ORDER BY start_seconds ASC
             """,
             bind: { $0.bind(1, recordingID) },
@@ -334,7 +478,8 @@ actor RecordingStore {
                     speaker: s.string(0),
                     start: s.double(1) ?? 0,
                     end: s.double(2),
-                    text: s.text(3)
+                    text: s.text(3),
+                    cluster: s.string(4)
                 )
             }
         )

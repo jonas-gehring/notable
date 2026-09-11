@@ -327,3 +327,47 @@ CREATE TABLE speaker_labels (
    Wieder aufnehmen nur, falls Treffen vor Ort und Telefonate zum Hauptfall werden.
 3. **Kurze Hörprobe je Sprecher** in Stufe 4 (5 s aus dem Archiv) — hilft beim
    Erkennen, geht aber nur, solange das Archiv existiert.
+
+## 9. Stand des Baus (2026-09-11)
+
+Entschieden am 2026-09-11: der Schalter „Sprecher am Bildschirm erkennen" startet
+**an** (Weg A, Bedienungshilfen); Weg B fragt beim ersten Bedarf. Gebaut wird **ohne
+geratene Adapter** — Stufe 0 misst, erst dann entstehen sie.
+
+**Gebaut:**
+
+- **Stufe 0, das Werkzeug:** Einstellungen → Meetings → „Call-Fenster jetzt auslesen"
+  schreibt den Bedienungshilfen-Baum des laufenden Calls als Text nach
+  `~/Library/Logs/Notable/screen-probe/` (Rollen, Titel, Beschreibungen, Werte; kein
+  Bild), mit Elementzahl und Dauer gegen das 50-ms-Budget. Liefert ein Browser weniger
+  als 200 Elemente, setzt es `AXManualAccessibility` und liest noch einmal — das ist
+  selbst Teil der Messung. Die **Kalender-Teilnehmer** werden je Termin geloggt: roh,
+  übernommen, verworfen je Grund (Namen privat).
+- **Stufe 1:** `SpeakerClusterCleanup` auf den Embeddings, die `MeetingPipeline` bisher
+  wegwarf. Klein = unter 8 s *und* unter 3 %; zwei große Cluster werden nie
+  verschmolzen. Die Payhawk-Form endet im Test bei drei Labels.
+- **Stufe 2 und 3, pur und getestet:** `ScreenTimeline` (nur Intervalle mit genau einem
+  hervorgehobenen Namen), `ScreenRoster` (Sprecherzahl für die Diarisierung, der
+  1:1-Fall), `ScreenSpeakerAssignment` (60 %/10 s/30 %, Zusammenführen bei zwei
+  Clustern mit einem Namen, segmentweise bei einem Cluster mit zwei Namen, der eigene
+  Name nie Ziel), `ScreenSelfCheck` (Verzögerung aus der eigenen Stimme, unter 70 %
+  Übereinstimmung wird Stufe 3 für das Meeting nicht angewendet).
+- **Das Gerüst:** `CallScreenObserver` (eigene Queue, 1 Hz, Budget mit Halbierung),
+  `screen.jsonl` im Spool, von der Wiederherstellung gelesen.
+- **Die Teilnehmer vom Bildschirm** stehen in der Notiz als „Im Call: …" unter „## Teilnehmer" und als `participants:` im Kopf, getrennt von „Eingeladen" — und gehen als Kandidaten an die Namenszuordnung durchs Modell, die nur noch Labels bekommt, die der Bildschirm offenließ.
+- **Stufe 4:** Migration 5 (`segments.cluster`, `recordings.participants`,
+  `speaker_labels`), Umbenennen und Zusammenführen in einer Transaktion, danach neu
+  projiziert; ein Sprecher-Dialog im Notizen-Fenster mit Herkunft, Vorschlägen aus
+  Kalender und Call, „Zusammenführen" und dem Angebot „Neu zusammenfassen".
+
+**Nicht gebaut, weil es an der Messung hängt:**
+
+- **Die Adapter für Teams, Zoom und Meet.** `CallScreenAdapters.all` ist leer; ohne
+  Adapter beobachtet der Observer nichts, und alles ab Stufe 2 bleibt folgenlos.
+  Genau so gewollt: ein Adapter, der die falsche Kachel liest, schreibt einen
+  selbstsicheren falschen Namen.
+- **Die Schwellen von Stufe 1** sind Startwerte. `MeetingReplayTests` spielt das Archiv
+  durch und druckt die Label-Statistik vorher/nachher
+  (`TEST_RUNNER_NOTABLE_REPLAY=1 xcodebuild … -only-testing:NotableTests/MeetingReplayTests`).
+- **Weg B (Texterkennung)** und die Meldung „Adapter liefert seit drei Meetings nichts"
+  — beide setzen einen Adapter voraus.

@@ -11,6 +11,9 @@ enum MarkdownProjector {
         /// actually heard: an invitation is not attendance, and the note must
         /// not claim someone spoke because they were on the list.
         var attendees: [String] = []
+        /// Who the call window showed (Spec 24). Separate from `attendees` for
+        /// the same reason: "invited" and "was there" are different statements.
+        var participants: [String] = []
         var segments: [(speaker: String?, text: String)]
         var summary: String?
         /// The user's own free-text notes, kept verbatim as a safety copy (and
@@ -52,6 +55,12 @@ enum MarkdownProjector {
                 lines.append("  - \"\(yamlEscaped(attendee))\"")
             }
         }
+        if !note.participants.isEmpty {
+            lines.append("participants:")
+            for participant in note.participants {
+                lines.append("  - \"\(yamlEscaped(participant))\"")
+            }
+        }
         let speakers = Self.speakers(in: note)
         if !speakers.isEmpty {
             lines.append("speakers:")
@@ -68,11 +77,14 @@ enum MarkdownProjector {
         // Who was there, right under the title: the first question anyone asks
         // of a meeting note a week later, and it used to be answerable only by
         // reading the whole transcript for speaker labels.
-        if !note.attendees.isEmpty || !speakers.isEmpty {
+        if !note.attendees.isEmpty || !note.participants.isEmpty || !speakers.isEmpty {
             lines.append("## Teilnehmer")
             lines.append("")
             if !note.attendees.isEmpty {
                 lines.append("Eingeladen: " + note.attendees.joined(separator: ", "))
+            }
+            if !note.participants.isEmpty {
+                lines.append("Im Call: " + note.participants.joined(separator: ", "))
             }
             if !speakers.isEmpty {
                 lines.append("Im Transkript: " + speakers.joined(separator: ", "))

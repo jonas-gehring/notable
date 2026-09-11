@@ -56,6 +56,10 @@ enum SpoolStore {
         /// (or a deferred, recovery-bound meeting) keeps them together with the
         /// recording they belong to.
         var notesURL: URL { directory.appendingPathComponent("notes.md") }
+        /// What the call window showed (Spec 24): one `ScreenObservation` per
+        /// line — names and times, never an image. Beside the audio so recovery
+        /// can still assign speakers; the archive keeps it, it is tiny.
+        var screenURL: URL { directory.appendingPathComponent("screen.jsonl") }
         /// Written the moment the note's Markdown file exists on disk — see
         /// ``markNoteWritten(_:)``.
         var doneURL: URL { directory.appendingPathComponent("note-written") }
@@ -144,6 +148,29 @@ enum SpoolStore {
         else { return }
         change(&meta)
         try? JSONEncoder().encode(meta).write(to: session.metaURL, options: .atomic)
+    }
+
+    /// Appends one observation. Called once a second from the observer's queue;
+    /// a line that fails to write costs one second of evidence, never the meeting.
+    static func appendScreenObservation(_ observation: ScreenObservation, to session: Session) {
+        guard var line = try? JSONEncoder().encode(observation) else { return }
+        line.append(0x0A)
+        if let handle = try? FileHandle(forWritingTo: session.screenURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: line)
+        } else {
+            try? line.write(to: session.screenURL)
+        }
+    }
+
+    /// Every observation that still parses — a torn last line after a crash is
+    /// skipped, not fatal.
+    static func readScreenObservations(_ session: Session) -> [ScreenObservation] {
+        guard let text = try? String(contentsOf: session.screenURL, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap {
+            try? JSONDecoder().decode(ScreenObservation.self, from: Data($0.utf8))
+        }
     }
 
     static func remove(_ session: Session) {

@@ -159,6 +159,7 @@ final class NoteManager: ObservableObject {
             date: record.startedAt,
             calendarEventTitle: record.calendarEventTitle,
             attendees: record.attendees,
+            participants: record.participants,
             segments: segments.map { ($0.speaker, $0.text) },
             summary: record.summary,
             userNotes: record.userNotes
@@ -200,6 +201,30 @@ final class NoteManager: ObservableObject {
             purpose: .summary, recordingID: record.id, store: store
         )
         try await reproject(record.id)
+        await reload()
+    }
+
+    // MARK: - Sprecher (Spec 24, Stufe 4)
+
+    func speakers(of recording: RecordingStore.Recording) async -> [RecordingStore.SpeakerLabel] {
+        (try? await store.speakerLabels(for: recording.id)) ?? []
+    }
+
+    /// Names a speaker — or, with an empty name, makes them anonymous again. A
+    /// name the user gives outranks the screen and the model, and no later run
+    /// overwrites it. One transaction in the store, then the note is projected
+    /// again, as after a rename of the title.
+    func renameSpeaker(_ recording: RecordingStore.Recording, cluster: String, to name: String) async throws {
+        try await store.renameSpeaker(recordingID: recording.id, cluster: cluster, to: name)
+        try await reproject(recording.id)
+        await reload()
+    }
+
+    /// Two labels, one person — allowed for the user, never automatic from the
+    /// voice alone (Stufe 1 never merges two large clusters).
+    func mergeSpeaker(_ recording: RecordingStore.Recording, cluster: String, into target: String) async throws {
+        try await store.mergeSpeaker(recordingID: recording.id, cluster: cluster, into: target)
+        try await reproject(recording.id)
         await reload()
     }
 

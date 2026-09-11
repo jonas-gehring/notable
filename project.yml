@@ -157,6 +157,9 @@ targets:
       # (main-actor buffer, off-main write) that only a running test can check.
       - path: Sources/Notable/Meeting/LiveNotesController.swift
       - path: Sources/Notable/Meeting/SpeakerNameResolver.swift
+      # Spec 24: splinter cleanup and the pure half of reading the call window.
+      - path: Sources/Notable/Meeting/SpeakerClusterCleanup.swift
+      - path: Sources/Notable/Meeting/ScreenSpeakers.swift
       # Judges whether a captured track carried audio at all — the shape every
       # meeting-capture regression has taken so far.
       - path: Sources/Notable/Meeting/TrackSilence.swift

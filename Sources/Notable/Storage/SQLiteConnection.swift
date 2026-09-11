@@ -283,6 +283,7 @@ final class SQLiteConnection: @unchecked Sendable {
         SQLiteConnection.migration2_indexes,
         SQLiteConnection.migration3_fullTextSearch,
         SQLiteConnection.migration4_attendees,
+        SQLiteConnection.migration5_speakers,
     ]
 
     /// Every table in its **current** shape, plus the ADD COLUMNs that lift a
@@ -315,7 +316,8 @@ final class SQLiteConnection: @unchecked Sendable {
             enhanced INTEGER,
             raw_text TEXT,
             calendar_event_title TEXT,
-            attendees TEXT
+            attendees TEXT,
+            participants TEXT
         )
         """)
         try db.execute("""
@@ -325,7 +327,8 @@ final class SQLiteConnection: @unchecked Sendable {
             speaker TEXT,
             start_seconds REAL NOT NULL,
             end_seconds REAL,
-            text TEXT NOT NULL
+            text TEXT NOT NULL,
+            cluster TEXT
         )
         """)
         try db.execute("""
@@ -451,6 +454,34 @@ final class SQLiteConnection: @unchecked Sendable {
     /// in a SQLite browser.
     private static func migration4_attendees(_ db: SQLiteConnection) throws {
         try db.addColumn("attendees", type: "TEXT", to: "recordings")
+    }
+
+    /// Spec 24, Stufe 4: speaker corrections that hold.
+    ///
+    /// - `segments.cluster` — the label the diarizer minted ("Sprecher 3").
+    ///   `segments.speaker` keeps holding the **displayed** name, so FTS,
+    ///   search, chat and the Markdown projection stay as they are; without the
+    ///   cluster nobody could tell, after a rename, which segments belong
+    ///   together.
+    /// - `recordings.participants` — who the call window showed, `\n`-separated.
+    ///   Separate from `attendees`: "invited" and "was there" are different
+    ///   statements.
+    /// - `speaker_labels` — where each name came from. `user` outranks
+    ///   everything and no later run overwrites it.
+    ///
+    /// Existing rows keep `NULL` in both new columns; nothing is estimated.
+    private static func migration5_speakers(_ db: SQLiteConnection) throws {
+        try db.addColumn("cluster", type: "TEXT", to: "segments")
+        try db.addColumn("participants", type: "TEXT", to: "recordings")
+        try db.execute("""
+        CREATE TABLE IF NOT EXISTS speaker_labels (
+            recording_id TEXT NOT NULL,
+            cluster TEXT NOT NULL,
+            name TEXT,
+            source TEXT NOT NULL CHECK (source IN ('llm', 'screen', 'user')),
+            PRIMARY KEY (recording_id, cluster)
+        )
+        """)
     }
 
     /// Idempotent `ADD COLUMN`: only "duplicate column name" is ignored.

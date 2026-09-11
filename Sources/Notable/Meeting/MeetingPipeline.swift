@@ -6,6 +6,10 @@ struct MeetingTranscriptSegment: Sendable {
     var start: TimeInterval
     var end: TimeInterval
     var text: String
+    /// The label the pipeline minted ("Ich", "Sprecher 3"), kept when a name
+    /// replaces `speaker` (Spec 24). Without it nobody could tell, after a
+    /// rename, which segments belong together.
+    var cluster: String? = nil
 }
 
 /// Post-meeting processing: VAD-segment the mic track ("Ich"), diarize the
@@ -166,41 +170,10 @@ enum MeetingPipeline {
         // cleanly. So VAD first, diarize speech only, then map back.
         var systemSegments: [(String, TimeInterval, TimeInterval)] = []
         if !systemSamples.isEmpty, let vad {
-            let speech = try await vad.segmentSpeech(systemSamples)
-
-            var compact: [Float] = []
-            var regions: [SpeechRegion] = []
-            let padding = [Float](repeating: 0, count: Int(compactionPadding * Double(sampleRate)))
-            // Growing this by += reallocates repeatedly, transiently holding 2×.
-            compact.reserveCapacity(speech.reduce(0) {
-                $0 + Int(($1.endTime - $1.startTime + compactionPadding) * Double(sampleRate))
-            })
-            for segment in speech {
-                let from = max(0, min(Int(segment.startTime * Double(sampleRate)), systemSamples.count))
-                let to = max(from, min(Int(segment.endTime * Double(sampleRate)), systemSamples.count))
-                guard to > from else { continue }
-                if !compact.isEmpty { compact += padding }
-                regions.append(SpeechRegion(
-                    compactStart: Double(compact.count) / Double(sampleRate),
-                    originalStart: segment.startTime,
-                    duration: Double(to - from) / Double(sampleRate)
-                ))
-                compact += systemSamples[from..<to]
-            }
-
-            if !compact.isEmpty {
-                let models = try await DiarizerModels.downloadIfNeeded(to: ModelInventory.directory(.diarizer))
-                let diarizer = DiarizerManager(config: Self.diarizerConfig(expectedSpeakers: expectedSpeakers))
-                diarizer.initialize(models: models)
-                defer { diarizer.cleanup() }
-                let result = try diarizer.performCompleteDiarization(compact, sampleRate: sampleRate)
-                systemSegments = result.segments.flatMap { segment in
-                    mapToOriginal(
-                        start: TimeInterval(segment.startTimeSeconds),
-                        end: TimeInterval(segment.endTimeSeconds),
-                        regions: regions
-                    ).map { (segment.speakerId, $0.start, $0.end) }
-                }
+            let diarized = try await diarizeSystemTrack(systemSamples, vad: vad, expectedSpeakers: expectedSpeakers)
+            systemSegments = diarized.cleaned.flatMap { segment in
+                mapToOriginal(start: segment.start, end: segment.end, regions: diarized.regions)
+                    .map { (segment.label, $0.start, $0.end) }
             }
         }
 
@@ -225,9 +198,67 @@ enum MeetingPipeline {
                 speaker: spec.speaker,
                 start: spec.start,
                 end: spec.end,
-                text: text
+                text: text,
+                cluster: spec.speaker
             ))
         }
         return transcript
+    }
+
+    /// The system track, VAD-compacted, diarized, and cleaned of splinters
+    /// (Spec 24, Stufe 1) — on the compacted timeline, with the regions to map
+    /// it back. Split out so `MeetingReplayTests` can print the label
+    /// statistics before and after the cleanup on archived meetings.
+    ///
+    /// The track is mostly silence: it holds nothing while *I* speak. Handing
+    /// that to the diarizer destroys it — measured on identical audio, the
+    /// silence holes alone collapse a British male and an American female into
+    /// a single speaker, while the compacted signal separates them cleanly. So
+    /// VAD first, diarize speech only, then map back.
+    static func diarizeSystemTrack(
+        _ systemSamples: [Float],
+        vad: VadManager,
+        expectedSpeakers: Int?
+    ) async throws -> (raw: [SpeakerClusterCleanup.Segment], cleaned: [SpeakerClusterCleanup.Segment], regions: [SpeechRegion]) {
+        let sampleRate = PCMDownsampler.targetSampleRate
+        let speech = try await vad.segmentSpeech(systemSamples)
+
+        var compact: [Float] = []
+        var regions: [SpeechRegion] = []
+        let padding = [Float](repeating: 0, count: Int(compactionPadding * Double(sampleRate)))
+        // Growing this by += reallocates repeatedly, transiently holding 2×.
+        compact.reserveCapacity(speech.reduce(0) {
+            $0 + Int(($1.endTime - $1.startTime + compactionPadding) * Double(sampleRate))
+        })
+        for segment in speech {
+            let from = max(0, min(Int(segment.startTime * Double(sampleRate)), systemSamples.count))
+            let to = max(from, min(Int(segment.endTime * Double(sampleRate)), systemSamples.count))
+            guard to > from else { continue }
+            if !compact.isEmpty { compact += padding }
+            regions.append(SpeechRegion(
+                compactStart: Double(compact.count) / Double(sampleRate),
+                originalStart: segment.startTime,
+                duration: Double(to - from) / Double(sampleRate)
+            ))
+            compact += systemSamples[from..<to]
+        }
+        guard !compact.isEmpty else { return ([], [], regions) }
+
+        let models = try await DiarizerModels.downloadIfNeeded(to: ModelInventory.directory(.diarizer))
+        let diarizer = DiarizerManager(config: Self.diarizerConfig(expectedSpeakers: expectedSpeakers))
+        diarizer.initialize(models: models)
+        defer { diarizer.cleanup() }
+        let result = try diarizer.performCompleteDiarization(compact, sampleRate: sampleRate)
+        // The embeddings used to be dropped right here; the cleanup needs them.
+        let raw = result.segments.map {
+            SpeakerClusterCleanup.Segment(
+                label: $0.speakerId,
+                start: TimeInterval($0.startTimeSeconds),
+                end: TimeInterval($0.endTimeSeconds),
+                embedding: $0.embedding,
+                quality: $0.qualityScore
+            )
+        }
+        return (raw, SpeakerClusterCleanup.cleaned(raw), regions)
     }
 }

@@ -17,6 +17,7 @@ struct NoteListView: View {
     @StateObject private var notesEditor = NotesEditorProxy()
     @State private var busy = false
     @State private var chatNote: RecordingStore.Recording?
+    @State private var speakerNote: RecordingStore.Recording?
     @AppStorage(DefaultsKey.summarizationProvider.key) private var providerID = DefaultsKey.summarizationProvider.fallback
 
     var body: some View {
@@ -42,6 +43,10 @@ struct NoteListView: View {
         .onDisappear { noteManager.isEditingUserNotes = false }
         .sheet(item: $chatNote) { note in
             MeetingChatView(recording: note)
+        }
+        .sheet(item: $speakerNote) { note in
+            SpeakerEditorView(recording: note)
+                .environmentObject(noteManager)
         }
         .alert("Fehler", isPresented: errorBinding, presenting: errorMessage) { _ in
             Button("OK", role: .cancel) {}
@@ -129,6 +134,15 @@ struct NoteListView: View {
             .buttonStyle(.borderless)
             .help("Chat mit dem Meeting")
             .accessibilityLabel("Chat mit dem Meeting")
+
+            Button {
+                speakerNote = note
+            } label: {
+                Image(systemName: "person.2")
+            }
+            .buttonStyle(.borderless)
+            .help("Sprecher benennen")
+            .accessibilityLabel("Sprecher benennen")
 
             Button {
                 toggleNotes(note)

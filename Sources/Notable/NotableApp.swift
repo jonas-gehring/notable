@@ -109,6 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // volume, so with nothing to do this costs a `fileExists`.
         ModelStorageMigration.run()
         container.dictation.start()
+        // An unreachable notes folder is said now, and a lost folder icon put
+        // back — without creating anything (Spec 27).
+        container.notesFolder.refreshStatus()
 
         // Notification Center is the consent surface (Spec 09) — the delegate must
         // exist before anything is posted, and the authorization result decides
@@ -437,6 +440,7 @@ struct NotableApp: App {
             OnboardingView()
                 .environmentObject(AppContainer.shared.permissions)
                 .environmentObject(AppContainer.shared.dictation)
+                .environmentObject(AppContainer.shared.notesFolder)
         }
         .windowResizability(.contentSize)
 
@@ -647,8 +651,17 @@ struct MenuContentView: View {
             Button("Notizen verwalten…") { open("notes") }
             Button("Durchsuchen…") { open("search") }
             Button("Notizen-Ordner öffnen") {
-                try? notesFolder.ensureExists()
-                NSWorkspace.shared.open(notesFolder.folderURL)
+                do {
+                    try notesFolder.ensureExists()
+                    NSWorkspace.shared.open(notesFolder.folderURL)
+                } catch {
+                    // To the page whose red line says why (Spec 27 §3.4).
+                    AppContainer.shared.settingsRoute.requested = .general
+                    open("settings")
+                }
+            }
+            if let error = notesFolder.lastError {
+                Text(error)
             }
         }
         // Top level, not buried in the submenu: the statistics line above is the

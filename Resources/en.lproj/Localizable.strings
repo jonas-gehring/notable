@@ -395,7 +395,6 @@
 "Notizen durchsuchen" = "Search notes";
 "Notizen gehören zu einer laufenden Aufnahme." = "Notes belong to a running recording.";
 "Notizen kommen als „Eigene Notizen“ in die Notiz und in die Zusammenfassung." = "Your notes go into the note as “Eigene Notizen” and into the summary.";
-"Notizen liegen in Dokumente/Notable" = "Notes live in Documents/Notable";
 "Notizen verwalten…" = "Manage notes…";
 "Notizen während des Calls" = "Notes during the call";
 "Notizen zum Meeting…" = "Notes for the meeting…";
@@ -715,3 +714,20 @@
 "Neu in %@" = "New in %@";
 "automatisch" = "automatically";
 "von Hand" = "by hand";
+
+/* Spec 27 — Notizen-Ordner */
+"Notizen liegen in %@" = "Notes live in %@";
+"Hier legt Notable jede Meeting-Notiz als Markdown-Datei ab." = "This is where Notable keeps every meeting note as a Markdown file.";
+"Der Ordner ist angelegt." = "The folder is in place.";
+"Ordner anlegen" = "Create folder";
+"Wird über iCloud synchronisiert" = "Synced via iCloud";
+"Nur auf diesem Mac" = "Only on this Mac";
+"iCloud Drive ist aus — Notizen-Ordner nicht erreichbar." = "iCloud Drive is off — the notes folder is unreachable.";
+"Notizen-Ordner nicht erreichbar: %@" = "Notes folder unreachable: %@";
+"Symbol am Notizen-Ordner" = "Icon on the notes folder";
+"In iCloud Drive verschieben…" = "Move to iCloud Drive…";
+"Notizen in iCloud Drive verschieben?" = "Move notes to iCloud Drive?";
+"Verschieben" = "Move";
+"%lld Notizen und %lld Ordner ziehen nach iCloud Drive › %@. Gespeicherte Pfade werden mitgeführt." = "%lld notes and %lld folders move to iCloud Drive › %@. Stored paths follow them.";
+"Während eines Meetings oder einer Notiz in Arbeit wird nichts verschoben." = "Nothing is moved during a meeting or while a note is being produced.";
+"Das Symbol wird nur gesetzt, wo kein eigenes ist, und beim Wechsel vom alten Ordner wieder entfernt. Andere Geräte zeigen es womöglich nicht — iCloud trägt eigene Ordnersymbole unzuverlässig mit." = "The icon is only set where there is no custom one, and removed from the old folder when you switch. Other devices may not show it — iCloud carries custom folder icons unreliably.";

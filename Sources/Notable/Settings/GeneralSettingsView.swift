@@ -14,6 +14,10 @@ struct GeneralSettingsView: View {
     @AppStorage(AppLanguage.storageKey) private var languageRaw = AppLanguage.system.rawValue
     @AppStorage(UpdateInstaller.automaticInstallKey) private var automaticInstall = true
     @State private var showRelaunchHint = false
+    @AppStorage(DefaultsKey.notesFolderIcon.key) private var folderIcon = DefaultsKey.notesFolderIcon.fallback
+    @State private var relocationPlan: NotesFolderManager.RelocationPlan?
+    @State private var relocationError: String?
+    @State private var relocating = false
 
     var body: some View {
         Form {
@@ -36,18 +40,7 @@ struct GeneralSettingsView: View {
                 Text("„Systemsprache“ folgt der Sprachreihenfolge in den Systemeinstellungen; kennt Notable die Sprache nicht, zeigt es English.")
             }
 
-            Section {
-                LabeledContent("Notizen-Ordner") {
-                    HStack {
-                        Text(notesFolder.folderURL.path)
-                            .truncationMode(.middle)
-                            .lineLimit(1)
-                        Button("Ändern…") {
-                            notesFolder.chooseFolder()
-                        }
-                    }
-                }
-            }
+            notesFolderSection
 
             Section {
                 Toggle("Bei Anmeldung starten", isOn: $launchAtLogin)
@@ -105,6 +98,84 @@ struct GeneralSettingsView: View {
     }
 
     private func relaunch() { AppRelauncher.relaunch() }
+
+    // MARK: - Notizen-Ordner (Spec 27)
+
+    /// Where the notes are, in Finder's names, and whether they reach other
+    /// devices — instead of the raw path, which here read
+    /// `/Users/…/Library/Mobile Documents/com~apple~CloudDocs/Codus/Meetings`.
+    private var notesFolderSection: some View {
+        Section {
+            HStack(spacing: 10) {
+                Image(nsImage: notesFolder.icon)
+                    .resizable()
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(notesFolder.readablePath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(notesFolder.sync.label)
+                        .font(.caption)
+                        .foregroundStyle(notesFolder.sync == .iCloudDriveOff ? .red : .secondary)
+                }
+                Spacer()
+                Button("Im Finder zeigen") {
+                    NSWorkspace.shared.activateFileViewerSelecting([notesFolder.folderURL])
+                }
+                .disabled(!notesFolder.exists)
+                Button("Ändern…") { notesFolder.chooseFolder() }
+            }
+            if let error = notesFolder.lastError, notesFolder.sync != .iCloudDriveOff {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+            Toggle("Symbol am Notizen-Ordner", isOn: $folderIcon)
+                .onChange(of: folderIcon) { _, _ in notesFolder.applyIcon() }
+            if notesFolder.canMoveToICloudDrive {
+                HStack {
+                    Button("In iCloud Drive verschieben…") { relocationPlan = notesFolder.relocationPlan() }
+                        .disabled(relocating)
+                    if relocating { ProgressView().controlSize(.small) }
+                }
+            }
+            if let relocationError {
+                Text(relocationError).font(.callout).foregroundStyle(.red)
+            }
+        } header: {
+            Text("Notizen-Ordner")
+        } footer: {
+            Text("Das Symbol wird nur gesetzt, wo kein eigenes ist, und beim Wechsel vom alten Ordner wieder entfernt. Andere Geräte zeigen es womöglich nicht — iCloud trägt eigene Ordnersymbole unzuverlässig mit.")
+        }
+        // The plan first, like the cleanup: what moves, and where to.
+        .confirmationDialog("Notizen in iCloud Drive verschieben?", isPresented: relocationBinding, presenting: relocationPlan) { plan in
+            Button("Verschieben") { relocate(plan) }
+            Button("Abbrechen", role: .cancel) {}
+        } message: { plan in
+            Text("\(plan.noteCount) Notizen und \(plan.folderCount) Ordner ziehen nach iCloud Drive › \(plan.target.lastPathComponent). Gespeicherte Pfade werden mitgeführt.")
+        }
+    }
+
+    private var relocationBinding: Binding<Bool> {
+        Binding(get: { relocationPlan != nil }, set: { if !$0 { relocationPlan = nil } })
+    }
+
+    /// Never while a note may be written into the folder being moved.
+    private func relocate(_ plan: NotesFolderManager.RelocationPlan) {
+        guard AppContainer.shared.meeting.state == .idle else {
+            relocationError = String(localized: "Während eines Meetings oder einer Notiz in Arbeit wird nichts verschoben.")
+            return
+        }
+        relocating = true
+        relocationError = nil
+        Task {
+            do {
+                try await notesFolder.relocate(plan)
+                await AppContainer.shared.notes.reload()
+            } catch {
+                relocationError = error.localizedDescription
+            }
+            relocating = false
+        }
+    }
 
     @ViewBuilder
     private var updatesSection: some View {

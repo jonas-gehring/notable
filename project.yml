@@ -95,6 +95,8 @@ targets:
       # query/run/transaction. Compiled into the test bundle because the store is.
       - path: Sources/Notable/Storage/SQLiteConnection.swift
       - path: Sources/Notable/Storage/RecordingStore.swift
+      # The notes folder's pure rules; the store's relocation uses them (Spec 27).
+      - path: Sources/Notable/Storage/NotesFolderRules.swift
       - path: Sources/Notable/Storage/MarkdownProjector.swift
       # Retention rules (issue #2). The planner is pure; the runner is the only
       # thing that deletes, and it is what the "statistics must not shrink"

@@ -368,6 +368,30 @@ actor RecordingStore {
         }
     }
 
+    /// The whole notes folder moved (Spec 27, Stufe 2): every stored path under
+    /// `oldRoot` follows it to `newRoot`, in **one** transaction — half a
+    /// rewrite would leave some notes pointing at the old place and some at the
+    /// new. Paths outside the folder are left alone. Returns how many moved.
+    @discardableResult
+    func relocateMarkdownPaths(from oldRoot: String, to newRoot: String) throws -> Int {
+        let connection = try db()
+        return try connection.transaction {
+            let rows = try connection.query(
+                "SELECT id, markdown_path FROM recordings WHERE markdown_path IS NOT NULL"
+            ) { s in (id: s.string(0) ?? "", path: s.string(1) ?? "") }
+            var moved = 0
+            for row in rows {
+                guard let rewritten = NotesRelocation.rewrite(row.path, from: oldRoot, to: newRoot) else { continue }
+                try connection.run("UPDATE recordings SET markdown_path = ?1 WHERE id = ?2") { s in
+                    s.bind(1, rewritten)
+                    s.bind(2, row.id)
+                }
+                moved += 1
+            }
+            return moved
+        }
+    }
+
     /// Moves a note between folders (Inbox → project). Caller moves the file.
     func updateLocation(folder: String?, markdownPath: String?, for id: String) throws {
         try db().run("UPDATE recordings SET folder = ?1, markdown_path = ?2 WHERE id = ?3") { s in

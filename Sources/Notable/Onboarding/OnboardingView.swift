@@ -8,6 +8,8 @@ import SwiftUI
 struct OnboardingView: View {
     @EnvironmentObject private var permissions: PermissionsManager
     @EnvironmentObject private var dictation: DictationController
+    @EnvironmentObject private var notesFolder: NotesFolderManager
+    @State private var folderExists = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openWindow) private var openWindow
     @AppStorage(DefaultsKey.didCompleteOnboarding.key) private var didComplete = DefaultsKey.didCompleteOnboarding.fallback
@@ -17,7 +19,7 @@ struct OnboardingView: View {
     private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     enum Page: Int, CaseIterable {
-        case welcome, microphone, hotkey, firstDictation, meetings, provider, done
+        case welcome, microphone, hotkey, firstDictation, meetings, provider, folder, done
 
         /// Names the dots in the footer, so jumping straight to a page is a
         /// choice rather than a guess.
@@ -29,6 +31,7 @@ struct OnboardingView: View {
             case .firstDictation: "Erstes Diktat"
             case .meetings: "Meetings"
             case .provider: "Zusammenfassung"
+            case .folder: "Notizen-Ordner"
             case .done: "Fertig"
             }
             return String(localized: key)
@@ -109,17 +112,60 @@ struct OnboardingView: View {
                     "Geht auch später — Diktat funktioniert ohne",
                 ],
                 action: ("Einstellungen öffnen…", { openSettings() }))
+        case .folder:
+            folderPage
         case .done:
             pageBody(
                 icon: "checkmark.circle.fill",
                 title: "Alles bereit",
                 text: "Notable wohnt in der Menüleiste.",
                 bullets: [
-                    "Notizen liegen in Dokumente/Notable",
+                    "Notizen liegen in \(notesFolder.readablePath)",
                     "Aufnahme, Statistik und Einstellungen im Menü",
                     "LLM-Verbesserung für Diktate bleibt aus, bis du sie einschaltest",
                 ])
         }
+    }
+
+    /// The folder is created *here* (Spec 27 §3.4): if macOS asks for access to
+    /// iCloud Drive or Documents, it asks now, with the reason on screen — not
+    /// while the first meeting's note is being written.
+    private var folderPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            pageHeader(icon: "folder", title: "Notizen-Ordner")
+            Text("Hier legt Notable jede Meeting-Notiz als Markdown-Datei ab.")
+                .foregroundStyle(Theme.textSubtle)
+            HStack(spacing: 10) {
+                Image(nsImage: notesFolder.icon)
+                    .resizable()
+                    .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(notesFolder.readablePath).foregroundStyle(Theme.textEmphasis)
+                    Text(notesFolder.sync.label).font(.caption).foregroundStyle(Theme.textSubtle)
+                }
+                Spacer()
+                Button("Ändern…") {
+                    notesFolder.chooseFolder()
+                    folderExists = notesFolder.exists
+                }
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
+            if folderExists {
+                Label("Der Ordner ist angelegt.", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.success)
+            } else {
+                Button("Ordner anlegen") {
+                    try? notesFolder.ensureExists() // the error is shown below
+                    folderExists = notesFolder.exists
+                }
+            }
+            if let error = notesFolder.lastError {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+        }
+        .onAppear { folderExists = notesFolder.exists }
     }
 
     private var firstDictationPage: some View {

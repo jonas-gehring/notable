@@ -580,6 +580,18 @@ final class MeetingController: ObservableObject {
         }
     }
 
+    /// The folder the note is about to be written into. A failure used to be
+    /// `try?`-ed away and surfaced only as a note that failed to write; now it
+    /// is named first (Spec 27 §3.4). The recording itself is not at stake: a
+    /// note that cannot be written keeps its spool.
+    private func ensureNotesFolder() {
+        do {
+            try notesFolder.ensureExists()
+        } catch {
+            statusMessage = String(localized: "Notizen-Ordner nicht erreichbar: \(error.localizedDescription)")
+        }
+    }
+
     /// The menu line while a quit waits for a note.
     func announceQuitAfterProcessing() {
         statusMessage = String(localized: "Beende nach Fertigstellung der Notiz …")
@@ -695,7 +707,7 @@ final class MeetingController: ObservableObject {
         statusMessage = String(localized: "Verarbeite Aufnahme…")
 
         let providerID = DefaultsKey.summarizationProvider.value()
-        try? notesFolder.ensureExists()
+        ensureNotesFolder()
         let folderURL = notesFolder.folderURL
 
         // A dropped tap buffer is lost audio, and losing it shortens the system
@@ -757,7 +769,7 @@ final class MeetingController: ObservableObject {
         isRecovering = true
         processingCount += 1
         statusMessage = String(localized: "Stelle unterbrochene Aufnahme wieder her…")
-        try? notesFolder.ensureExists()
+        ensureNotesFolder()
         let folderURL = notesFolder.folderURL
         let providerID = DefaultsKey.summarizationProvider.value()
         let event: CalendarMonitor.EventMatch? = meta.eventTitle.map {

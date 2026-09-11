@@ -33,7 +33,7 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [24](24-sprechererkennung.md) | **Sprechererkennung** — Teilnehmer und aktiver Sprecher vom Call-Bildschirm, Splitter auflösen, Korrektur, die hält | ½ T + S + S–M + M + M | Call-Oberflächen ändern sich mit jedem App-Update | 📋 Entwurf, braucht 23 |
 | [25](25-auto-update-das-wirklich-installiert.md) | **Updates, die sich tatsächlich installieren** — ruhiger Moment statt „kein Fenster offen", nichts vergessen, hinterher sagen | M | ein kaputtes Release installiert sich jetzt wirklich | gebaut; `test-update.sh` noch nicht gelaufen |
 | [26](26-notizen-einruecken.md) | **Einrücken/Ausrücken in Notizen** — verschachtelte Listen, Tab/⇧Tab, ⌘]/⌘[ | S–M + S | Drift im Markdown-Round-Trip | gebaut |
-| [27](27-notizen-ordner-icloud-und-symbol.md) | **Notizen-Ordner** — Notable-Symbol am Ordner, iCloud Drive als Vorgabe für neue Einrichtungen | S (+ S) | TCC beim ersten Zugriff ohne Open-Panel | 📋 Entwurf |
+| [27](27-notizen-ordner-icloud-und-symbol.md) | **Notizen-Ordner** — Notable-Symbol am Ordner, iCloud Drive als Vorgabe für neue Einrichtungen | S (+ S) | TCC beim ersten Zugriff ohne Open-Panel | gebaut, mit Stufe 2; TCC auf frischem Konto offen |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
 

@@ -162,3 +162,45 @@ Angeboten, nie automatisch.
    ohne Stufe 2 zeigen sie ins Leere. Deshalb ist es eine Entscheidung, keine Kür.
 2. **Symbol auch an einem selbst gewählten Ordner** (Default an) — oder nur am
    Vorgabe-Ordner, weil ein gewählter Ordner dem Nutzer gehört?
+
+## 8. Stand des Baus (2026-09-11)
+
+Stufe 1 (a–e) und Stufe 2 sind gebaut. Entschieden am 2026-09-11: Stufe 2 wird gebaut,
+und das Symbol kommt auch an einen selbst gewählten Ordner.
+
+**Gemessen auf diesem Mac:**
+
+- `FileManager.componentsToDisplay` liefert für den iCloud-Pfad
+  „… › Library › Mobile Documents › iCloud Drive › Codus › Meetings". Der lesbare Pfad
+  wird deshalb an der Wurzel geschnitten, deren Anzeige mit dem Pfad beginnt
+  (`NotesFolderDisplay`), nicht aus den rohen Komponenten gebaut.
+- `isUbiquitousItem` ist für `~/Documents` wahr („Schreibtisch & Dokumente" ist hier
+  eingeschaltet). „Wird über iCloud synchronisiert" stützt sich deshalb auf beides:
+  auf die Lage unter iCloud Drive *und* auf dieses Flag.
+- `notesFolderPath` ist hier gesetzt — die Migration fasst diesen Mac nicht an.
+
+**Abweichungen:**
+
+- **§3.4 behauptet, eine Notiz, deren Datei nicht geschrieben werden konnte, liege
+  trotzdem in SQLite. Das stimmt nicht.** `produceNote` schreibt die Markdown-Datei
+  mit `try` *vor* der Datenbank; scheitert das, bleibt die Aufnahme als Spool in
+  `spool-failed` und die Statuszeile nennt den Fehler. Den Kernpfad dafür umzubauen
+  (erst SQLite, dann projizieren, später nachprojizieren) ist eine eigene Änderung
+  und hier nicht gemacht. Gebaut ist, dass der Ordnerfehler **vorher** benannt wird.
+- **Auch die neue Vorgabe wird festgeschrieben**, nicht nur der alte Ordner: sonst
+  wanderte der Ordner, sobald iCloud Drive später ein- oder ausgeschaltet wird, und
+  neue Notizen lägen an einem anderen Ort als die alten.
+- **Umziehen verschiebt den ganzen Ordner mit einem `moveItem`** (iCloud Drive liegt
+  auf demselben Volume) und schreibt die Pfade danach in einer Transaktion um;
+  scheitert die Datenbank, zieht der Ordner zurück. Das Ziel ist nie ein bestehender
+  Ordner („Notable 2", …). Während eines Meetings oder einer Notiz in Arbeit wird
+  nichts verschoben.
+
+**Offen:**
+
+- **TCC beim ersten Zugriff ohne Open-Panel** (Risiko aus §5) ist nicht geprüft — das
+  braucht ein frisches Benutzerkonto. Der Ordner-Schritt im Onboarding legt den Ordner
+  in jedem Fall dort an, sodass eine Rückfrage im Zusammenhang käme.
+- **Das Symbol ist nicht im Finder angesehen.** Es wird beim ersten Start einer App mit
+  diesem Stand auf den gewählten Ordner gesetzt (`iCloud Drive/Codus/Meetings` hat
+  kein eigenes Symbol) — dort ist es zu prüfen.

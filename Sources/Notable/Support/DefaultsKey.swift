@@ -71,6 +71,14 @@ enum DefaultsKey {
     /// Name of the device the last meeting was recorded from, shown in Settings.
     static let lastMeetingInputDevice = DefaultsEntry(key: "lastMeetingInputDevice", fallback: "")
 
+    // MARK: Notizen-Ordner
+
+    /// Notable's mark on the notes folder in Finder (Spec 27).
+    static let notesFolderIcon = DefaultsEntry(key: "notesFolderIcon", fallback: true)
+    /// Which folder Notable put its icon on — the only way to tell its icon from
+    /// one the user designed (`FolderIconRule`). Empty means none.
+    static let notesFolderIconPath = DefaultsEntry(key: "notesFolderIconPath", fallback: "")
+
     // MARK: Zusammenfassung
 
     static let summarizationProvider = DefaultsEntry(

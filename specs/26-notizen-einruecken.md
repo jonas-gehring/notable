@@ -170,3 +170,27 @@ Implementierung je Begriff.)
   `NotesRichTextTests` unverändert grün.
 - Ein Spool mit verschachtelten `notes.md` wird nach einem Absturz wörtlich
   wiederhergestellt.
+
+## 7. Stand des Baus (2026-09-11)
+
+Stufen 1 und 2 sind gebaut. Abweichungen und Befunde:
+
+- **Eine Leerzeile beendet die Liste.** CommonMark würde „- a⏎⏎  - b" noch als
+  Kind lesen (lockere Liste); das Modell kennt keine leeren Listenpunkte, also ist die
+  Leerzeile Fließtext und der nächste Punkt Ebene 0. Einmal umgeschrieben, danach
+  stabil — ein Test hält das fest.
+- **Return und Backspace mit Ebene sind pure Funktionen** (`leavingEmptyItem`,
+  `backspacingAtLineStart`) statt Logik im Proxy, damit sie getestet sind. Die
+  Tastenbindung selbst (`insertTab:`/`insertBacktab:` in `NSTextView`) ist nicht
+  automatisch getestet — nur, was dahinter passiert.
+- **Die Formatleiste ist mitgewandert**, nicht nur der Editor: `NotesFormatBar` und
+  `NotesEditorShortcuts` in `NotesTextEditor.swift`, benutzt vom Live-Fenster und vom
+  Notizen-Fenster. Ohne sie ließe sich im Notizen-Fenster keine Liste anlegen.
+- **Drei Tooltips waren nie übersetzt** („Titel (⌘⌥1)", „Nummerierte Liste (⌘⌥5)",
+  „Checkliste (⌘⌥6)"): sie gingen als `String` in eine Hilfsfunktion. Jetzt
+  `LocalizedStringKey`, mit englischen Einträgen.
+- **Der Eigenschaftstest zieht Fließtext aus Wörtern, die nicht wie Markup
+  beginnen.** Fließtext, der mit „- " oder „1. " anfängt, lässt sich in diesem Format
+  gar nicht eindeutig schreiben — er wird beim nächsten Lesen ein Listenpunkt, und das
+  war vor der Verschachtelung genauso. Diesen Fall deckt der zweite Eigenschaftstest
+  ab (Idempotenz über beliebigen Text mit Markup-Bruchstücken).

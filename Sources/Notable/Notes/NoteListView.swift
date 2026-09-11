@@ -14,6 +14,7 @@ struct NoteListView: View {
     @State private var errorMessage: String?
     @State private var notesEditingID: String?
     @State private var draftNotes = ""
+    @StateObject private var notesEditor = NotesEditorProxy()
     @State private var busy = false
     @State private var chatNote: RecordingStore.Recording?
     @AppStorage(DefaultsKey.summarizationProvider.key) private var providerID = DefaultsKey.summarizationProvider.fallback
@@ -178,10 +179,14 @@ struct NoteListView: View {
             Text("Eigene Notizen (kommen als Header ins .md und fließen in die Zusammenfassung ein)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextEditor(text: $draftNotes)
-                .font(.body)
-                .frame(minHeight: 80)
+            // The live notes editor, not a plain TextEditor over raw Markdown:
+            // there, Tab typed a tab character that CommonMark reads as a code
+            // block (Spec 26, Stufe 2).
+            NotesFormatBar(editor: notesEditor)
+            NotesTextEditor(text: $draftNotes, proxy: notesEditor, isEditable: true)
+                .frame(height: 180)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+            NotesEditorShortcuts(editor: notesEditor)
             HStack {
                 Button("Speichern") {
                     perform { try await noteManager.saveUserNotes(draftNotes, for: note); notesEditingID = nil }

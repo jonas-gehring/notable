@@ -628,7 +628,7 @@
 "„Inbox“ ist reserviert." = "“Inbox” is reserved.";
 "„Systemaudio-Aufnahme“ ist der Ton der anderen — ein eigenes Recht, nicht die Bildschirmaufnahme. Ein Bild wird nie aufgezeichnet." = "“System Audio Recording” is the other side's sound — a right of its own, not Screen Recording. No picture is ever recorded.";
 "„Systemsprache“ folgt der Sprachreihenfolge in den Systemeinstellungen; kennt Notable die Sprache nicht, zeigt es English." = "“System language” follows the language order in System Settings; if Notable does not speak that language, it shows English.";
-"⌘⌥1–6 formatiert · ⌘⏎ hakt ab · ⌘T stempelt" = "⌘⌥1–6 formats · ⌘⏎ ticks off · ⌘T timestamps";
+"⌘⌥1–6 formatiert · Tab rückt ein · ⌘⏎ hakt ab · ⌘T stempelt" = "⌘⌥1–6 formats · Tab indents · ⌘⏎ ticks off · ⌘T timestamps";
 "⚠︎ %@" = "⚠︎ %@";
 
 /* MARK: - Modelle und Speicherplatz (Specs 20 und 21) */
@@ -687,3 +687,10 @@
 "Festgelegtes Gerät (nicht verbunden)" = "Pinned device (not connected)";
 "Zuletzt aufgenommen von" = "Last recorded from";
 "Automatisch: das Gerät, das der Call selbst benutzt, sonst der Systemstandard — außer dem eingebauten Mikrofon bei geschlossenem Deckel, das dann abgeschaltet ist. Ein Bluetooth-Headset wird für Meetings nur übernommen, wenn es schon aufnimmt, damit die Wiedergabe nicht in den Headset-Modus springt. Gilt auch fürs Diktat." = "Automatic: the device the call itself is using, otherwise the system default — except the built-in microphone with the lid closed, which is switched off then. For meetings a Bluetooth headset is only taken over when it is already recording, so playback does not drop into headset mode. Applies to dictation too.";
+
+/* Spec 26 — Einrücken in Notizen */
+"Titel (⌘⌥1)" = "Title (⌘⌥1)";
+"Nummerierte Liste (⌘⌥5)" = "Numbered list (⌘⌥5)";
+"Checkliste (⌘⌥6)" = "Checklist (⌘⌥6)";
+"Einrücken (⌘])" = "Indent (⌘])";
+"Ausrücken (⌘[)" = "Outdent (⌘[)";

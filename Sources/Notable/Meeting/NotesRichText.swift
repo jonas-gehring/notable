@@ -24,14 +24,23 @@ enum NotesRichText {
 
     /// Visible marker for a list block, including the tab the hanging indent
     /// aligns to. Empty for everything that has no marker.
-    static func marker(for block: NotesBlock, ordinal: Int = 1) -> String {
+    ///
+    /// The level is **visible text too** (Spec 26): one leading tab per level,
+    /// "\t\t•\tText" at level 2. That keeps the rule above intact — deleting the
+    /// leading tab outdents, exactly as deleting the marker ends the list. A
+    /// hidden level attribute would have been a second piece of hidden state.
+    static func marker(for block: NotesBlock, ordinal: Int = 1, indent: Int = 0) -> String {
+        let levels = block.isListItem ? String(repeating: "\t", count: max(0, indent)) : ""
         switch block {
-        case .bullet: return "•\t"
-        case .numbered: return "\(max(1, ordinal)).\t"
-        case .checkbox(let done): return done ? "☑\t" : "☐\t"
+        case .bullet: return levels + "•\t"
+        case .numbered: return levels + "\(max(1, ordinal)).\t"
+        case .checkbox(let done): return levels + (done ? "☑\t" : "☐\t")
         case .body, .title, .heading, .subheading: return ""
         }
     }
+
+    /// Width of one nesting level, and of the gap between marker and text.
+    static let indentStep: CGFloat = 18
 
     static func font(for block: NotesBlock) -> NSFont {
         switch block {
@@ -44,13 +53,16 @@ enum NotesRichText {
 
     /// Hanging indent for list items so wrapped lines line up under the text and
     /// not under the marker; a little air above headings so sections breathe.
-    static func paragraphStyle(for block: NotesBlock) -> NSParagraphStyle {
+    ///
+    /// At level *n* the leading tabs step the marker to `18·n`, and the tab after
+    /// it lands the text at `18·(n+1)` — which is also where wrapped lines start.
+    static func paragraphStyle(for block: NotesBlock, indent: Int = 0) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         if block.isListItem {
-            let indent: CGFloat = 18
-            style.headIndent = indent
+            let levels = max(0, indent) + 1
+            style.headIndent = indentStep * CGFloat(levels)
             style.firstLineHeadIndent = 0
-            style.tabStops = [NSTextTab(textAlignment: .left, location: indent)]
+            style.tabStops = (1...levels).map { NSTextTab(textAlignment: .left, location: indentStep * CGFloat($0)) }
             style.paragraphSpacing = 2
         }
         switch block {
@@ -64,10 +76,10 @@ enum NotesRichText {
         return style
     }
 
-    static func attributes(for block: NotesBlock) -> [NSAttributedString.Key: Any] {
+    static func attributes(for block: NotesBlock, indent: Int = 0) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font(for: block),
-            .paragraphStyle: paragraphStyle(for: block),
+            .paragraphStyle: paragraphStyle(for: block, indent: indent),
             .foregroundColor: NSColor.labelColor,
         ]
         // Only headings need the hidden marker; see the type comment.
@@ -81,13 +93,13 @@ enum NotesRichText {
 
     static func attributed(markdown: String) -> NSAttributedString {
         let lines = NotesMarkdown.parse(markdown)
+        // The same per-level count the Markdown gets — one rule, two renderings.
+        let ordinals = NotesMarkdown.ordinals(lines)
         let result = NSMutableAttributedString()
-        var ordinal = 0
         for (index, line) in lines.enumerated() {
-            if case .numbered = line.block { ordinal += 1 } else { ordinal = 0 }
             if index > 0 { result.append(NSAttributedString(string: "\n")) }
-            let rendered = marker(for: line.block, ordinal: ordinal) + line.text
-            result.append(NSAttributedString(string: rendered, attributes: attributes(for: line.block)))
+            let rendered = marker(for: line.block, ordinal: ordinals[index], indent: line.indent) + line.text
+            result.append(NSAttributedString(string: rendered, attributes: attributes(for: line.block, indent: line.indent)))
         }
         return result
     }
@@ -118,24 +130,56 @@ enum NotesRichText {
         return raw.flatMap(NotesBlock.init(headingCode:))
     }
 
-    /// Splits one rendered paragraph into its block kind and its text. The marker
-    /// wins; the heading hint only applies to a paragraph that carries no marker.
+    /// Splits one rendered paragraph into its block kind, level and text. The
+    /// marker wins; the heading hint only applies to a paragraph that carries no
+    /// marker. Leading tabs before a marker are the level — so "\t•\tText", which
+    /// a Tab keypress used to produce as body text with a literal "•" in it, now
+    /// reads as the sub-point it looks like.
     static func line(from paragraph: String, headingHint: NotesBlock?) -> NotesLine {
-        if paragraph.hasPrefix("☐\t") { return NotesLine(.checkbox(done: false), String(paragraph.dropFirst(2))) }
-        if paragraph.hasPrefix("☑\t") { return NotesLine(.checkbox(done: true), String(paragraph.dropFirst(2))) }
-        if paragraph.hasPrefix("•\t") { return NotesLine(.bullet, String(paragraph.dropFirst(2))) }
-        if let rest = numberedContent(of: paragraph) { return NotesLine(.numbered, rest) }
+        if let item = listItem(in: paragraph) {
+            return NotesLine(item.block, item.text, indent: min(item.levels, NotesMarkdown.maxIndent))
+        }
         return NotesLine(headingHint ?? .body, paragraph)
     }
 
-    /// "3.\ttext" → "text". Mirrors `NotesMarkdown`'s digit limit so a year at
-    /// the start of a line is not mistaken for a list marker.
-    private static func numberedContent(of paragraph: String) -> String? {
+    /// The list marker of a rendered paragraph, if it has one: its block, how
+    /// many leading tabs (levels) precede it, the marker's full UTF-16 length
+    /// including those tabs, and the text after it.
+    private static func listItem(in paragraph: String) -> (block: NotesBlock, levels: Int, length: Int, text: String)? {
+        let levels = paragraph.prefix(while: { $0 == "\t" }).count
+        let rest = paragraph.dropFirst(levels)
+        let block: NotesBlock
+        let markerLength: Int
+        if rest.hasPrefix("☐\t") {
+            (block, markerLength) = (.checkbox(done: false), 2)
+        } else if rest.hasPrefix("☑\t") {
+            (block, markerLength) = (.checkbox(done: true), 2)
+        } else if rest.hasPrefix("•\t") {
+            (block, markerLength) = (.bullet, 2)
+        } else if let digits = numberedDigits(of: rest) {
+            (block, markerLength) = (.numbered, digits + 2)
+        } else {
+            return nil
+        }
+        // Every character counted here is a single UTF-16 unit.
+        return (block, levels, levels + markerLength, String(rest.dropFirst(markerLength)))
+    }
+
+    /// Digit count of a "3.\t" marker. Mirrors `NotesMarkdown`'s digit limit so
+    /// a year at the start of a line is not mistaken for a list marker.
+    private static func numberedDigits(of paragraph: Substring) -> Int? {
         let digits = paragraph.prefix(while: \.isNumber)
         guard !digits.isEmpty, digits.count <= 3 else { return nil }
-        let afterDigits = paragraph.dropFirst(digits.count)
-        guard afterDigits.hasPrefix(".\t") else { return nil }
-        return String(afterDigits.dropFirst(2))
+        guard paragraph.dropFirst(digits.count).hasPrefix(".\t") else { return nil }
+        return digits.count
+    }
+
+    /// Whether a click at `offset` (UTF-16, from the paragraph start) lands on
+    /// a checkbox glyph — not on the leading tabs before it, and not on the text.
+    /// The one copy of that rule; the text view's click handler asks here.
+    static func isCheckboxHit(in paragraph: String, atOffset offset: Int) -> Bool {
+        guard let item = listItem(in: paragraph), case .checkbox = item.block else { return false }
+        return offset >= item.levels && offset < item.length
     }
 
     // MARK: - Caret mapping
@@ -186,13 +230,11 @@ enum NotesRichText {
         return offset
     }
 
-    /// UTF-16 length of the visible marker at the start of a rendered paragraph.
+    /// UTF-16 length of the visible marker at the start of a rendered paragraph,
+    /// including the leading tabs of its level — so a column still counts from
+    /// the first character *after* the marker.
     static func markerLength(of paragraph: String) -> Int {
-        if paragraph.hasPrefix("☐\t") || paragraph.hasPrefix("☑\t") || paragraph.hasPrefix("•\t") { return 2 }
-        if numberedContent(of: paragraph) != nil {
-            return paragraph.prefix(while: \.isNumber).count + 2
-        }
-        return 0
+        listItem(in: paragraph)?.length ?? 0
     }
 }
 

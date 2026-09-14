@@ -17,7 +17,9 @@ extension UsageRow {
             wordCount: record.wordCount,
             engine: record.engine,
             latencyMs: record.latencyMs,
-            sourceApp: record.sourceApp
+            sourceApp: record.sourceApp,
+            polisher: record.polisher,
+            polishMs: record.polishMs
         )
     }
 }

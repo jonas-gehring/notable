@@ -128,6 +128,9 @@ actor RecordingStore {
         let latencyMs: Int?
         let sourceApp: String?
         let enhanced: Bool
+        /// Which stage shaped the text last (Spec 32); nil before migration 6.
+        var polisher: String? = nil
+        var polishMs: Int? = nil
     }
 
     /// One provider round-trip's token spend, as stored.
@@ -828,7 +831,8 @@ actor RecordingStore {
     func usageRows(from: Date, to: Date) throws -> [UsageRecord] {
         try db().query(
             """
-            SELECT kind, started_at, ended_at, word_count, engine, latency_ms, source_app, enhanced
+            SELECT kind, started_at, ended_at, word_count, engine, latency_ms, source_app, enhanced,
+                   polisher, polish_ms
             FROM recordings
             WHERE started_at >= ?1 AND started_at < ?2
             ORDER BY started_at ASC
@@ -848,7 +852,9 @@ actor RecordingStore {
                     engine: s.string(4),
                     latencyMs: s.int(5),
                     sourceApp: s.string(6),
-                    enhanced: s.bool(7)
+                    enhanced: s.bool(7),
+                    polisher: s.string(8),
+                    polishMs: s.int(9)
                 )
             }
         )

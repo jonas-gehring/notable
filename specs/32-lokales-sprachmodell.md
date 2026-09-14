@@ -261,3 +261,44 @@ braucht, um das zu messen, was später tatsächlich läuft.
 
 **Tests:** `LocalPolishTests` 14 (neu, ohne Modell), `LocalModelProbeTests` 1 (opt-in,
 übersprungen). **Nicht verifiziert:** alles in §6, was ein laufendes Modell braucht (2–7).
+
+### Nachtrag: Statistik und Stufe 2 (2026-09-14)
+
+Auf Ansage „alles vollständig bauen" — Abweichungen 2 und 3 sind damit aufgehoben, die
+Messung aus §8 **nicht**: auch Stufe 2 bleibt aus, bis jemand sie einschaltet.
+
+- **Statistik** (§3.7, §3.8): Karte „Wer den Text geformt hat" unter „Details" —
+  Anteile Regeln / lokal / Befehl / CLI („Text verließ das Gerät") und Median/p95 von
+  `polish_ms` ab zehn Messungen. Alte Zeilen bleiben „Unbekannt".
+- **Einwilligung:** ein Schalter „Text aus der Ziel-App lesen (lokal)", aus. Er ist die
+  eine Einwilligung für alle drei Teile; ohne ihn liest Notable nichts, und die
+  Befehl-Taste wird gar nicht erst installiert. Nie in einem Passwortfeld
+  (`IsSecureEventInputEnabled`, `AXSecureTextField`), 250 ms Accessibility-Zeitgrenze.
+- **Kontext um den Cursor:** bis 500 Zeichen vor der Einfügestelle, auf ganze Wörter
+  geschnitten, gehen als „nur Kontext" markiert in den lokalen Prompt. Gespeichert
+  wird davon nichts.
+- **Spec 04 auf dem Gerät:** dritte Taste mit der Rolle `.command` (`HotkeyRouting`:
+  teilt sie sich eine Taste mit Diktat oder Verbessern, verliert der Befehl). Die
+  Aufnahme ist der Befehl, die Markierung das Material; `LocalPolisher.runCommand` mit
+  eigener Instruktion, 10 s, und `LocalPolish.acceptCommand` (kein Kommentar, kein
+  Code-Block, nie leer; umschließende Anführungszeichen fallen weg). Ersetzt wird per
+  ⌘V über die aktive Markierung — derselbe Einfügeweg mit derselben Zielprüfung wie ein
+  Diktat, also kein zweiter Schreibweg über `kAXSelectedTextAttribute`. Scheitert
+  etwas, bleibt die Markierung unangetastet und das HUD sagt es
+  (`localModelUnavailable`, `commandFailed`). HUD-Zustand „Führe Befehl aus…".
+  `polisher = "command"`, kein `llm_usage`-Eintrag — nichts verlässt das Gerät.
+- **Wörterbuch-Quelle C** (Spec 06): 30 s nach dem Einfügen liest Notable das Feld noch
+  einmal an der Einfügestelle. `TargetTextRules.corrections` nimmt nur eng gefasste
+  Korrekturen: mindestens drei Wörter, gleiche Wortzahl, erstes oder letztes Wort
+  gleich, höchstens drei Ersetzungen und nie mehr als ein Drittel. Treffer landen über
+  `PersonalDictionary.recordCorrection` als Vorschlag, nicht als Eintrag.
+
+**Abweichung:** CLAUDE.md nennt Spec 04 unter den festen Entscheidungen „off the table"
+— begründet mit der Datengrenze. Diese Fassung verlässt das Gerät nicht, ist aus und
+braucht zwei bewusste Schritte; CLAUDE.md ist trotzdem nicht angepasst (unkommittierte
+Änderungen des Owners), die Entscheidung liegt beim Owner.
+
+**Tests:** `TextStageMetricsTests`, `TargetTextRulesTests` 11, `LocalPolishTests` +4,
+`HotkeyRoutingTests` +3, `DictationPipelineTests` +1. **Nicht verifiziert:** jeder
+Modellaufruf (Apple Intelligence aus) und das Lesen fremder Felder — Accessibility-Werte
+unterscheiden sich je App, das zeigt nur ein Handtest.

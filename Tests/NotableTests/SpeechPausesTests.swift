@@ -55,7 +55,7 @@ final class SpeechPausesTests: XCTestCase {
     }
 
     func testGapJustBelowTheThresholdIsNoPause() {
-        let t = tokens([("Eins.", 0), ("Zwei.", 0.79)])
+        let t = tokens([("Eins.", 0), ("Zwei.", 0.34)])
         XCTAssertEqual(SpeechPauses.sentenceBoundaryPauses(tokens: t, text: "Eins. Zwei."), [false])
     }
 

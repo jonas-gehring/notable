@@ -35,6 +35,9 @@ final class StatsModel: ObservableObject {
     @Published private(set) var latencies: [(engine: String, stats: UsageMetrics.LatencyStats?)] = []
     @Published private(set) var apps: [(sourceApp: String, totals: UsageTotals)] = []
     @Published private(set) var wordsPerMinute: Double = 0
+    /// Spec 32: which text stage shaped the dictations, and the on-device timing.
+    @Published private(set) var textStages: [(polisher: String, count: Int)] = []
+    @Published private(set) var polishLatency: UsageMetrics.LatencyStats?
     @Published private(set) var streak = 0
 
     private var rows: [UsageRow] = []
@@ -91,6 +94,8 @@ final class StatsModel: ObservableObject {
             .map { (engine: $0.engine, stats: UsageMetrics.latency(rows, by: $0.engine)) }
         apps = UsageMetrics.appTotals(rows, typingWPM: typingWPM)
         wordsPerMinute = UsageMetrics.wordsPerMinute(rows)
+        textStages = UsageMetrics.polisherShares(rows)
+        polishLatency = UsageMetrics.polishLatency(rows)
         streak = UsageMetrics.streak(
             UsageMetrics.buckets(rows, by: .day, calendar: calendar, typingWPM: typingWPM),
             today: now,
@@ -194,6 +199,7 @@ struct StatsView: View {
                 HeatmapCard(matrix: model.heatmap, calendar: model.displayCalendar)
                 EngineUsageCard(totals: model.engines)
                 EnginePerformanceCard(stats: model.latencies, wordsPerMinute: model.wordsPerMinute)
+                TextStageCard(shares: model.textStages, latency: model.polishLatency)
                 TargetAppsCard(totals: model.apps)
             }
             .padding(.top, 10)

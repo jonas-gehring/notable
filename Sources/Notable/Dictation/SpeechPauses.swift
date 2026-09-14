@@ -24,10 +24,15 @@ struct TimedToken: Equatable, Sendable {
 /// framework, anything — the answer is nil, and the formatter counts sentences
 /// as before. **Never a wrong break**, only sometimes no better one.
 enum SpeechPauses {
-    /// A pause at least this long between two sentences allows a paragraph.
-    /// A starting value, like Spec 24's cosine threshold: measured speech has
-    /// 0.2–0.5 s between sentences said in one breath.
-    static let minimumGap: TimeInterval = 0.8
+    /// A gap at least this long between two sentences' tokens allows a paragraph.
+    ///
+    /// Measured on Parakeet v3 (2026-09-14, `SpeechPausesModelTests`): inside a
+    /// sentence the token timings are contiguous — gap 0.00 s — while a spoken
+    /// pause of 1.5 s showed up as a gap of only 0.56 s, because the TDT model
+    /// spreads most of the silence over the duration of the tokens beside it.
+    /// The first guess, 0.8 s, sat above anything the model reports and never
+    /// fired on real audio. 0.35 s separates the two cleanly.
+    static let minimumGap: TimeInterval = 0.35
 
     /// For each boundary between two sentences of `text` — so `sentences − 1`
     /// entries — whether the speaker paused there. Nil when the tokens do not

@@ -101,7 +101,7 @@ actor LocalPolisher {
         prepared = session
     }
 
-    func polish(_ text: String, category: AppCategory) async -> LocalPolishResult {
+    func polish(_ text: String, category: AppCategory, context: String? = nil) async -> LocalPolishResult {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, LocalModelAvailability.current.isAvailable else {
             return LocalPolishResult(text: text, didPolish: false)
@@ -110,7 +110,7 @@ actor LocalPolisher {
         prepared = nil
         defer { prewarm() }
 
-        let prompt = LocalPolish.prompt(for: trimmed, category: category)
+        let prompt = LocalPolish.prompt(for: trimmed, category: category, context: context)
         let started = ContinuousClock.now
         func elapsed() -> Int {
             let duration = started.duration(to: .now)
@@ -141,6 +141,31 @@ actor LocalPolisher {
                 failure: String(localized: "Formatierung fehlgeschlagen — Regeltext eingefügt."),
                 milliseconds: elapsed()
             )
+        }
+    }
+
+    /// A spoken command on the selection (Spec 04 on the device). Its own
+    /// session with its own instructions; ten seconds, because the user asked
+    /// for it and is waiting. Never throws — a failure leaves the selection alone.
+    func runCommand(_ command: String, selection: String?) async -> LocalPolishResult {
+        guard LocalModelAvailability.current.isAvailable else {
+            return LocalPolishResult(text: selection ?? "", didPolish: false, failure: LocalModelAvailability.current.reason)
+        }
+        let session = LanguageModelSession(instructions: LocalPolish.commandInstructions)
+        let prompt = LocalPolish.commandPrompt(command: command, selection: selection)
+        let started = ContinuousClock.now
+        do {
+            let output = try await withDeadline(.seconds(10)) {
+                try await session.respond(to: prompt, generating: PolishedDictation.self).content.text
+            }
+            let duration = started.duration(to: .now)
+            let milliseconds = Int(Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15)
+            guard let accepted = LocalPolish.acceptCommand(output) else {
+                return LocalPolishResult(text: selection ?? "", didPolish: false, milliseconds: milliseconds)
+            }
+            return LocalPolishResult(text: accepted, didPolish: true, milliseconds: milliseconds)
+        } catch {
+            return LocalPolishResult(text: selection ?? "", didPolish: false)
         }
     }
 }

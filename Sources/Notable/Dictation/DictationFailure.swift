@@ -39,6 +39,10 @@ enum DictationFailure: Equatable, Sendable {
     case transcriptionFailed
     /// The input device went away and could not be resumed.
     case deviceLost
+    /// A command was spoken, and the on-device model is not there to run it.
+    case localModelUnavailable(reason: String?)
+    /// The model's answer to a command was unusable; the selection is unchanged.
+    case commandFailed
 
     /// One sentence: what happened.
     var title: String {
@@ -66,6 +70,8 @@ enum DictationFailure: Equatable, Sendable {
         case .modelMissing: String(localized: "Kein ASR-Modell verfügbar.")
         case .transcriptionFailed: String(localized: "Transkription fehlgeschlagen.")
         case .deviceLost: String(localized: "Mikrofon verschwunden — bis dahin wird transkribiert.")
+        case .localModelUnavailable: String(localized: "Befehle brauchen das lokale Modell.")
+        case .commandFailed: String(localized: "Befehl nicht ausgeführt — nichts geändert.")
         }
     }
 
@@ -85,6 +91,8 @@ enum DictationFailure: Equatable, Sendable {
         case .modelMissing: String(localized: "Modell in den Einstellungen laden, dann im Menü wiederholen.")
         case .transcriptionFailed: String(localized: "Das Diktat ist aufbewahrt — im Menü wiederholen.")
         case .deviceLost: String(localized: "Mikrofon wieder verbinden.")
+        case .localModelUnavailable(let reason): reason ?? String(localized: "Einstellungen → Diktat → Textstufe auf dem Gerät.")
+        case .commandFailed: String(localized: "Befehl anders formulieren.")
         }
     }
 
@@ -112,8 +120,13 @@ enum DictationFailure: Equatable, Sendable {
     }
 }
 
-/// The sounds a dictation makes. Named by meaning, not by file: Spec 30 swaps
-/// the files, and nothing that triggers a cue has to change for that.
+/// The sounds a dictation makes. Named by meaning, not by file.
+///
+/// Notable ships its own five (Spec 30 §3.5, `Resources/Sounds/cue-*.caf`):
+/// short, synthesized, each one distinct — rising for start, falling for cancel,
+/// two low notes for a failure. "Tink" and "Pop" belonged to other apps, and a
+/// failure used to sound exactly like nothing. The system sounds stay only as
+/// the fallback for a bundle that is missing a file.
 enum SoundCue: String, Sendable, CaseIterable {
     case start
     case locked
@@ -122,10 +135,18 @@ enum SoundCue: String, Sendable, CaseIterable {
     case failed
 
     func play() {
-        NSSound(named: systemSoundName)?.play()
+        if let url = Bundle.main.url(forResource: fileName, withExtension: "caf"),
+           let sound = NSSound(contentsOf: url, byReference: true) {
+            sound.play()
+        } else {
+            NSSound(named: systemSoundName)?.play()
+        }
     }
 
-    /// The system sound standing in until Notable ships its own.
+    /// The bundled file, without extension.
+    var fileName: String { "cue-\(rawValue)" }
+
+    /// The fallback when the bundle lacks the file.
     var systemSoundName: String {
         switch self {
         case .start: "Tink"

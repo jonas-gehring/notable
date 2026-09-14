@@ -6,6 +6,8 @@ import SwiftUI
 struct LocalPolishSection: View {
     @AppStorage(LocalPolish.Mode.storageKey) private var modeRaw = LocalPolish.Mode.fallback.rawValue
     @State private var availability = LocalModelAvailability.current
+    @AppStorage(LocalPolish.readsTargetTextKey) private var readsTargetText = false
+    @AppStorage(LocalPolish.commandHotkeyKey) private var commandHotkeyRaw = ""
 
     var body: some View {
         Section {
@@ -23,10 +25,28 @@ struct LocalPolishSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // The consent for everything that reads the target app (Stufe 2):
+            // context for the stage above, commands on a selection, learning
+            // from corrections. Local in all three; off until switched on.
+            Toggle("Text aus der Ziel-App lesen (lokal)", isOn: $readsTargetText)
+                .onChange(of: readsTargetText) { _, _ in
+                    AppContainer.shared.dictation.hotkeyChanged()
+                }
+            if readsTargetText {
+                Picker("Befehl-Taste", selection: $commandHotkeyRaw) {
+                    Text("Keine").tag("")
+                    ForEach(HotkeySpec.allCases.filter { $0 != HotkeySpec.current && $0 != EnhancementSettings.hotkey() }) { spec in
+                        Text(spec.label).tag(spec.rawValue)
+                    }
+                }
+                .onChange(of: commandHotkeyRaw) { _, _ in
+                    AppContainer.shared.dictation.hotkeyChanged()
+                }
+            }
         } header: {
             Text("Textstufe auf dem Gerät")
         } footer: {
-            Text("Satzzeichen, Selbstkorrekturen und Listen mit Apples Modell auf diesem Mac. Nichts verlässt das Gerät; das Diktat braucht dafür spürbar länger.")
+            Text("Mit Apples Modell auf diesem Mac: Satzzeichen, Selbstkorrekturen, Listen — und mit Lesen auch Befehle auf markiertem Text. Nichts verlässt das Gerät.")
         }
         .onAppear { availability = LocalModelAvailability.current }
     }

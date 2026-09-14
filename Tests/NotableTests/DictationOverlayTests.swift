@@ -137,6 +137,33 @@ final class DictationOverlayTests: XCTestCase {
         XCTAssertFalse(overlay.panel?.isVisible ?? false)
     }
 
+    /// Spec 30 §3.9: the capsule can take a click — and the panel still never
+    /// becomes key, and still lets clicks elsewhere fall through.
+    func testCancelButtonKeepsThePanelOutOfFocus() throws {
+        let overlay = controller(style: .bottom)
+        var cancelled = false
+        overlay.onCancel = { cancelled = true }
+        overlay.show(.recording)
+        let panel = try XCTUnwrap(overlay.panel)
+
+        XCTAssertFalse(panel.canBecomeKey)
+        XCTAssertTrue(panel.ignoresMouseEvents, "ohne Zeiger über der Kapsel fällt jeder Klick durch")
+        XCTAssertTrue(panel.contentView?.acceptsFirstMouse(for: nil) ?? false, "der erste Klick trifft das ×")
+        overlay.onCancel?()
+        XCTAssertTrue(cancelled)
+        overlay.hide()
+        XCTAssertTrue(panel.ignoresMouseEvents)
+    }
+
+    func testOnlyWaitingStatesOfferCancel() {
+        typealias State = DictationOverlayController.OverlayState
+        for state: State in [.recording, .transcribing, .enhancing, .formatting, .commanding, .loadingModel] {
+            XCTAssertTrue(state.isCancellable, "\(state)")
+        }
+        XCTAssertFalse(State.error("x").isCancellable)
+        XCTAssertFalse(State.notice("x").isCancellable)
+    }
+
     /// A dictation that is done before the delay never shows its spinner.
     func testDelayedStateIsDroppedWhenHiddenFirst() {
         let overlay = controller(style: .bottom)

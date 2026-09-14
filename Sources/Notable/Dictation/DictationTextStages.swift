@@ -13,7 +13,10 @@ struct DictationJob: Sendable {
     let startedAt: Date
     let releasedAt: ContinuousClock.Instant
     let targetBundleID: String?
-    let wantsEnhancement: Bool
+    /// Which key started it: plain, enhanced, or a command (Spec 32 Stufe 2).
+    let role: HotkeyRole
+    /// The target field at the release, when reading it is allowed.
+    let target: TargetCapture?
     let notice: String?
 }
 
@@ -31,7 +34,8 @@ enum DictationTextStages {
         let transcript: String
         let tokens: [TimedToken]?
         let category: AppCategory
-        let wantsEnhancement: Bool
+        let role: HotkeyRole
+        let capture: TargetCapture?
         let localMode: LocalPolish.Mode
     }
 
@@ -78,12 +82,15 @@ enum DictationTextStages {
         if let failure = DictationPipeline.afterTranscript(polished) { return .failed(failure) }
 
         let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
+        if input.role == .command {
+            return await command(trimmed, selection: input.capture?.selection, isLive: isLive, show: show)
+        }
         var text = Text(toPaste: trimmed, polishedAt: .now)
 
         // On the device, nothing leaves it (Spec 32).
         if LocalPolish.shouldRun(mode: input.localMode, category: input.category, text: trimmed) {
             show(.formatting, true)
-            if let result = await localPolish(trimmed, category: input.category) {
+            if let result = await localPolish(trimmed, category: input.category, context: input.capture?.context) {
                 guard isLive() else { return .cancelled }
                 text.polishMs = result.milliseconds
                 if result.didPolish {
@@ -97,7 +104,7 @@ enum DictationTextStages {
 
         // The only place dictation text may leave the device, and only because
         // *this* recording was started with the enhancement hotkey.
-        if input.wantsEnhancement, EnhancementSettings.isEnabled {
+        if input.role == .enhanced, EnhancementSettings.isEnabled {
             show(.enhancing, false)
             let result = await DictationEnhancer.forDictation().enhance(
                 text.toPaste, profile: EnhancementSettings.profile(for: input.category)
@@ -197,12 +204,56 @@ enum DictationTextStages {
     }
 
     /// Nil means the stage does not exist on this system — not that it failed.
-    private static func localPolish(_ text: String, category: AppCategory) async -> LocalPolishResult? {
+    private static func localPolish(_ text: String, category: AppCategory, context: String?) async -> LocalPolishResult? {
         #if canImport(FoundationModels)
         guard #available(macOS 26, *) else { return nil }
-        return await LocalPolisher.shared.polish(text, category: category)
+        return await LocalPolisher.shared.polish(text, category: category, context: context)
         #else
         return nil
         #endif
+    }
+
+    /// A spoken command on the selection, run by the on-device model (Spec 04
+    /// on the device). The answer is pasted like a dictation: with the selection
+    /// still active, ⌘V replaces it — the same path, the same target check.
+    /// Nothing is pasted when the model is missing or its answer is unusable.
+    private static func command(
+        _ spoken: String,
+        selection: String?,
+        isLive: () -> Bool,
+        show: (DictationOverlayController.OverlayState, _ delayed: Bool) -> Void
+    ) async -> Outcome {
+        let availability = LocalModelAvailability.current
+        guard availability.isAvailable else { return .failed(.localModelUnavailable(reason: availability.reason)) }
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, *) else { return .failed(.localModelUnavailable(reason: availability.reason)) }
+        show(.commanding, false)
+        let result = await LocalPolisher.shared.runCommand(spoken, selection: selection)
+        guard isLive() else { return .cancelled }
+        guard result.didPolish else { return .failed(.commandFailed) }
+        var text = Text(toPaste: result.text, polishedAt: .now)
+        text.rawText = spoken
+        text.polisher = "command"
+        text.polishMs = result.milliseconds
+        return .produced(text)
+        #else
+        return .failed(.localModelUnavailable(reason: availability.reason))
+        #endif
+    }
+
+    /// Looks at the field once more after the paste and learns from a corrected
+    /// word (Spec 06 Quelle C) — only with consent, only a few words, and only as
+    /// a suggestion: `PersonalDictionary` still waits for the user to accept it.
+    static let correctionDelay: Duration = .seconds(30)
+
+    static func watchForCorrections(_ pasted: String, capture: TargetCapture?) {
+        guard let capture, let element = capture.element, let start = capture.insertionPoint else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: correctionDelay)
+            guard LocalPolish.readsTargetText(), let value = TargetTextAccess.currentValue(of: element) else { return }
+            for pair in TargetTextRules.corrections(pasted: pasted, fieldText: value, start: start) {
+                PersonalDictionary.recordCorrection(heard: pair.heard, corrected: pair.corrected)
+            }
+        }
     }
 }

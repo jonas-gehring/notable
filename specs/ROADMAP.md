@@ -128,9 +128,12 @@ Punkte, deren Fehlermodus still war — die also niemand gemeldet hätte:
   gebaut am selben Tag als Specs 28–33 (Stand und Abweichungen jeweils in §8/§9).
   Offen: **alle Handtests an der installierten App** (nichts davon ist an echter
   Hardware bedient worden), die **Messung von Spec 32** — Apple Intelligence ist auf dem
-  Build-Rechner aus, die lokale Textstufe ist deshalb gebaut, aber aus — und die
-  offenen Entscheidungen unter §7 der Specs (Klangsprache, Material-Kontrast,
-  Betriebsart des lokalen Modells, Icon, Engine-Namen, Menüleisten-Motive).
+  Build-Rechner aus, die lokale Textstufe (Stufe 1 und 2) ist deshalb gebaut, aber aus —
+  und die Material-Kontrastmessung (Spec 30 §7). Die übrigen §7-Entscheidungen sind mit
+  den Vorschlägen der Specs gebaut und in §8/§9 als solche markiert, also umkehrbar.
+  **Spec 04 lokal** (Befehle auf markiertem Text, Spec 32 Stufe 2) widerspricht der
+  festen Entscheidung in CLAUDE.md dem Wortlaut nach — nicht der Begründung, denn nichts
+  verlässt das Gerät. Der Owner entscheidet, ob es bleibt.
 - **Sprecher-Erkennung an einem echten Call messen.** Die Diarisierung ist
   nachgeschärft (Trennschwelle 0,62 statt 0,7 auf der VAD-kompaktierten Spur,
   Mindestdauer 0,4 s, erwartete Sprecherzahl aus der Einladung) und die Namensprüfung

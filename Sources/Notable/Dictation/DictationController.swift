@@ -46,8 +46,8 @@ final class DictationController: ObservableObject {
     /// Said after the paste of the recording it belongs to.
     private var pendingNotice: String?
     private var recordingStartedAt = Date.distantPast
-    /// Set when the *second* hotkey started this recording.
-    private var enhanceRequested = false
+    /// The role of the key that started this recording.
+    private var startRole: HotkeyRole = .plain
     /// Numbers each recording; the job's key once it is released.
     private var recordingGeneration = 0
     /// True while the microphone is open. Capture and processing are separate
@@ -74,6 +74,7 @@ final class DictationController: ObservableObject {
             self?.overlay.flashNotice(String(localized: "\(engine.shortLabel) aktiv — volle Qualität."))
         }
         engineObservation = engines.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        overlay.onCancel = { [weak self] in self?.cancelRecording() }
     }
 
     var modelState: ModelState { engines.modelState }
@@ -89,9 +90,7 @@ final class DictationController: ObservableObject {
             // The role belongs to the press that *starts* a recording (Spec 29):
             // the press that ends a hands-free one must not decide whether its
             // text leaves the device.
-            self.enhanceRequested = DictationPipeline.enhanceRequested(
-                after: action, pressed: role, current: self.enhanceRequested
-            )
+            self.startRole = DictationPipeline.startedRole(after: action, pressed: role, current: self.startRole)
             self.perform(action)
         }
         hotkey.onKeyUp = { [weak self] _ in
@@ -104,16 +103,14 @@ final class DictationController: ObservableObject {
             self.perform(action)
         }
         hotkey.onEscape = { [weak self] in self?.cancelRecording() }
-        // Esc is live while a recording runs *or* a released one is on its way
-        // to the paste (Spec 29 §3.4).
         hotkey.acceptsEscape = { [weak self] in
             guard let self else { return false }
             return self.isCapturing || !self.jobs.isEmpty
         }
         hotkey.spec = HotkeySpec.current
         hotkey.enhanceSpec = EnhancementSettings.hotkey()
+        hotkey.commandSpec = LocalPolish.commandHotkey()
         overlay.prepare()
-        // Stashes of dictations that never finished — a crash or a quit mid-job.
         LastClipStore.removeStrayStashes()
         DictationTextStages.prewarmLocalModel()
 
@@ -150,6 +147,7 @@ final class DictationController: ObservableObject {
         hotkey.stop()
         hotkey.spec = HotkeySpec.current
         hotkey.enhanceSpec = EnhancementSettings.hotkey()
+        hotkey.commandSpec = LocalPolish.commandHotkey()
         installHotkey()
     }
 
@@ -328,12 +326,12 @@ final class DictationController: ObservableObject {
             feedback.report(failure)
             return
         }
-        let wantsEnhancement = enhanceRequested
-        enhanceRequested = false
+        let role = startRole
+        startRole = .plain
         startJob(DictationJob(
             generation: recordingGeneration, samples: samples, sampleRate: sampleRate,
-            duration: duration, startedAt: recordingStartedAt, releasedAt: releasedAt,
-            targetBundleID: targetBundleID, wantsEnhancement: wantsEnhancement, notice: notice
+            duration: duration, startedAt: recordingStartedAt, releasedAt: releasedAt, targetBundleID: targetBundleID,
+            role: role, target: TargetTextAccess.capture(wantsContext: role != .command), notice: notice
         ))
     }
 
@@ -360,7 +358,7 @@ final class DictationController: ObservableObject {
             generation: recordingGeneration, samples: samples, sampleRate: sampleRate,
             duration: Double(samples.count) / Double(sampleRate), startedAt: clip.recordedAt,
             releasedAt: .now, targetBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-            wantsEnhancement: false, notice: nil
+            role: .plain, target: nil, notice: nil
         ))
     }
 
@@ -415,7 +413,7 @@ final class DictationController: ObservableObject {
                 let outcome = await DictationTextStages.produce(
                     DictationTextStages.Input(
                         transcript: transcription.text, tokens: transcription.tokens,
-                        category: category, wantsEnhancement: job.wantsEnhancement, localMode: localMode
+                        category: category, role: job.role, capture: job.target, localMode: localMode
                     ),
                     isLive: { self.isLive(generation) },
                     show: { state, delayed in
@@ -444,6 +442,7 @@ final class DictationController: ObservableObject {
                 case .pasted:
                     feedback.playCue(.done)
                     lastDictationText = text.toPaste
+                    DictationTextStages.watchForCorrections(text.toPaste, capture: job.target)
                     if !isCapturing {
                         if let notice = text.notice {
                             overlay.flashError(notice)

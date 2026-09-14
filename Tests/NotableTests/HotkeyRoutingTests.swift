@@ -55,6 +55,41 @@ final class HotkeyRoutingTests: XCTestCase {
         }
     }
 
+    // MARK: - Command key (Spec 32 Stufe 2)
+
+    func testCommandKeyReportsTheCommandRole() {
+        XCTAssertEqual(
+            HotkeyRouting.event(keyCode: HotkeySpec.rightControl.keyCode, isPressed: true, held: nil,
+                                plain: .rightOption, enhance: .rightCommand, command: .rightControl),
+            .down(.command)
+        )
+        XCTAssertEqual(
+            HotkeyRouting.event(keyCode: HotkeySpec.rightControl.keyCode, isPressed: false, held: .command,
+                                plain: .rightOption, enhance: .rightCommand, command: .rightControl),
+            .up(.command)
+        )
+    }
+
+    /// A command that rewrites a selection is the last thing a shared key may mean.
+    func testCommandLosesAKeySharedWithAnotherRole() {
+        XCTAssertEqual(
+            HotkeyRouting.event(keyCode: HotkeySpec.rightOption.keyCode, isPressed: true, held: nil,
+                                plain: .rightOption, enhance: nil, command: .rightOption),
+            .down(.plain)
+        )
+        XCTAssertEqual(
+            HotkeyRouting.event(keyCode: HotkeySpec.rightCommand.keyCode, isPressed: true, held: nil,
+                                plain: .rightOption, enhance: .rightCommand, command: .rightCommand),
+            .down(.enhanced)
+        )
+    }
+
+    func testWithoutACommandKeyTheRoleIsUnreachable() {
+        for spec in HotkeySpec.allCases {
+            XCTAssertNotEqual(event(spec, pressed: true), .down(.command), spec.rawValue)
+        }
+    }
+
     func testReleaseWithNothingHeldIsIgnored() {
         XCTAssertEqual(event(.rightOption, pressed: false, held: nil), .ignore)
     }

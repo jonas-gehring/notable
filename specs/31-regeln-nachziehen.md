@@ -242,3 +242,14 @@ neu), `AppCategoryTests` +6. **Nicht verifiziert:** die Token-Abbildung an echte
 Parakeet-Ausgabe — sie ist mit synthetischen SentencePiece-Tokens getestet; weicht die
 echte Ausgabe ab, liefert sie keine Pausen und der Formatter zählt wie vorher. Die
 Handtests an der App stehen aus.
+
+### Nachtrag: an echter Parakeet-Ausgabe gemessen (2026-09-14)
+
+`SpeechPausesModelTests` (neu) spricht zwei Sätze mit 1,5 s Pause per `say` ein und
+lässt sie durch Parakeet v3 laufen. Die Tokens innerhalb eines Satzes liegen lückenlos
+aneinander; die gesprochene Pause von 1,5 s kommt als **0,56 s** Lücke zwischen „."
+und dem nächsten Token an — der Tokenzeitstempel sitzt am Ende des Klangs, nicht am
+Anfang der Stille. Die Startschwelle 0,8 s hätte also keine einzige echte Pause
+erkannt. **`SpeechPauses.minimumGap` ist jetzt 0,35 s**, der Test läuft mit dem Modell
+grün (übersprungen, wenn Modelle oder Stimme fehlen). Abweichung 3 gilt mit dieser
+Schwelle.

@@ -15,6 +15,8 @@ final class DictationOverlayController {
         /// The on-device text stage (Spec 32). Says nothing about leaving the
         /// device, because nothing does.
         case formatting
+        /// A spoken command running on the selection (Spec 32 Stufe 2).
+        case commanding
         case loadingModel
         case error(String)
         /// Something worth saying that is not a failure — the model swap, for
@@ -45,6 +47,12 @@ final class DictationOverlayController {
         @Published var alignment: Alignment = .center
         /// The second line of a failure: what to do (Spec 30 §3.6).
         @Published var hint: String?
+        /// Where the capsule sits in the panel (top-left origin), for the mouse
+        /// tracking that lets only the capsule take a click (Spec 30 §3.9). Not
+        /// published: it changes with every layout, and nothing draws it.
+        var capsuleFrame: CGRect = .zero
+        /// The cancel action; without one there is no button.
+        var cancel: (() -> Void)?
     }
 
     private let model = Model()
@@ -59,6 +67,14 @@ final class DictationOverlayController {
     /// Bumped by every `show` and `hide`, so a fade-out or a delayed state that
     /// is overtaken by something newer does nothing when it lands.
     private var visibilityGeneration = 0
+    /// Watches the pointer while a cancellable state is up — see `trackMouse`.
+    private var mouseTracker: Timer?
+
+    /// What the capsule's "×" does (Spec 30 §3.9).
+    var onCancel: (() -> Void)? {
+        get { model.cancel }
+        set { model.cancel = newValue }
+    }
 
     /// Read live: a `static let` kept the value from launch, so changing the
     /// system setting did nothing until a restart.
@@ -109,6 +125,7 @@ final class DictationOverlayController {
         position(panel, style: style)
         let alreadyShown = panel.isVisible && panel.alphaValue > 0.99
         panel.orderFrontRegardless() // never makeKey
+        updateMouseTracking(style: style, state: state)
         // Appears like an object, not like a switch (Spec 30 §3.2). A state
         // change inside a visible panel does not fade again.
         guard !alreadyShown, !Self.reduceMotion else {
@@ -135,6 +152,45 @@ final class DictationOverlayController {
             guard let self, !Task.isCancelled, self.visibilityGeneration == generation else { return }
             self.show(state)
         }
+    }
+
+    // MARK: - Clicks (Spec 30 §3.9)
+
+    /// The panel ignores the mouse — a 380 × 68 window of mostly nothing must
+    /// never swallow a click meant for the app below. Only while the pointer is
+    /// over the capsule, and only in a state that can be cancelled, does it take
+    /// clicks, so the "×" works. Taking a click does not make it key: a
+    /// borderless non-activating panel cannot become key, and
+    /// `DictationOverlayTests` keeps checking exactly that.
+    private func updateMouseTracking(style: OverlayStyle, state: OverlayState) {
+        stopMouseTracking()
+        guard style != .notch, state.isCancellable, model.cancel != nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.trackMouse() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        mouseTracker = timer
+    }
+
+    private func trackMouse() {
+        guard let panel, panel.isVisible else { return }
+        let capsule = model.capsuleFrame
+        let onScreen = CGRect(
+            x: panel.frame.minX + capsule.minX,
+            y: panel.frame.maxY - capsule.maxY,
+            width: capsule.width,
+            height: capsule.height
+        )
+        let over = capsule.width > 0 && onScreen.contains(NSEvent.mouseLocation)
+        if panel.ignoresMouseEvents == over {
+            panel.ignoresMouseEvents = !over
+        }
+    }
+
+    private func stopMouseTracking() {
+        mouseTracker?.invalidate()
+        mouseTracker = nil
+        panel?.ignoresMouseEvents = true
     }
 
     /// "Aus" still shows failures and the model-swap notice — those are not a
@@ -186,6 +242,7 @@ final class DictationOverlayController {
         model.level = 0
         model.partial = ""
         model.locked = false
+        stopMouseTracking()
         guard let panel, panel.isVisible else { return }
         guard !Self.reduceMotion else {
             panel.orderOut(nil)
@@ -221,7 +278,7 @@ final class DictationOverlayController {
         if let panel {
             // Same panel, different view: everything below (non-activating,
             // ignores the mouse, never key) has to stay exactly as it is.
-            panel.contentView = NSHostingView(rootView: content(for: style))
+            panel.contentView = OverlayHostingView(rootView: content(for: style))
             builtStyle = style
             return panel
         }
@@ -239,7 +296,7 @@ final class DictationOverlayController {
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: content(for: style))
+        panel.contentView = OverlayHostingView(rootView: content(for: style))
         self.panel = panel
         builtStyle = style
         return panel
@@ -317,12 +374,24 @@ private struct DictationOverlayView: View {
         pill
             .padding(.trailing, model.alignment == .trailing ? NotchGeometry.rightEdgePadding : 0)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: model.alignment)
+            .coordinateSpace(name: Self.space)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(accessibilityText)
     }
 
+    private static let space = "overlay"
+
     private var pill: some View {
         HStack(spacing: 9) {
+            if model.state.isCancellable, let cancel = model.cancel {
+                Button(action: cancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Abbrechen")
+                .accessibilityLabel("Abbrechen")
+            }
             content
             if model.provisional {
                 Text("vorläufig")
@@ -344,6 +413,14 @@ private struct DictationOverlayView: View {
                 .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
         }
         .shadow(color: .black.opacity(0.30), radius: 10, y: 3)
+        .background {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .named(Self.space))
+                Color.clear
+                    .onAppear { model.capsuleFrame = frame }
+                    .onChange(of: frame) { _, new in model.capsuleFrame = new }
+            }
+        }
         .animation(Self.reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.85),
                    value: model.locked)
     }
@@ -383,6 +460,9 @@ private struct DictationOverlayView: View {
         case .formatting:
             Image(systemName: "text.badge.checkmark")
             Text("Formatiere…").font(.callout.weight(.medium))
+        case .commanding:
+            Image(systemName: "wand.and.rays")
+            Text("Führe Befehl aus…").font(.callout.weight(.medium))
         case .error(let message):
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
@@ -409,6 +489,7 @@ private struct DictationOverlayView: View {
         case .transcribing: String(localized: "Transkribiere")
         case .enhancing: String(localized: "Verbessere")
         case .formatting: String(localized: "Formatiere")
+        case .commanding: String(localized: "Führe Befehl aus")
         case .loadingModel: String(localized: "Modell lädt")
         case .error(let message), .notice(let message):
             [message, model.hint].compactMap { $0 }.joined(separator: " ")
@@ -545,6 +626,7 @@ struct NotchOverlayView: View {
         case .transcribing: return String(localized: "Transkribiere…")
         case .enhancing: return String(localized: "Verbessere…")
         case .formatting: return String(localized: "Formatiere…")
+        case .commanding: return String(localized: "Führe Befehl aus…")
         case .loadingModel: return String(localized: "Modell lädt…")
         case .error(let message): return message
         case .notice(let message): return message
@@ -575,4 +657,22 @@ struct NotchShape: Shape {
         path.closeSubpath()
         return path
     }
+}
+
+extension DictationOverlayController.OverlayState {
+    /// A recording or its processing can be aborted; a failure or a notice is
+    /// already over.
+    var isCancellable: Bool {
+        switch self {
+        case .recording, .transcribing, .enhancing, .formatting, .commanding, .loadingModel: true
+        case .error, .notice: false
+        }
+    }
+}
+
+/// Hosts the HUD. Takes the first click, so the "×" works in a panel that is
+/// never key — without this the first click would only focus a window that
+/// cannot take focus, and nothing would happen.
+final class OverlayHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

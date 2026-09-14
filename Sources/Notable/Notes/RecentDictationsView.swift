@@ -24,6 +24,9 @@ struct RecentDictationsView: View {
     @State private var window: Window = .day
     @State private var items: [RecordingStore.ActivityItem] = []
     @State private var loaded = false
+    /// The dictation whose transcription failed or whose paste did not land
+    /// (Spec 30 §3.7).
+    @State private var failed: LastClip?
     /// Bumps to re-run the loader when the user switches windows or asks to refresh.
     @State private var reloadToken = 0
 
@@ -53,6 +56,11 @@ struct RecentDictationsView: View {
 
             Divider()
 
+            if let failed {
+                failedRow(failed)
+                Divider()
+            }
+
             if items.isEmpty, !loaded {
                 // Loading is not an empty state (Spec 33 §3.6): a large "no
                 // content" graphic for the half second a query takes read as
@@ -74,6 +82,7 @@ struct RecentDictationsView: View {
         .windowFrameAutosave(WindowSize.recent)
         .task(id: reloadKey) {
             loaded = false
+            failed = LastClipStore.pending()
             // Filtered in SQL, not here: with a mixed `LIMIT 200` the meetings
             // in the window ate slots, so "all dictations" was quietly capped
             // at whatever share of the last 200 rows happened to be dictations.
@@ -82,6 +91,38 @@ struct RecentDictationsView: View {
             )) ?? []
             loaded = true
         }
+    }
+
+    /// The failed dictation, here too. Retrying stays in the menu: it pastes, and
+    /// a click in this window makes Notable the frontmost app — the text would
+    /// land here. From the window it can be copied or discarded.
+    private func failedRow(_ clip: LastClip) -> some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.s) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Fehlgeschlagenes Diktat · \(clip.recordedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.callout.weight(.medium))
+                Text(clip.failure)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Wiederholen fügt ein — deshalb steht es im Menü, wo die Ziel-App vorne bleibt.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let text = clip.text {
+                Button("Kopieren") { DictationHistory.copyToClipboard(text) }
+                    .buttonStyle(.link)
+            }
+            Button("Verwerfen", role: .destructive) {
+                AppContainer.shared.dictation.discardLastClip()
+                failed = nil
+            }
+            .buttonStyle(.link)
+        }
+        .padding(Theme.Spacing.m)
     }
 
     /// One value that changes whenever we must re-query.

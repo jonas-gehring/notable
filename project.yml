@@ -94,6 +94,8 @@ targets:
       # the opt-in probe measures.
       - path: Sources/Notable/Dictation/LocalPolish.swift
       - path: Sources/Notable/Dictation/LocalPolisher.swift
+      # Stufe 2: what may be read from the target app, and what a correction is.
+      - path: Sources/Notable/Dictation/TargetText.swift
       # Pausing/muting playback during a dictation (Spec 08 B). The "only undo
       # your own doing" rule is the part worth a test.
       - path: Sources/Notable/Dictation/MediaInterrupter.swift

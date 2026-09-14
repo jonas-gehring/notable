@@ -66,6 +66,17 @@ enum DictationPipeline {
         action == .start ? role == .enhanced : current
     }
 
+    /// The role of the recording, generalised to the third key (Spec 32
+    /// Stufe 2): decided by the press that starts it, untouched by the one that
+    /// ends a hands-free recording.
+    static func startedRole(
+        after action: PTTStateMachine.Action,
+        pressed role: HotkeyRole,
+        current: HotkeyRole
+    ) -> HotkeyRole {
+        action == .start ? role : current
+    }
+
     // MARK: - Stopping
 
     enum StopDecision: Equatable, Sendable {

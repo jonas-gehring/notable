@@ -89,6 +89,42 @@ final class LocalPolishTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Chat-Nachricht"))
     }
 
+    // MARK: - Stufe 2
+
+    func testContextIsMarkedAndTheDictationStaysLast() {
+        let prompt = LocalPolish.prompt(for: "danke dir", category: .mail, context: "Hallo Anna,")
+        XCTAssertTrue(prompt.contains("nur Kontext"))
+        XCTAssertTrue(prompt.contains("Hallo Anna,"))
+        XCTAssertTrue(prompt.hasSuffix("danke dir"))
+        XCTAssertFalse(LocalPolish.prompt(for: "danke dir", category: .mail).contains("Kontext"))
+    }
+
+    func testCommandPromptWithAndWithoutSelection() {
+        XCTAssertEqual(LocalPolish.commandPrompt(command: "kürzer", selection: "Ein langer Satz."),
+                       "Befehl: kürzer\n\nMarkierter Text:\nEin langer Satz.")
+        XCTAssertTrue(LocalPolish.commandPrompt(command: "schreib eine Absage", selection: nil).contains("kein markierter Text"))
+    }
+
+    func testCommandAnswerIsUnwrappedButNeverCommentary() {
+        XCTAssertEqual(LocalPolish.acceptCommand("„Sehr geehrte Frau Lang,“"), "Sehr geehrte Frau Lang,")
+        XCTAssertEqual(LocalPolish.acceptCommand("- Milch\n- Brot"), "- Milch\n- Brot")
+        XCTAssertNil(LocalPolish.acceptCommand("Hier ist der gekürzte Text: Kurz."))
+        XCTAssertNil(LocalPolish.acceptCommand("   "))
+        XCTAssertNil(LocalPolish.acceptCommand("```\nx\n```"))
+    }
+
+    func testCommandKeyNeedsConsentAndAKey() throws {
+        let suite = "LocalPolishTests-\(UUID().uuidString)"
+        let store = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { store.removePersistentDomain(forName: suite) }
+        store.set("rightControl", forKey: LocalPolish.commandHotkeyKey)
+        XCTAssertNil(LocalPolish.commandHotkey(store), "ohne Einwilligung kein Befehl")
+        store.set(true, forKey: LocalPolish.readsTargetTextKey)
+        XCTAssertEqual(LocalPolish.commandHotkey(store), .rightControl)
+        store.set("", forKey: LocalPolish.commandHotkeyKey)
+        XCTAssertNil(LocalPolish.commandHotkey(store))
+    }
+
     func testNumberAndWordExtraction() {
         XCTAssertEqual(LocalPolish.numbers(in: "um 8:30 Uhr für 22,50 € und 1.000 Leute"), ["8:30", "22,50", "1.000"])
         XCTAssertEqual(LocalPolish.words(in: "Müller-Lüdenscheidt's Büro, 3 Tage"), ["Müller-Lüdenscheidt's", "Büro", "Tage"])

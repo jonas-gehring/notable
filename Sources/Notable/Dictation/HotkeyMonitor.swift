@@ -29,6 +29,8 @@ final class HotkeyMonitor {
     /// release. `nil` (the default) means the feature has no key and can never
     /// fire by accident.
     var enhanceSpec: HotkeySpec?
+    /// Optional third key: a spoken command on the selection (Spec 32 Stufe 2).
+    var commandSpec: HotkeySpec?
 
     private var flagsTap: CFMachPort?
     private var flagsSource: CFRunLoopSource?
@@ -104,6 +106,8 @@ final class HotkeyMonitor {
             matched = spec
         } else if let enhanceSpec, enhanceSpec != spec, keyCode == enhanceSpec.keyCode {
             matched = enhanceSpec
+        } else if let commandSpec, commandSpec != spec, commandSpec != enhanceSpec, keyCode == commandSpec.keyCode {
+            matched = commandSpec
         } else {
             matched = nil
         }
@@ -116,7 +120,8 @@ final class HotkeyMonitor {
             isPressed: matched.isPressed(in: event.flags),
             held: heldRole,
             plain: spec,
-            enhance: enhanceSpec
+            enhance: enhanceSpec,
+            command: commandSpec
         ) {
         case .down(let role):
             heldRole = role

@@ -35,6 +35,11 @@ struct UsageRow: Sendable {
     var latencyMs: Int? = nil
     /// Bundle ID of the app the text went into.
     var sourceApp: String? = nil
+    /// Which stage shaped a dictation's text last: "rules", "local", "cli"
+    /// (Spec 32). `nil` for rows from before migration 6 — reported as unknown.
+    var polisher: String? = nil
+    /// How long the on-device stage took, where it ran.
+    var polishMs: Int? = nil
 
     /// Recording duration in seconds, or `nil` when `endedAt` is missing.
     /// Never negative (a clock skew flooring to 0).
@@ -467,6 +472,32 @@ enum UsageMetrics {
         guard !sorted.isEmpty else { return 0 }
         let rank = Int((fraction * Double(sorted.count)).rounded(.up))
         return sorted[min(max(rank - 1, 0), sorted.count - 1)]
+    }
+
+    /// Dictations per text stage, in a fixed order — rules, local, CLI, unknown —
+    /// so the card does not reshuffle as counts change. Stages with no dictation
+    /// are left out (Spec 32 §3.7).
+    static func polisherShares(_ rows: [UsageRow]) -> [(polisher: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for row in rows where row.kind == .dictation {
+            counts[row.polisher ?? unknownKey, default: 0] += 1
+        }
+        return ["rules", "local", "command", "cli", unknownKey].compactMap { key in
+            counts[key].map { (polisher: key, count: $0) }
+        }
+    }
+
+    /// Median and p95 of the on-device stage, never the mean — one cold model
+    /// load would move a mean by seconds (Spec 32 §3.8). `nil` below
+    /// `minimumLatencySamples`.
+    static func polishLatency(_ rows: [UsageRow]) -> LatencyStats? {
+        let samples = rows
+            .filter { $0.kind == .dictation && $0.polisher == "local" }
+            .compactMap(\.polishMs)
+            .map(Double.init)
+            .sorted()
+        guard samples.count >= minimumLatencySamples else { return nil }
+        return LatencyStats(p50: percentile(samples, 0.5), p95: percentile(samples, 0.95), count: samples.count)
     }
 
     /// Spoken words per minute of recording — how fast the user talks, not how

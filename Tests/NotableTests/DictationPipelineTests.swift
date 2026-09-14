@@ -66,6 +66,13 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertTrue(DictationPipeline.enhanceRequested(after: .finish, pressed: .plain, current: true))
     }
 
+    /// Spec 32 Stufe 2: the same rule for all three roles.
+    func testTheStartedRoleIncludesCommands() {
+        XCTAssertEqual(DictationPipeline.startedRole(after: .start, pressed: .command, current: .plain), .command)
+        XCTAssertEqual(DictationPipeline.startedRole(after: .finish, pressed: .command, current: .plain), .plain)
+        XCTAssertEqual(DictationPipeline.startedRole(after: .finish, pressed: .plain, current: .command), .command)
+    }
+
     func testANoOpPressChangesNothing() {
         XCTAssertTrue(DictationPipeline.enhanceRequested(after: .none, pressed: .plain, current: true))
     }
@@ -256,6 +263,7 @@ final class DictationPipelineTests: XCTestCase {
             .nothingHeard(device: "X"), .nothingHeard(device: nil), .nothingRecognized, .tooShort,
             .targetChanged(app: "Slack"), .targetChanged(app: nil), .pasteBlocked, .modelMissing,
             .transcriptionFailed, .deviceLost,
+            .localModelUnavailable(reason: nil), .localModelUnavailable(reason: "aus"), .commandFailed,
         ]
         for failure in all {
             XCTAssertFalse(failure.title.isEmpty, "\(failure)")
@@ -272,10 +280,17 @@ final class DictationPipelineTests: XCTestCase {
         XCTAssertEqual(DictationFailure.deviceLost.cue, .failed)
     }
 
-    func testEveryCueHasAnInstalledSound() {
+    /// Spec 30 §3.5: every cue has its own file in the bundle's resources, and a
+    /// system fallback that exists.
+    func testEveryCueHasItsOwnSoundAndAFallback() {
+        let resources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Resources/Sounds")
         for cue in SoundCue.allCases {
-            let path = "/System/Library/Sounds/\(cue.systemSoundName).aiff"
-            XCTAssertTrue(FileManager.default.fileExists(atPath: path), path)
+            let bundled = resources.appendingPathComponent(cue.fileName + ".caf").path
+            XCTAssertTrue(FileManager.default.fileExists(atPath: bundled), bundled)
+            let fallback = "/System/Library/Sounds/\(cue.systemSoundName).aiff"
+            XCTAssertTrue(FileManager.default.fileExists(atPath: fallback), fallback)
         }
     }
 

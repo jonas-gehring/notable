@@ -237,3 +237,23 @@ Menü als „Fehlgeschlagenes Diktat · 14:02" mit Wiederholen und Verwerfen.
 fällt weg, verzögerter Zustand erscheint; Ausblenden wartet die Animation ab),
 `LocalizationTests` +1. **Nicht verifiziert:** alle Abnahmepunkte, die man sehen oder
 hören muss (1–6) — Handtest an der installierten App.
+
+### Nachtrag: vervollständigt (2026-09-14)
+
+Mit den Vorschlägen aus §7, auf Ansage „alles vollständig bauen":
+
+- **Eigene Klänge** (§3.5, Abweichung 1 aufgehoben): fünf kurze, synthetisierte Töne
+  `Resources/Sounds/cue-{start,locked,done,cancelled,failed}.caf`; `SoundCue.play()`
+  lädt die Datei aus dem Bundle und fällt auf den Systemklang zurück. Die Klangsprache
+  ist ein erster Vorschlag, kein Gestaltungsauftrag — austauschbar, ohne Code.
+- **Stufe 3 gebaut:** ein ×-Knopf in der Kapsel für Aufnahme und jede Wartephase. Das
+  Panel bleibt `canBecomeKey == false` und `ignoresMouseEvents == true`; nur solange der
+  Zeiger über der Kapsel steht, nimmt es Klicks an (`acceptsFirstMouse`), sonst fällt
+  jeder Klick durch. `DictationOverlayTests` prüft beides.
+- **Fehlgeschlagene Diktate auch im Fenster „Letzte Diktate"** (Abweichung 5 ergänzt,
+  nicht ersetzt): die Menüzeile bleibt, das Fenster zeigt die Zeile oben mit Kopieren.
+- **Text-Clips** (Abweichung 4 ergänzt): konnte nicht eingefügt werden, bleibt der Text
+  als `LastClip` ohne Audio und ist über das Menü wiederholbar.
+
+Weiter offen: die Kontrastmessung `.regularMaterial` gegen `.thickMaterial` (sehen,
+nicht rechnen) und alle Handtests.

@@ -174,13 +174,13 @@ private struct SmartReplaceEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("Textbaustein")
                 .font(.headline)
 
             Form {
                 TextField("Wenn du sagst", text: $item.trigger, prompt: Text("meine Adresse"))
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text("erscheint")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -208,7 +208,7 @@ private struct SmartReplaceEditor: View {
                 .disabled(!SmartReplace.isValidTrigger(item.trigger) || item.replacement.isEmpty)
             }
         }
-        .padding(16)
+        .padding(Theme.Spacing.l)
         .frame(width: 460)
     }
 }

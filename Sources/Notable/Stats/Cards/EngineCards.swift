@@ -54,7 +54,7 @@ struct EnginePerformanceCard: View {
         ) {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(stats, id: \.engine) { entry in
-                    HStack(spacing: 8) {
+                    HStack(spacing: Theme.Spacing.s) {
                         Text(ASREngineID(rawValue: entry.engine)?.label ?? UsageMetrics.displayKey(entry.engine))
                             .font(.subheadline)
                             .frame(width: 200, alignment: .leading)

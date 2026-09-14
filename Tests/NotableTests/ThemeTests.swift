@@ -50,6 +50,20 @@ final class ThemeTests: XCTestCase {
         XCTAssertTrue(found.isEmpty, "Radien ohne Token:\n" + found.joined(separator: "\n"))
     }
 
+    /// A spacing that has a token uses it (Spec 33 §3.3). Values in between
+    /// (6, 10, …) stay literal: rounding them onto the scale would move pixels
+    /// nobody has looked at. `DictationOverlay.swift` is compiled into the test
+    /// bundle without `Theme` and keeps its numbers.
+    func testSpacingOnTheScaleUsesTokens() throws {
+        let pattern = try NSRegularExpression(
+            pattern: #"(\.padding\((\.[a-zA-Z]+, )?|\bspacing: )(4|8|12|16|24)(?![\d.])"#
+        )
+        let found = try offending { line in
+            pattern.firstMatch(in: line, range: NSRange(line.startIndex ..< line.endIndex, in: line)) != nil
+        }.filter { !$0.contains("Dictation/DictationOverlay.swift") }
+        XCTAssertTrue(found.isEmpty, "Abstände ohne Token:\n" + found.joined(separator: "\n"))
+    }
+
     /// `textDefault` had the same value as `textEmphasis` and is gone.
     func testNoDuplicateTextToken() throws {
         let found = try offending { $0.contains("Theme.textDefault") }

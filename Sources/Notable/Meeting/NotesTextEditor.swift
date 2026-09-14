@@ -340,7 +340,7 @@ struct NotesFormatBar<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Theme.Spacing.xs) {
             blockButton("textformat.size.larger", .title, "Titel (⌘⌥1)")
             blockButton("textformat.size", .heading, "Überschrift (⌘⌥2)")
             blockButton("textformat.size.smaller", .subheading, "Unterüberschrift (⌘⌥3)")

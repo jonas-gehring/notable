@@ -12,7 +12,7 @@ struct SearchWindowView: View {
         VStack(spacing: 0) {
             TextField("Diktate und Meetings durchsuchen…", text: $query)
                 .textFieldStyle(.roundedBorder)
-                .padding(12)
+                .padding(Theme.Spacing.m)
                 .accessibilityLabel("Suchfeld")
 
             Divider()
@@ -81,6 +81,6 @@ private struct SearchHitRow: View {
                 .buttonStyle(.link)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Theme.Spacing.xs)
     }
 }

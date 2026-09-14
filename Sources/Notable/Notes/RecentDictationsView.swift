@@ -52,7 +52,7 @@ struct RecentDictationsView: View {
                 .help("Aktualisieren")
                 .accessibilityLabel("Aktualisieren")
             }
-            .padding(12)
+            .padding(Theme.Spacing.m)
 
             Divider()
 

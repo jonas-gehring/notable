@@ -29,7 +29,7 @@ struct AppCategorySection: View {
     var body: some View {
         Section {
             ForEach(rows) { row in
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Spacing.s) {
                     if let icon = row.icon {
                         Image(nsImage: icon)
                             .resizable()

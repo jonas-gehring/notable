@@ -67,13 +67,13 @@ struct NoteListView: View {
 
     @ViewBuilder
     private func row(for note: RecordingStore.Recording) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             rowHeader(for: note)
             if notesEditingID == note.id {
                 notesEditor(for: note)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Theme.Spacing.xs)
     }
 
     @ViewBuilder
@@ -225,7 +225,7 @@ struct NoteListView: View {
             }
             .disabled(busy)
         }
-        .padding(.leading, 4)
+        .padding(.leading, Theme.Spacing.xs)
     }
 
     private func toggleNotes(_ note: RecordingStore.Recording) {

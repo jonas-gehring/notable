@@ -73,7 +73,7 @@ struct OnboardingView: View {
                     "Meeting-Notizen als Markdown-Datei",
                 ])
         case .microphone:
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 permissionPage(
                     .microphone,
                     title: "Mikrofon",
@@ -87,19 +87,19 @@ struct OnboardingView: View {
                 }
             }
         case .hotkey:
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 pageHeader(icon: "keyboard", title: "Taste & Einfügen")
                 Text("Zwei Rechte, dann einmal neu starten.")
                     .foregroundStyle(Theme.textSubtle)
                 permissionRow(.inputMonitoring)
                 permissionRow(.accessibility)
                 Button("Notable neu starten") { relaunch() }
-                    .padding(.top, 4)
+                    .padding(.top, Theme.Spacing.xs)
             }
         case .firstDictation:
             firstDictationPage
         case .meetings:
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 pageHeader(icon: "person.2.wave.2", title: "Meetings")
                 Text("Optional. Notable erkennt Calls und fragt vorher.")
                     .foregroundStyle(Theme.textSubtle)
@@ -140,7 +140,7 @@ struct OnboardingView: View {
     /// iCloud Drive or Documents, it asks now, with the reason on screen — not
     /// while the first meeting's note is being written.
     private var folderPage: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             pageHeader(icon: "folder", title: "Notizen-Ordner")
             Text("Hier legt Notable jede Meeting-Notiz als Markdown-Datei ab.")
                 .foregroundStyle(Theme.textSubtle)
@@ -179,7 +179,7 @@ struct OnboardingView: View {
 
     private var firstDictationPage: some View {
         let done = dictation.lastDictationAt != nil
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             pageHeader(icon: "mic.fill", title: "Dein erstes Diktat")
             Text("In ein Textfeld einer anderen App klicken, **\(hotkeyLabel)** halten, einen Satz sprechen, loslassen.")
                 .font(.title3)
@@ -214,7 +214,7 @@ struct OnboardingView: View {
     private func pageBody(icon: String, title: LocalizedStringKey, text: LocalizedStringKey,
                           bullets: [LocalizedStringKey] = [],
                           action: (LocalizedStringKey, () -> Void)? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             pageHeader(icon: icon, title: title)
             Text(text)
                 .font(.title3)
@@ -222,7 +222,7 @@ struct OnboardingView: View {
             if !bullets.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(Array(bullets.enumerated()), id: \.offset) { _, bullet in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
                             Image(systemName: "checkmark")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(Theme.accent)
@@ -250,7 +250,7 @@ struct OnboardingView: View {
 
     private func permissionPage(_ kind: PermissionsManager.Kind,
                                 title: LocalizedStringKey, text: LocalizedStringKey) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             pageHeader(icon: "mic", title: title)
             Text(text).foregroundStyle(Theme.textSubtle)
             permissionRow(kind)

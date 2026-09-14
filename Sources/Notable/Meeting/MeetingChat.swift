@@ -128,7 +128,7 @@ struct MeetingChatView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.s) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Chat mit dem Meeting")
                     .font(.title3.weight(.semibold))
@@ -151,7 +151,7 @@ struct MeetingChatView: View {
             }
             Button("Fertig") { dismiss() }
         }
-        .padding(12)
+        .padding(Theme.Spacing.m)
     }
 
     private var transcript: some View {
@@ -177,7 +177,7 @@ struct MeetingChatView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .padding(12)
+                .padding(Theme.Spacing.m)
             }
             .onChange(of: controller.messages.count) { _, _ in
                 if let last = controller.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
@@ -186,7 +186,7 @@ struct MeetingChatView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text(controller.isReady
                 ? String(localized: "Frag alles über dieses Meeting.")
                 : String(localized: "Für dieses Meeting gibt es kein Transkript."))
@@ -225,7 +225,7 @@ struct MeetingChatView: View {
     }
 
     private var inputBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.s) {
             TextField("Frage stellen…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
@@ -244,7 +244,7 @@ struct MeetingChatView: View {
             .disabled(!canSend)
             .keyboardShortcut(.return, modifiers: [.command])
         }
-        .padding(12)
+        .padding(Theme.Spacing.m)
         .disabled(!controller.isReady)
     }
 

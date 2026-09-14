@@ -20,7 +20,7 @@ struct SpeakerEditorView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sprecher").font(.headline)
                 Text(recording.title ?? String(localized: "Meeting")).font(.subheadline).foregroundStyle(.secondary)
@@ -71,7 +71,7 @@ struct SpeakerEditorView: View {
                 Color.clear.frame(width: 1, height: 1)
                 Color.clear.frame(width: 1, height: 1)
             } else {
-                HStack(spacing: 4) {
+                HStack(spacing: Theme.Spacing.xs) {
                     TextField("Name …", text: draftBinding(speaker))
                         .textFieldStyle(.roundedBorder)
                         .frame(minWidth: 160)

@@ -2,15 +2,12 @@ import SwiftUI
 
 // MARK: - Diktat
 
+/// The page in the order of Spec 33 §3.2: key, recognition, text, dictionary and
+/// building blocks, display and sound, and the repair tools folded away.
 struct DictationSettingsView: View {
     @EnvironmentObject private var dictation: DictationController
     @AppStorage(HotkeySpec.storageKey) private var hotkeyRaw = HotkeySpec.rightOption.rawValue
-    @AppStorage(DefaultsKey.polishRemoveFillers.key) private var removeFillers = DefaultsKey.polishRemoveFillers.fallback
-    @AppStorage(DefaultsKey.polishApplyITN.key) private var applyITN = DefaultsKey.polishApplyITN.fallback
-    @AppStorage(DefaultsKey.polishParagraphs.key) private var paragraphs = DefaultsKey.polishParagraphs.fallback
-    @AppStorage(DefaultsKey.polishStructureCommands.key) private var structureCommands = DefaultsKey.polishStructureCommands.fallback
     @AppStorage(DefaultsKey.polishFuzzyDictionary.key) private var fuzzyDictionary = DefaultsKey.polishFuzzyDictionary.fallback
-    @AppStorage(DefaultsKey.appContextFormatting.key) private var appContextFormatting = DefaultsKey.appContextFormatting.fallback
     @AppStorage(DefaultsKey.dictationSounds.key) private var dictationSounds = DefaultsKey.dictationSounds.fallback
     @AppStorage(DefaultsKey.dictationIdleTimeout.key) private var dictationIdleTimeout = DefaultsKey.dictationIdleTimeout.fallback
     @AppStorage(Paster.Method.storageKey) private var pasteMethodRaw = Paster.Method.pasteboard.rawValue
@@ -25,6 +22,18 @@ struct DictationSettingsView: View {
     @State private var newWrong = ""
     @State private var newRight = ""
 
+    /// Hands-free on silence as a switch (Spec 33 §3.1 rule 3); the number sits
+    /// under "Erweitert" for whoever wants another one.
+    private var endsOnSilence: Binding<Bool> {
+        Binding(
+            get: { dictationIdleTimeout > 0 },
+            set: { on in
+                let standard = DefaultsKey.dictationIdleTimeout.fallback
+                dictationIdleTimeout = on ? (standard > 0 ? standard : 30) : 0
+            }
+        )
+    }
+
     var body: some View {
         Form {
             Section {
@@ -32,14 +41,22 @@ struct DictationSettingsView: View {
                 // roles, so the one already taken by "Diktat mit Verbesserung"
                 // is not offered here either.
                 Picker("Push-to-talk-Taste", selection: $hotkeyRaw) {
-                    ForEach(HotkeySpec.allCases.filter { $0 != EnhancementSettings.hotkey() }) { spec in
+                    ForEach(HotkeySpec.allCases.filter { $0 != EnhancementSettings.hotkey() && $0 != LocalPolish.commandHotkey() }) { spec in
                         Text(spec.label).tag(spec.rawValue)
                     }
                 }
                 .onChange(of: hotkeyRaw) { _, _ in
                     dictation.hotkeyChanged()
                 }
-                Picker("ASR-Engine", selection: $engineRaw) {
+                Toggle("Freihändig bei Stille beenden", isOn: endsOnSilence)
+            } header: {
+                Text("Taste")
+            } footer: {
+                Text("Halten = Push-to-talk, kurzer Tap = freihändig.")
+            }
+
+            Section {
+                Picker("Erkennung", selection: $engineRaw) {
                     ForEach(ASREngineID.allCases) { engine in
                         Text(engine.label).tag(engine.rawValue)
                     }
@@ -48,9 +65,7 @@ struct DictationSettingsView: View {
                     dictation.engineChanged()
                 }
                 // Status where the choice is made: what a switch costs, and
-                // whether the thing is even loaded, used to be visible only as a
-                // line in the menu bar — the one place you are not looking when
-                // you change the engine.
+                // whether the thing is even loaded.
                 EngineStatusRow(dictation: dictation)
                 if engineRaw == ASREngineID.whisper.rawValue {
                     Picker("Whisper-Modell", selection: $whisperSizeRaw) {
@@ -62,55 +77,18 @@ struct DictationSettingsView: View {
                         dictation.whisperModelChanged()
                     }
                 }
-                Picker("Anzeige während der Aufnahme", selection: $overlayStyleRaw) {
-                    ForEach(OverlayStyle.allCases) { style in
-                        Text(style.label).tag(style.rawValue)
-                    }
-                }
-                Toggle("Wiedergabe während des Diktats pausieren", isOn: $pauseMedia)
-                Toggle("Systemton während des Diktats stummschalten", isOn: $muteOutput)
                 SpokenLanguagesRow()
-            } footer: {
-                Text("Halten = Push-to-talk, kurzer Tap = freihändig. Unified: live, nur Englisch. Whisper: mehrsprachig, Modell lädt beim ersten Mal.")
-            }
-
-            Section {
-                Toggle("Füllwörter entfernen (ähm, äh …)", isOn: $removeFillers)
-                Toggle("Zahlen & Daten formatieren", isOn: $applyITN)
-                Toggle("Absätze setzen", isOn: $paragraphs)
-                Toggle("Gesprochene Struktur umsetzen", isOn: $structureCommands)
             } header: {
-                Text("Textqualität")
+                Text("Erkennung")
             } footer: {
-                Text("Absätze und gesprochene Befehle wie „neue Zeile“ oder „Stichpunkt“ — nie in Code-Editoren.")
+                Text("„Englisch — schnell“ versteht nur Englisch; Whisper lädt sein Modell beim ersten Mal.")
             }
 
-            Section {
-                Toggle("Text an die Ziel-App anpassen", isOn: $appContextFormatting)
-            } header: {
-                Text("App-Anpassung")
-            } footer: {
-                Text("Locker in Chats, Schlusspunkt in Mails, wörtlich in Code-Editoren.")
-            }
-
-            if appContextFormatting {
-                AppCategorySection()
-            }
+            TextPreparationSection()
 
             LocalPolishSection()
 
-            Section {
-                Toggle("Töne bei Aufnahme-Start und -Ende", isOn: $dictationSounds)
-                Stepper(value: $dictationIdleTimeout, in: 0...120, step: 15) {
-                    Text(dictationIdleTimeout == 0
-                        ? String(localized: "Freihändig bei Stille beenden: aus")
-                        : String(localized: "Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden"))
-                }
-            } header: {
-                Text("Verhalten")
-            } footer: {
-                Text("Der Idle-Timeout gilt nur für den freihändigen Lock-Modus (kurzer Tap), nicht für gehaltenes Push-to-talk.")
-            }
+            EnhancementSettingsSection(onHotkeyChange: { dictation.hotkeyChanged() })
 
             Section {
                 if dictionary.isEmpty {
@@ -154,7 +132,7 @@ struct DictationSettingsView: View {
                 }
                 Toggle("Ähnliche Schreibweisen automatisch korrigieren", isOn: $fuzzyDictionary)
             } header: {
-                Text("Persönliches Wörterbuch")
+                Text("Wörterbuch & Bausteine")
             }
 
             if !suggestions.isEmpty {
@@ -183,17 +161,26 @@ struct DictationSettingsView: View {
                 } header: {
                     Text("Gelernte Vorschläge")
                 } footer: {
-                    Text("Aus deinen Korrekturen unter Letzte Diktate gelernt. Übernehmen fügt den Eintrag oben ins Wörterbuch ein.")
+                    Text("Aus deinen Korrekturen gelernt — in „Letzte Diktate“ und, wenn Lesen erlaubt ist, im Zielfeld.")
                 }
             }
 
-            EnhancementSettingsSection(onHotkeyChange: { dictation.hotkeyChanged() })
-
             SmartReplaceSection()
 
-            // Repair tools and a measurement, one level down (Spec 33 §3.1). The
-            // recent-dictations list that used to close this page has its own
-            // window; a copy of it here was a convenience for development.
+            Section {
+                Picker("Anzeige während der Aufnahme", selection: $overlayStyleRaw) {
+                    ForEach(OverlayStyle.allCases) { style in
+                        Text(style.label).tag(style.rawValue)
+                    }
+                }
+                Toggle("Töne bei Aufnahme-Start und -Ende", isOn: $dictationSounds)
+                Toggle("Wiedergabe während des Diktats pausieren", isOn: $pauseMedia)
+                Toggle("Systemton während des Diktats stummschalten", isOn: $muteOutput)
+            } header: {
+                Text("Anzeige & Ton")
+            }
+
+            // Repair tools and a measurement, one level down (Spec 33 §3.1).
             Section {
                 DisclosureGroup("Erweitert") {
                     Picker("Einfügemethode", selection: $pasteMethodRaw) {
@@ -201,6 +188,11 @@ struct DictationSettingsView: View {
                         Text("Tastatureingabe simulieren").tag("typing")
                     }
                     Toggle("Beim ersten Start ein kleines Modell vorschalten", isOn: $bootstrapModel)
+                    if dictationIdleTimeout > 0 {
+                        Stepper(value: $dictationIdleTimeout, in: 15...120, step: 15) {
+                            Text("Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden")
+                        }
+                    }
                     if let latency = dictation.lastLatencyMillis {
                         LabeledContent(
                             String(localized: "Letzte Latenz (Loslassen → Einfügen)"),
@@ -214,5 +206,98 @@ struct DictationSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// One switch for the rule stage (Spec 33 §3.2): fillers, numbers, paragraphs,
+/// spoken structure and the target app are *one* thing to most people. The five
+/// switches stay — in a sheet, for whoever wants one of them off.
+struct TextPreparationSection: View {
+    @AppStorage(DefaultsKey.polishRemoveFillers.key) private var removeFillers = DefaultsKey.polishRemoveFillers.fallback
+    @AppStorage(DefaultsKey.polishApplyITN.key) private var applyITN = DefaultsKey.polishApplyITN.fallback
+    @AppStorage(DefaultsKey.polishParagraphs.key) private var paragraphs = DefaultsKey.polishParagraphs.fallback
+    @AppStorage(DefaultsKey.polishStructureCommands.key) private var structureCommands = DefaultsKey.polishStructureCommands.fallback
+    @AppStorage(DefaultsKey.appContextFormatting.key) private var appContextFormatting = DefaultsKey.appContextFormatting.fallback
+    @State private var showsDetails = false
+
+    private var switches: [Bool] { [removeFillers, applyITN, paragraphs, structureCommands, appContextFormatting] }
+
+    private var all: Binding<Bool> {
+        Binding(
+            get: { switches.allSatisfy { $0 } },
+            set: { on in
+                removeFillers = on
+                applyITN = on
+                paragraphs = on
+                structureCommands = on
+                appContextFormatting = on
+            }
+        )
+    }
+
+    var body: some View {
+        Section {
+            Toggle("Text aufbereiten", isOn: all)
+            HStack {
+                if switches.contains(true), switches.contains(false) {
+                    Text("Angepasst")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Anpassen…") { showsDetails = true }
+            }
+        } header: {
+            Text("Text")
+        } footer: {
+            Text("Füllwörter, Zahlen, Absätze, gesprochene Struktur und die Ziel-App — nie in Code-Editoren.")
+        }
+        .sheet(isPresented: $showsDetails) {
+            TextPreparationSheet()
+        }
+    }
+}
+
+private struct TextPreparationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(DefaultsKey.polishRemoveFillers.key) private var removeFillers = DefaultsKey.polishRemoveFillers.fallback
+    @AppStorage(DefaultsKey.polishApplyITN.key) private var applyITN = DefaultsKey.polishApplyITN.fallback
+    @AppStorage(DefaultsKey.polishParagraphs.key) private var paragraphs = DefaultsKey.polishParagraphs.fallback
+    @AppStorage(DefaultsKey.polishStructureCommands.key) private var structureCommands = DefaultsKey.polishStructureCommands.fallback
+    @AppStorage(DefaultsKey.appContextFormatting.key) private var appContextFormatting = DefaultsKey.appContextFormatting.fallback
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    Toggle("Füllwörter entfernen (ähm, äh …)", isOn: $removeFillers)
+                    Toggle("Zahlen & Daten formatieren", isOn: $applyITN)
+                    Toggle("Absätze setzen", isOn: $paragraphs)
+                    Toggle("Gesprochene Struktur umsetzen", isOn: $structureCommands)
+                } header: {
+                    Text("Textqualität")
+                } footer: {
+                    Text("Absätze und gesprochene Befehle wie „neue Zeile“ oder „Stichpunkt“ — nie in Code-Editoren.")
+                }
+                Section {
+                    Toggle("Text an die Ziel-App anpassen", isOn: $appContextFormatting)
+                } header: {
+                    Text("App-Anpassung")
+                } footer: {
+                    Text("Locker in Chats, Schlusspunkt in Mails, wörtlich in Code-Editoren.")
+                }
+                if appContextFormatting {
+                    AppCategorySection()
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Fertig") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(Theme.Spacing.l)
+        }
+        .frame(minWidth: 460, minHeight: 420)
     }
 }

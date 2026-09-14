@@ -569,6 +569,13 @@ struct MenuContentView: View {
             meeting.toggle()
         }
         .disabled(meeting.state == .processing)
+        // A measuring tool behind ⌥ (Spec 33 §3.1) — macOS 15 and later; on 14
+        // it stays in Settings → Meetings → Erweitert only.
+        .optionAlternate {
+            Button("Call-Fenster auslesen…") {
+                if !ScreenProbe.probeRunningCall().succeeded { NSSound.beep() }
+            }
+        }
         // No `.keyboardShortcut` on the items below.
         //
         // A status-item menu is not in the main menu's key-equivalent chain, so
@@ -778,5 +785,17 @@ struct MenuContentView: View {
     private func open(_ id: String) {
         openWindow(id: id)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+extension View {
+    /// `modifierKeyAlternate(.option)` where it exists (macOS 15), nothing below.
+    @ViewBuilder
+    func optionAlternate(@ViewBuilder _ alternate: () -> some View) -> some View {
+        if #available(macOS 15, *) {
+            modifierKeyAlternate(.option, alternate)
+        } else {
+            self
+        }
     }
 }

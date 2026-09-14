@@ -81,7 +81,7 @@ struct RecentDictationRow: View {
 
             Spacer(minLength: 8)
 
-            VStack(spacing: 4) {
+            VStack(spacing: Theme.Spacing.xs) {
                 // No "Einfügen" here on purpose: clicking a button in this
                 // window makes the window key, so the synthesized ⌘V lands in
                 // Notable itself. Copying is the honest action from a window;
@@ -104,7 +104,7 @@ struct RecentDictationRow: View {
                 .disabled(text.isEmpty)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, Theme.Spacing.xs)
         .sheet(isPresented: $correcting) { correctionSheet }
     }
 
@@ -112,7 +112,7 @@ struct RecentDictationRow: View {
     /// `PersonalDictionary.recordCorrection` so Notable learns. The text is NOT
     /// re-inserted anywhere — it already landed in its target app.
     private var correctionSheet: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("Diktat korrigieren")
                 .font(.headline)
             Text("Notable lernt daraus, welche Wörter es falsch hört, und schlägt sie in den Einstellungen als Wörterbuch-Eintrag vor. Der Text wird nicht erneut eingefügt.")
@@ -135,7 +135,7 @@ struct RecentDictationRow: View {
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines) == text)
             }
         }
-        .padding(16)
+        .padding(Theme.Spacing.l)
         .frame(width: 440)
     }
 }

@@ -47,11 +47,15 @@ enum ASREngineID: String, CaseIterable, Identifiable {
     /// `String(localized:)` per branch, like every other plain-`String` label:
     /// a `Text(engine.label)` renders this verbatim, so an unwrapped literal is
     /// German in an English window with nothing to warn about it.
+    ///
+    /// The role first, the name after it (Spec 33 §3.2, §7): a picker of three
+    /// model names asks the user to know them. The name stays in the label, so
+    /// "English only" is never hidden behind a quality word (Spec 11 §4).
     var label: String {
         switch self {
-        case .parakeetV3: String(localized: "Parakeet v3 — mehrsprachig (Standard)")
-        case .unifiedEnglish: String(localized: "Parakeet Unified — Englisch, Streaming")
-        case .whisper: String(localized: "Whisper (OpenAI) — mehrsprachig")
+        case .parakeetV3: String(localized: "Standard — mehrsprachig (Parakeet v3)")
+        case .unifiedEnglish: String(localized: "Englisch — schnell (Parakeet Unified)")
+        case .whisper: String(localized: "Vergleich — Whisper (OpenAI)")
         }
     }
 }

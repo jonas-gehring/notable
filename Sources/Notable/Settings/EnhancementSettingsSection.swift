@@ -144,12 +144,12 @@ private struct ProfileEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("Verbesserungs-Profil")
                 .font(.headline)
             Form {
                 TextField("Titel", text: $profile.title, prompt: Text("Protokollstil"))
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     Text("Anweisung an das Modell")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -180,7 +180,7 @@ private struct ProfileEditor: View {
                 .disabled(profile.title.isEmpty || profile.systemPrompt.isEmpty)
             }
         }
-        .padding(16)
+        .padding(Theme.Spacing.l)
         .frame(width: 480)
     }
 }

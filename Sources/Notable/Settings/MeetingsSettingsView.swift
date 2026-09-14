@@ -22,17 +22,7 @@ struct MeetingsSettingsView: View {
 
     /// Stufe 0 of Spec 24: one text dump of the running call's window.
     private func probe() {
-        guard let call = AppContainer.shared.detector.callProcess else {
-            probeMessage = ScreenProbe.ProbeError.noCallApp.errorDescription
-            return
-        }
-        do {
-            let url = try ScreenProbe.dump(bundleIDs: call.processBundleIDs, callName: call.sourceName)
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-            probeMessage = url.lastPathComponent
-        } catch {
-            probeMessage = error.localizedDescription
-        }
+        probeMessage = ScreenProbe.probeRunningCall().message
     }
 
     /// Which engine a meeting will actually use given the toggle — Unified can't
@@ -203,5 +193,24 @@ private struct RememberedConsentSection: View {
         decisions = MeetingConsentStore.all()
             .map { (key: $0.key, decision: $0.value) }
             .sorted { $0.key < $1.key }
+    }
+}
+
+extension ScreenProbe {
+    /// Writes the running call window's Accessibility tree and reveals the file.
+    /// One entry for Settings and for the ⌥ alternative in the menu (Spec 33 §3.1).
+    @MainActor
+    @discardableResult
+    static func probeRunningCall() -> (succeeded: Bool, message: String?) {
+        guard let call = AppContainer.shared.detector.callProcess else {
+            return (false, ProbeError.noCallApp.errorDescription)
+        }
+        do {
+            let url = try dump(bundleIDs: call.processBundleIDs, callName: call.sourceName)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return (true, url.lastPathComponent)
+        } catch {
+            return (false, error.localizedDescription)
+        }
     }
 }

@@ -13,7 +13,7 @@ struct EngineStatusRow: View {
 
     var body: some View {
         LabeledContent("Modell") {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Spacing.s) {
                 switch dictation.modelState(for: selected) {
                 case .ready:
                     Label("geladen", systemImage: "checkmark.circle.fill")
@@ -56,7 +56,7 @@ struct SpokenLanguagesRow: View {
 
     var body: some View {
         LabeledContent("Sprachen, die ich diktiere") {
-            HStack(spacing: 12) {
+            HStack(spacing: Theme.Spacing.m) {
                 ForEach(SpokenLanguages.supported, id: \.code) { language in
                     Toggle(language.label, isOn: binding(for: language.code))
                         .toggleStyle(.checkbox)

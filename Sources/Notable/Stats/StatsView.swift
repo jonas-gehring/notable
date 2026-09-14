@@ -125,7 +125,7 @@ struct StatsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 header
                 if model.isEmpty {
                     emptyState
@@ -195,7 +195,7 @@ struct StatsView: View {
     /// fold would bury it.
     private var details: some View {
         DisclosureGroup(isExpanded: $showDetails) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                 HeatmapCard(matrix: model.heatmap, calendar: model.displayCalendar)
                 EngineUsageCard(totals: model.engines)
                 EnginePerformanceCard(stats: model.latencies, wordsPerMinute: model.wordsPerMinute)
@@ -303,14 +303,14 @@ struct StatsView: View {
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartYScale(domain: 0...max(1, model.series.map { $0.savedSeconds / 60 }.max() ?? 1))
-        .chartPlotStyle { $0.padding(.vertical, 4) }
+        .chartPlotStyle { $0.padding(.vertical, Theme.Spacing.xs) }
         .accessibilityLabel("Verlauf der gesparten Zeit")
     }
 
     // MARK: Stat tiles — period value, delta, lifetime as the caption
 
     private var tiles: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: 12)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: Theme.Spacing.m)], spacing: Theme.Spacing.m) {
             StatTile(
                 icon: "text.word.spacing",
                 caption: String(localized: "Wörter diktiert"),
@@ -408,7 +408,7 @@ struct StatsView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Theme.Spacing.s) {
             Image(systemName: "chart.bar.xaxis")
                 .font(Theme.Typography.display)
                 .foregroundStyle(Theme.chartPrimary.opacity(0.7))
@@ -611,7 +611,7 @@ private struct BucketChart: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(.title3.weight(.semibold))
@@ -658,7 +658,7 @@ private struct BucketChart: View {
                     startPoint: .top, endPoint: .bottom))
                 .opacity(hovered == nil || hovered == bucket.id ? 1 : 0.3)
                 .cornerRadius(3)
-                .annotation(position: .top, spacing: 4) {
+                .annotation(position: .top, spacing: Theme.Spacing.xs) {
                     if hovered == nil, bucket.id == peak?.id {
                         Text(UsageMetrics.integer(value(bucket)))
                             .font(.caption2.weight(.medium))

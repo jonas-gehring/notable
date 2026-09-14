@@ -268,3 +268,35 @@ Ergebnis hierher.
 verifiziert:** alles, was man sehen oder bedienen muss — Abnahme 1, 3, 5–8, darunter ob
 der Frame-Autosave bei SwiftUI-`Window`-Szenen tatsächlich greift und ob
 ⌘C/⌘V/⌘Z/⌘A in den Editoren funktionieren (§8).
+
+### Nachtrag: vervollständigt (2026-09-14)
+
+Auf Ansage „alles vollständig bauen", mit den Vorschlägen aus §7 wo es einen gibt:
+
+- **Sammelschalter „Text aufbereiten"** (Abweichung 2 aufgehoben): ein Schalter für
+  Füllwörter, Zahlen, Absätze, Struktur und Ziel-App; „Angepasst", sobald die fünf
+  nicht gleich stehen; „Anpassen…" öffnet die fünf Einzelschalter samt App-Zuordnungen
+  in einem Sheet.
+- **Die Diktat-Seite in der Reihenfolge von §3.2:** Taste, Erkennung, Text,
+  Textstufe auf dem Gerät, Verbesserung, Wörterbuch & Bausteine, Anzeige & Ton,
+  Erweitert. Der Idle-Timeout ist ein Schalter „Freihändig bei Stille beenden"
+  (45 s); die Zahl steht unter „Erweitert".
+- **Engine-Rollen** (§7): „Standard — mehrsprachig (Parakeet v3)", „Englisch — schnell
+  (Parakeet Unified)", „Vergleich — Whisper (OpenAI)". Der Name bleibt im Label, damit
+  „nur Englisch" nie hinter einem Rollenwort verschwindet (Spec 11 §4).
+- **Zwölf Menüleisten-Motive** (§7, Auswahl: Wellenform ×4, Mikrofon ×3, Sprechblase,
+  Untertitel, Notiz, Aufnahme, Notieren). Ein gespeichertes Motiv aus der alten Liste
+  funktioniert weiter und steht als „Bisherige Wahl" im Picker.
+- **⌥-Alternative** (Abweichung 1 ergänzt): mit gedrückter ⌥ wird „Meeting aufzeichnen"
+  zu „Call-Fenster auslesen…" — ab macOS 15; auf 14 bleibt nur der Knopf unter
+  „Erweitert".
+- **Abstände migriert** (Abweichung 4 aufgehoben): 56 Stellen in 18 Dateien, **nur**
+  exakte Werte der Skala (4/8/12/16/24 → `Theme.Spacing`), also ohne sichtbare
+  Änderung. Zwischenwerte (6, 10, …) bleiben Zahlen — sie auf die Skala zu runden,
+  verschiebt Pixel, die niemand angesehen hat. `ThemeTests` hält das fest;
+  `DictationOverlay.swift` ist ausgenommen, weil es ohne `Theme` im Test-Bundle liegt.
+
+**Weiter nicht gebaut:** das App-Icon (Icon Composer, ein Gestaltungsauftrag ohne
+Vorschlag in §7), die README-Screenshots, und Abweichung 3 bleibt (Einfügemethode und
+Vorschaltmodell unter „Erweitert", nicht entfernt). **Tests:** `ThemeTests` +1;
+Regressionslauf ohne Modell-Suiten 825 Tests grün.

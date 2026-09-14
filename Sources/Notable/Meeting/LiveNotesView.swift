@@ -47,7 +47,7 @@ struct LiveNotesView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.s) {
             Image(systemName: notes.isActive ? "record.circle" : "note.text")
                 .foregroundStyle(notes.isActive ? Theme.accent : Theme.textMuted)
             VStack(alignment: .leading, spacing: 1) {
@@ -73,7 +73,7 @@ struct LiveNotesView: View {
                 ElapsedLabel(notes: notes)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Theme.Spacing.m)
         .padding(.vertical, 9)
     }
 
@@ -123,8 +123,8 @@ struct LiveNotesView: View {
                     .font(.subheadline)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Spacing.m)
+        .padding(.vertical, Theme.Spacing.s)
     }
 
     /// ⌘T drops the elapsed time in at the caret. The leading-newline decision is

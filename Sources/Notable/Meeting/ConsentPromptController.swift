@@ -139,7 +139,7 @@ private struct ConsentPromptView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Spacing.s) {
                 Image(systemName: "record.circle")
                     .font(.title3)
                     .foregroundStyle(.red)
@@ -159,7 +159,7 @@ private struct ConsentPromptView: View {
                     .font(.callout)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Spacing.s) {
                 Button("Später", action: onNo)
                 Spacer()
                 Button("Aufnehmen", action: onYes)

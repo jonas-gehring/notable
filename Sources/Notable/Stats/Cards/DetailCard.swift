@@ -35,7 +35,7 @@ struct DetailCard<Content: View>: View {
                     .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, Theme.Spacing.s)
             } else {
                 content
             }
@@ -55,7 +55,7 @@ struct ShareRow: View {
     var icon: NSImage?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.s) {
             if let icon {
                 Image(nsImage: icon)
                     .resizable()

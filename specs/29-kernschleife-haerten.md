@@ -253,3 +253,57 @@ Kein Schema, keine Migration. `recordingGeneration` bleibt und wird zum Job-Schl
 - **Idle-Timeout-Vorgabe 45 s statt aus** — dito. Vorschlag: ja; die Hysterese ist der
   Teil, der den alten Einwand (Timeout mitten im Satz) entkräftet.
 - **Job-Zähler im Overlay** — erst, wenn zwei Jobs im Alltag tatsächlich vorkommen.
+
+## 8. Stand des Baus (2026-09-14)
+
+**Gebaut:** alle zwölf Punkte aus §1, in dieser Form:
+
+- `DictationPipeline` (pur): `start`, `enhanceRequested(after:)`, `afterStop`,
+  `afterTranscript`, `paste`, `escapeTarget`, `reachedMaximum`; dazu `JobQueue` und
+  `IdleDetector`. `DictationFailure` benennt jeden Ausgang mit Titel, Hinweis, Ton und
+  der Unterscheidung Notice/Fehler; `SoundCue` die fünf Momente.
+- Der Controller trennt `isCapturing` und `jobs`; `appState.captureState` wird daraus
+  abgeleitet (`publishCaptureState`), sodass Menü, Updater und Detektor unverändert
+  lesen. Ein zweites Diktat startet während der Transkription; Jobs fügen in
+  Sprechreihenfolge ein, weil jeder auf den vorigen Task wartet, bevor er einfügt.
+- Esc trifft die laufende Aufnahme oder den jüngsten Job. Mikrofonberechtigung und
+  Secure Input werden beim Drücken geprüft, digitale Stille nach dem Loslassen, Ziel-App
+  und Secure Input vor dem Einfügen (bei Abweichung: Zwischenablage + Meldung).
+  Gerätewechsel ruft `resume`; scheitert es, wird transkribiert, was da ist. Ruhezustand
+  beendet und transkribiert. Die Rolle hängt am Start. Tap-Schwelle 0,2 s, „zu kurz"
+  wird gesagt. Idle-Timeout mit Hysterese, Maximaldauer nach Wanduhr.
+- Tastendruck-Arbeit läuft nicht mehr im Tap-Callback (`DispatchQueue.main.async`,
+  Reihenfolge bleibt); das Overlay-Panel wird beim Start gebaut; der Geräte-Kontext
+  2 s gecacht.
+
+**Abweichungen vom Konzept:**
+
+1. **Keine Wirkungsliste (`PipelineEffect`).** Die Entscheidungen sind pure Funktionen,
+   der Controller führt sie aus. Dieselbe Testbarkeit für jede der zwölf Stellen, ohne
+   den Kontrollfluss ein zweites Mal als Daten aufzuschreiben.
+2. **Der Controller hat nicht unter 500 Zeilen** (Abnahme 9), sondern gut 940. Die
+   Modellverwaltung (rund 250 Zeilen: Laden, Bootstrap, Tausch) ist geblieben; sie
+   herauszulösen ist ein eigener Schritt ohne Verhaltensänderung.
+3. **Der Mikrofonwechsel wird nach dem Einfügen gemeldet**, nicht während der Aufnahme:
+   eine Notice verdeckt die Wellenform und blendet das HUD nach drei Sekunden aus,
+   mitten im Diktat.
+4. **`engine.prepare()` nach dem Stop** nicht eingebaut — `installTapAndStart` bereitet
+   ohnehin vor dem Start vor; was vom Vorlauf noch fehlt, ist zu messen.
+5. `HotkeyMonitor.isRecordingActive` behält seinen Namen und bedeutet jetzt „Esc hat ein
+   Ziel".
+6. Töne sind Systemklänge (`SoundCue.systemSoundName`); Spec 30 tauscht die Dateien.
+7. Die neuen puren Dateien stehen als `path:` im Testziel in `project.yml` — das
+   Testbundle hat keinen App-Host und linkt sonst nicht.
+
+**Offene Entscheidungen aus §7 mit dem Vorschlag gebaut:** Töne an und Idle-Timeout
+45 s in der Vorgabe. Beides ist je eine Zeile in `DefaultsKey`.
+
+**Tests:** `DictationPipelineTests` 37 (neu), `DefaultsKeyTests` angepasst; 125 Tests
+der Diktat-Klassen grün. Die übrige Suite ebenfalls grün, in zwei Teilen: der
+vollständige Lauf wurde bei den Modelltests vom System wegen Speichermangels beendet
+(49 Suiten bis dahin grün), der Rest lief danach gegen dieselben Build-Produkte
+(294 Tests, 1 übersprungen, 0 Fehlschläge). **Nicht gelaufen:**
+`ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `WhisperTranscriberTests` und
+`LatencyProbeTests` — sie laden echte Modelle, und Spec 29 berührt keinen Transcriber. **Nicht verifiziert:** die Handtests 1–8 der Abnahme
+(zweites Diktat, Esc in jeder Phase, entzogenes Mikrofon, ⌘Tab, AirPods, Passwortfeld,
+kurzes Halten) — sie brauchen die installierte App und echte Hardware.

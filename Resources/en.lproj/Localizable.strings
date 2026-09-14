@@ -408,6 +408,36 @@
 "Nächstes: %@" = "Next: %@";
 "Oben an der Notch" = "Top, around the notch";
 "Rechts am Rand" = "Right edge";
+
+/* Spec 29 — dictation failures and notices */
+"Mikrofonzugriff fehlt." = "Microphone access is missing.";
+"Mikrofonzugriff wird erfragt." = "Asking for microphone access.";
+"Sicheres Eingabefeld aktiv." = "A secure input field is active.";
+"Mikrofon nicht verfügbar." = "Microphone unavailable.";
+"Nichts gehört über „%@“." = "Nothing heard from “%@”.";
+"Nichts gehört." = "Nothing heard.";
+"Nichts verstanden." = "Nothing recognized.";
+"Zu kurz gehalten." = "Held too briefly.";
+"App gewechselt zu „%@“ — Text in der Zwischenablage." = "Switched to “%@” — the text is on the clipboard.";
+"App gewechselt — Text in der Zwischenablage." = "App switched — the text is on the clipboard.";
+"Einfügen braucht die Bedienungshilfe." = "Pasting needs Accessibility access.";
+"Transkription fehlgeschlagen." = "Transcription failed.";
+"Mikrofon verschwunden — bis dahin wird transkribiert." = "Microphone disconnected — transcribing what was recorded.";
+"Systemeinstellungen → Datenschutz → Mikrofon." = "System Settings → Privacy → Microphone.";
+"Nach dem Erlauben die Taste erneut drücken." = "Press the key again once allowed.";
+"In ein normales Textfeld klicken." = "Click into a regular text field.";
+"Anderes Mikrofon in den Einstellungen wählen." = "Choose another microphone in Settings.";
+"Anderes Mikrofon wählen oder Deckel öffnen." = "Choose another microphone or open the lid.";
+"Länger halten oder kurz tippen für freihändig." = "Hold longer, or tap briefly for hands-free.";
+"⌘V im richtigen Fenster." = "Press ⌘V in the right window.";
+"Text liegt in der Zwischenablage." = "The text is on the clipboard.";
+"Einstellungen → Diktat: Modell erneut laden." = "Settings → Dictation: reload the model.";
+"Noch einmal diktieren." = "Dictate again.";
+"Mikrofon wieder verbinden." = "Reconnect the microphone.";
+"Mikrofon gewechselt: „%@“." = "Microphone switched: “%@”.";
+"Diktat vor dem Ruhezustand beendet." = "Dictation ended before sleep.";
+"Diktat nach %lld s Stille beendet." = "Dictation ended after %lld s of silence.";
+"Diktat nach %lld Minuten automatisch beendet." = "Dictation ended automatically after %lld minutes.";
 "oder eine lokale CLI: Claude Code, Gemini, Codex" = "or a local CLI: Claude Code, Gemini, Codex";
 "ohne Echo-Unterdrückung (%@) — bei Lautsprecher-Ton kann die Gegenseite doppelt im Transkript landen" = "without echo cancellation (%@) — with speaker audio the other side can end up twice in the transcript";
 "Ohne Mikrofon kein Diktat. Das ist die einzige zwingende Berechtigung." = "No microphone, no dictation. This is the one permission that is not optional.";

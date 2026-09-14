@@ -48,8 +48,13 @@ enum DefaultsKey {
     static let polishStructureCommands = DefaultsEntry(key: "polishStructureCommands", fallback: true)
     static let polishFuzzyDictionary = DefaultsEntry(key: "polishFuzzyDictionary", fallback: true)
     static let appContextFormatting = DefaultsEntry(key: "appContextFormatting", fallback: true)
-    static let dictationSounds = DefaultsEntry(key: "dictationSounds", fallback: false)
-    static let dictationIdleTimeout = DefaultsEntry(key: "dictationIdleTimeout", fallback: 0.0)
+    /// On since Spec 29: with it off, cancel, failure, lock and "too short" all
+    /// ended without any signal. Only the unset key changes — a user who switched
+    /// the sounds off keeps them off.
+    static let dictationSounds = DefaultsEntry(key: "dictationSounds", fallback: true)
+    /// 45 s since Spec 29, with hysteresis (`IdleDetector`). Off, a forgotten
+    /// hands-free lock stayed open until the ten-minute cap.
+    static let dictationIdleTimeout = DefaultsEntry(key: "dictationIdleTimeout", fallback: 45.0)
     static let bootstrapModel = DefaultsEntry(key: "bootstrapModel", fallback: true)
     /// Which app a dictation was pasted into. Stays in the local database and
     /// never goes into a request.

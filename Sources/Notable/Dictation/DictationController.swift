@@ -1,4 +1,6 @@
 import AppKit
+import AVFoundation
+import Carbon.HIToolbox
 import Foundation
 import os
 
@@ -67,19 +69,43 @@ final class DictationController: ObservableObject {
     private let minimumDuration: TimeInterval = 0.3
     /// Upper bound for a single dictation (hands-free lock has no key to release).
     static let maximumRecordingSeconds: TimeInterval = 600
-    private static let maximumRecordingTicks = Int(maximumRecordingSeconds * 10) // 0.1 s ticks
-    /// Set when the 10-minute cap ended the recording; shown after the paste.
-    private var autoStopNotice: String?
+    /// Said after the paste of the recording it belongs to: the auto-stop, a
+    /// microphone that changed mid-sentence, the sleep that ended it.
+    private var pendingNotice: String?
 
     private var recordingStartedAt = Date.distantPast
     /// Set at key-down when the *second* hotkey started this recording. False
     /// for every normal dictation, which is what keeps the core path offline and
     /// as fast as before.
     private var enhanceRequested = false
-    /// Bumped on every begin/finish/cancel — async work from an older
-    /// recording checks it after each await and bails instead of
-    /// contaminating the current one.
+    /// Numbers each recording. It is the job's key once the recording is
+    /// released: Esc or a cancel removes the job from `jobs`, and the job checks
+    /// after every await whether it is still there.
     private var recordingGeneration = 0
+    /// True while the microphone is open.
+    ///
+    /// Capture and processing are separate states since Spec 29 — the split
+    /// `MeetingController` got for back-to-back calls. `captureState` used to be
+    /// one value, and a dictation still transcribing blocked the next key press
+    /// without a sound. `appState.captureState` is now *derived* from these two
+    /// (`publishCaptureState`), so the menu, the updater and the detector read
+    /// the same combined state as before.
+    private var isCapturing = false
+    /// Released recordings still on their way to the paste, oldest first.
+    private var jobs = JobQueue()
+    private var jobTasks: [Int: Task<Void, Never>] = [:]
+    /// The most recently started job. The next one waits for it before pasting,
+    /// so two texts never land in the reverse of the order they were spoken.
+    private var lastJobTask: Task<Void, Never>?
+    /// A failure of an older job that arrived while a new recording ran. Said
+    /// once nothing is running any more instead of covering the waveform.
+    private var deferredFailure: DictationFailure?
+    /// Name of the device this recording opened, for "nothing heard on …".
+    private var recordingDevice: String?
+    private var cachedInputContext: (context: InputDevicePolicy.Context, at: Date)?
+    /// `resume` itself reconfigures the engine and posts another change.
+    private var ignoreConfigurationChangesUntil = Date.distantPast
+    private var sleepObserver: NSObjectProtocol?
     /// Per-engine load state; `modelState` mirrors the selected engine.
     private var v3State: ModelState = .loading
     private var streamState: ModelState = .loading
@@ -94,11 +120,8 @@ final class DictationController: ObservableObject {
     private var pendingSwap = false
     private var ptt = PTTStateMachine()
     private var levelTimer: Timer?
-    private var timerTicks = 0
-    /// Consecutive silent 0.1 s ticks, for the hands-free idle-timeout (Spec 08 D).
-    private var silentTicks = 0
-    /// Seconds of silence that auto-end a hands-free lock (0 = off), read at start.
-    private var idleTimeoutSeconds = 0.0
+    /// Hands-free idle-timeout (Spec 08 D), with hysteresis since Spec 29.
+    private var idle = IdleDetector(timeout: 0)
 
     init(appState: AppState) {
         self.appState = appState
@@ -107,33 +130,46 @@ final class DictationController: ObservableObject {
     func start() {
         hotkey.onKeyDown = { [weak self] role in
             guard let self else { return }
-            // Decided at the *start* of the recording and remembered, so the
-            // release does not have to look the setting up again.
-            self.enhanceRequested = role == .enhanced
-            self.perform(self.ptt.keyDown(at: ProcessInfo.processInfo.systemUptime))
+            let action = self.ptt.keyDown(at: ProcessInfo.processInfo.systemUptime)
+            // The role belongs to the press that *starts* a recording (Spec 29).
+            // The press that ends a hands-free one must not change whether its
+            // text leaves the device.
+            self.enhanceRequested = DictationPipeline.enhanceRequested(
+                after: action, pressed: role, current: self.enhanceRequested
+            )
+            self.perform(action)
         }
         hotkey.onKeyUp = { [weak self] _ in
             guard let self else { return }
             let action = self.ptt.keyUp(at: ProcessInfo.processInfo.systemUptime)
             if self.ptt.isLocked {
                 self.overlay.updateLocked(true)
+                self.playCue(.locked)
             }
             self.perform(action)
         }
+        overlay.prepare()
         hotkey.onEscape = { [weak self] in self?.cancelRecording() }
+        // Esc is live while a recording runs *or* a released one is still on its
+        // way to the paste. Only the first half used to count, so Esc during a
+        // long enhancement went to the focused app instead (Spec 29).
         hotkey.isRecordingActive = { [weak self] in
-            self?.appState.captureState == .recording
+            guard let self else { return false }
+            return self.isCapturing || !self.jobs.isEmpty
         }
         hotkey.spec = HotkeySpec.current
         hotkey.enhanceSpec = EnhancementSettings.hotkey()
         activeEngine = ASREngineID.current
 
+        // A route change moves the recording to the device the policy picks
+        // now, instead of cancelling it (Spec 29).
         recorder.onConfigurationChange = { [weak self] in
-            Task { @MainActor in
-                guard let self, self.appState.captureState == .recording else { return }
-                self.cancelRecording()
-                self.overlay.flashError(String(localized: "Audiogerät hat gewechselt — Aufnahme abgebrochen."))
-            }
+            Task { @MainActor in self?.handleConfigurationChange() }
+        }
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.finishBeforeSleep() }
         }
 
         if hotkey.start() {
@@ -222,7 +258,7 @@ final class DictationController: ObservableObject {
     /// Settings changes that invalidate a running recording. Dropping audio
     /// the user is speaking into is fine — dropping it silently is not.
     private func discardActiveRecording(reason: String) {
-        guard appState.captureState == .recording else { return }
+        guard isCapturing else { return }
         cancelRecording()
         overlay.flashError(reason)
     }
@@ -417,124 +453,199 @@ final class DictationController: ObservableObject {
         )
     }
 
+    /// The input context, cached briefly.
+    ///
+    /// Enumerating devices and reading the lid through IORegistry used to happen
+    /// on every key-down. Two seconds is shorter than any realistic gap between
+    /// plugging something in and dictating, and a route change drops the cache.
+    private func inputContext(fresh: Bool = false) -> InputDevicePolicy.Context {
+        if !fresh, let cached = cachedInputContext, Date().timeIntervalSince(cached.at) < 2 {
+            return cached.context
+        }
+        let context = Self.inputContext()
+        cachedInputContext = (context, Date())
+        return context
+    }
+
+    private static func microphonePermission() -> DictationPipeline.MicrophonePermission {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: .granted
+        case .notDetermined: .notDetermined
+        default: .denied
+        }
+    }
+
     private func beginRecording() {
-        guard appState.captureState == .idle else {
-            // The PTT machine already advanced on keyDown — resync it, or a
-            // quick tap during processing would fake-lock with no recording.
+        // A running capture is the only thing that blocks a new one. A dictation
+        // still being transcribed does not (Spec 29): its samples are already
+        // out of the recorder, and the old `.idle` guard here dropped the second
+        // dictation of a quick exchange without a sound.
+        guard !isCapturing else {
             ptt.reset()
             return
         }
-        let choice = InputDevicePolicy.choose(Self.inputContext())
-        // Nothing but the built-in microphone behind a closed lid: it is cut off
-        // in hardware and would record zeros. Saying so now beats a silent
-        // "nothing recognized" after the release.
-        guard !choice.isKnownSilent else {
+        let choice = InputDevicePolicy.choose(inputContext())
+        switch DictationPipeline.start(
+            permission: Self.microphonePermission(),
+            secureInput: IsSecureEventInputEnabled(),
+            knownSilent: choice.isKnownSilent
+        ) {
+        case .start:
+            break
+        case .requestPermission:
             ptt.reset()
-            overlay.flashError(String(localized: "Deckel geschlossen — das eingebaute Mikrofon ist dann abgeschaltet.")
-                + " " + String(localized: "Externes Mikrofon oder Headset verbinden."))
+            report(.microphoneRequested)
+            Task { _ = await AVCaptureDevice.requestAccess(for: .audio) }
+            return
+        case .refuse(let failure):
+            ptt.reset()
+            report(failure)
             return
         }
         do {
             try recorder.start(device: choice.device?.id)
         } catch {
             ptt.reset()
-            overlay.flashError(String(localized: "Mikrofon nicht verfügbar: \(error.localizedDescription)"))
+            Self.log.error("Mikrofon: \(error.localizedDescription, privacy: .public)")
+            report(.microphoneUnavailable)
             return
         }
         recordingGeneration += 1
-        autoStopNotice = nil
+        recordingDevice = choice.device?.name
+        pendingNotice = nil
+        ignoreConfigurationChangesUntil = .distantPast
         // After `recorder.start()` succeeded: a failed start must not leave the
         // Mac muted with nothing recording.
         media.begin()
         recordingStartedAt = Date()
-        appState.captureState = .recording
+        isCapturing = true
+        publishCaptureState()
         // The overlay's "Esc verwirft" is only true if the tap came up; without
         // Accessibility it does not, and promising a way out that does not exist
         // is worse than not offering one.
         let escAvailable = hotkey.beginEscInterception()
         overlay.setEscapeAvailable(escAvailable)
         overlay.show(.recording)
-        playCue("Tink")
+        playCue(.start)
 
-        timerTicks = 0
-        silentTicks = 0
-        idleTimeoutSeconds = DefaultsKey.dictationIdleTimeout.value()
+        idle = IdleDetector(timeout: DefaultsKey.dictationIdleTimeout.value())
         let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.appState.captureState == .recording else { return }
-                self.overlay.updateLevel(self.recorder.level)
-                self.timerTicks += 1
+                guard let self, self.isCapturing else { return }
+                let level = self.recorder.level
+                self.overlay.updateLevel(level)
 
-                // Hands-free idle-timeout: end a locked session after a run of
-                // silence, so a forgotten lock stops on its own (Spec 08 D).
-                if self.ptt.isLocked, self.idleTimeoutSeconds > 0 {
-                    if self.recorder.level < 0.04 { self.silentTicks += 1 } else { self.silentTicks = 0 }
-                    if self.silentTicks >= Int(self.idleTimeoutSeconds * 10) {
-                        self.autoStopNotice = String(localized: "Diktat nach \(Int(self.idleTimeoutSeconds)) s Stille beendet.")
-                        self.finishRecording()
-                        return
-                    }
-                }
-                // Hands-free lock has no key held down to end it: a forgotten
-                // session would grow the sample buffer without bound (~64 KB/s,
-                // plus an O(n) copy per snapshot). Dictation is not meeting
-                // capture — cut it off and transcribe what there is.
-                if self.timerTicks >= Self.maximumRecordingTicks {
-                    // Shown once the transcript is in — the transcribing
-                    // overlay would otherwise swallow the notice immediately.
-                    self.autoStopNotice = String(localized: "Diktat nach \(Int(Self.maximumRecordingSeconds / 60)) Minuten automatisch beendet.")
+                // Hands-free idle-timeout: a forgotten lock stops on its own,
+                // a soft speaker does not (hysteresis, `IdleDetector`).
+                if self.ptt.isLocked,
+                   self.idle.observe(level: level, at: ProcessInfo.processInfo.systemUptime) {
+                    self.pendingNotice = String(localized: "Diktat nach \(Int(self.idle.timeout)) s Stille beendet.")
                     self.finishRecording()
                     return
                 }
-                // Whole-clip dictation: no incremental/streaming
-                // pre-decoding during recording — just the level meter. The
-                // clip is transcribed once, on release, which is fast for
-                // normal-length dictations and far more robust.
+                // Hands-free lock has no key held down to end it: a forgotten
+                // session would grow the sample buffer without bound. By wall
+                // clock — a stalled main thread must not stretch the cap.
+                if DictationPipeline.reachedMaximum(
+                    startedAt: self.recordingStartedAt, now: Date(), maximum: Self.maximumRecordingSeconds
+                ) {
+                    self.pendingNotice = String(localized: "Diktat nach \(Int(Self.maximumRecordingSeconds / 60)) Minuten automatisch beendet.")
+                    self.finishRecording()
+                    return
+                }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
         levelTimer = timer
     }
 
-    /// The transcribe → polish → enhance → paste → save task of the recording
-    /// that was just released. Held so Esc can still reach it.
-    private var postProcessingTask: Task<Void, Never>?
+    /// Derives `appState.captureState` from the capture and the job queue, and
+    /// does what "nothing running any more" implies.
+    ///
+    /// Recording wins over processing, as in `MeetingController.state`: a running
+    /// capture is what the user needs to see. Once both are over, the Esc tap goes,
+    /// a model swap that came due meanwhile happens, and a failure that arrived
+    /// during a newer recording is finally said.
+    private func publishCaptureState() {
+        appState.captureState = isCapturing ? .recording : (jobs.isEmpty ? .idle : .transcribing)
+        guard !isCapturing, jobs.isEmpty else { return }
+        hotkey.endEscInterception()
+        // Only after `.idle`: `updateActiveEngine` refuses to swap while a
+        // capture is in flight, and asking earlier merely set `pendingSwap`
+        // again with no later path asking.
+        applyPendingSwap()
+        if let failure = deferredFailure {
+            deferredFailure = nil
+            show(failure)
+        }
+    }
 
-    private func cancelRecording() {
-        // Esc during transcription or enhancement: there is no recording left to
-        // stop, but there is a task to abort — and during `.enhancing` that task
-        // is waiting on a CLI round-trip of up to a minute. Cancelling it also
-        // terminates that process (`CLIProcessRunner` handles cancellation), so
-        // Esc means the same thing in both phases: nothing is pasted.
-        if appState.captureState == .transcribing {
-            recordingGeneration += 1
-            postProcessingTask?.cancel()
-            postProcessingTask = nil
-            hotkey.endEscInterception()
-            appState.captureState = .idle
-            applyPendingSwap()
-            overlay.hide()
+    /// Says a failure: a sound always, words unless a recording is running —
+    /// then the words wait until nothing is (`publishCaptureState`).
+    private func report(_ failure: DictationFailure) {
+        playCue(failure.cue)
+        Self.log.info("Diktat: \(failure.title, privacy: .public)")
+        guard !isCapturing else {
+            deferredFailure = failure
             return
         }
-        guard appState.captureState == .recording else { return }
-        recordingGeneration += 1
-        ptt.reset()
-        hotkey.endEscInterception()
-        stopLevelTimer()
-        _ = recorder.stop()
-        autoStopNotice = nil
-        // Cancelling counts as ending: the volume comes back either way.
-        media.end()
-        appState.captureState = .idle
-        applyPendingSwap()
+        show(failure)
+    }
+
+    private func show(_ failure: DictationFailure) {
+        if failure.isNotice {
+            overlay.flashNotice(failure.message)
+        } else {
+            overlay.flashError(failure.message)
+        }
+    }
+
+    /// Is this job still wanted? Esc removes it from the queue, and a cancelled
+    /// task must not paste into whatever field is focused by then. Read after
+    /// every await of the job.
+    private func isLive(_ generation: Int) -> Bool {
+        jobs.contains(generation) && !Task.isCancelled
+    }
+
+    /// Hides the overlay unless a newer recording is using it.
+    private func hideIfIdle() {
+        guard !isCapturing else { return }
         overlay.hide()
+    }
+
+    private func cancelRecording() {
+        switch DictationPipeline.escapeTarget(isCapturing: isCapturing, jobs: jobs) {
+        case .recording:
+            ptt.reset()
+            stopLevelTimer()
+            _ = recorder.stop()
+            pendingNotice = nil
+            // Cancelling counts as ending: the volume comes back either way.
+            media.end()
+            isCapturing = false
+            overlay.hide()
+            playCue(.cancelled)
+            publishCaptureState()
+        case .job(let generation):
+            // Esc after the release: the newest job is the one whose text has
+            // not appeared yet. During `.enhancing` it is waiting on a CLI
+            // round-trip of up to a minute; cancelling the task also terminates
+            // that process (`CLIProcessRunner` handles cancellation).
+            jobs.finish(generation)
+            jobTasks[generation]?.cancel()
+            jobTasks[generation] = nil
+            overlay.hide()
+            playCue(.cancelled)
+            publishCaptureState()
+        case .none:
+            return
+        }
     }
 
     /// Performs a swap that came due while a recording was in flight.
     ///
-    /// Called from every path that returns to `.idle` — the finished dictation,
-    /// the too-short clip, and the cancel. `updateActiveEngine` is idempotent
-    /// and clears the flag itself; a no-op here is the normal case.
+    /// Called when capture and processing have both ended. `updateActiveEngine`
+    /// is idempotent and clears the flag itself; a no-op here is the normal case.
     private func applyPendingSwap() {
         guard pendingSwap else { return }
         updateActiveEngine()
@@ -545,14 +656,49 @@ final class DictationController: ObservableObject {
         levelTimer = nil
     }
 
-    /// Plays a short system sound cue if enabled (Spec 08 C). Off by default.
-    private func playCue(_ name: String) {
+    /// Plays the sound for a moment of the dictation (Spec 08 C; on by default
+    /// since Spec 29).
+    private func playCue(_ cue: SoundCue) {
         guard DefaultsKey.dictationSounds.value() else { return }
-        NSSound(named: name)?.play()
+        NSSound(named: cue.systemSoundName)?.play()
+    }
+
+    /// A route change during a recording: device unplugged, AirPods connected.
+    ///
+    /// It used to cancel the recording and discard the audio. `resume` keeps the
+    /// buffer, reinstalls the tap on the device the policy picks *now* and pads
+    /// the gap with silence — what meetings have done all along. Only when that
+    /// fails does the recording end, and then what was captured is transcribed:
+    /// half a dictation beats a lost one.
+    private func handleConfigurationChange() {
+        cachedInputContext = nil
+        guard isCapturing, Date() >= ignoreConfigurationChangesUntil else { return }
+        let choice = InputDevicePolicy.choose(inputContext(fresh: true))
+        ignoreConfigurationChangesUntil = Date().addingTimeInterval(1.5)
+        do {
+            try recorder.resume(device: choice.device?.id)
+            if let name = choice.device?.name, name != recordingDevice {
+                recordingDevice = name
+                pendingNotice = String(localized: "Mikrofon gewechselt: „\(name)“.")
+            }
+        } catch {
+            Self.log.error("Gerätewechsel: \(error.localizedDescription, privacy: .public)")
+            pendingNotice = DictationFailure.deviceLost.message
+            finishRecording()
+        }
+    }
+
+    /// A recording must not run across a sleep: the audio engine may come back
+    /// without a route change, and a hands-free lock would collect nothing but a
+    /// hole. What was said before the lid closed is transcribed.
+    private func finishBeforeSleep() {
+        guard isCapturing else { return }
+        pendingNotice = String(localized: "Diktat vor dem Ruhezustand beendet.")
+        finishRecording()
     }
 
     private func finishRecording() {
-        guard appState.captureState == .recording else { return }
+        guard isCapturing else { return }
         let releasedAt = ContinuousClock.now
         // Freeze the target app now: the overlay is non-activating, so the
         // frontmost app is still the field the user dictated into (Spec 03).
@@ -561,28 +707,34 @@ final class DictationController: ObservableObject {
         // Separate switch from the formatting one: a user may well want per-app
         // polishing without a per-app tally of where he dictates.
         let appStatisticsEnabled = DefaultsKey.appStatistics.value()
-        // NOT `endEscInterception()` here: the tap stays until the task below
-        // is done, so Esc can still abort a long enhancement. Every exit path
-        // ends it — the short-clip return, the task's `defer`, and `cancel`.
         stopLevelTimer()
         let samples = recorder.stop()
         // Restored as soon as the microphone is closed — not after the paste.
         // Transcription takes long enough that waiting would feel like a bug.
         media.end()
         let sampleRate = recorder.targetSampleRate
-
         ptt.reset()
-        recordingGeneration += 1
+        isCapturing = false
+        let generation = recordingGeneration
+        let startedAt = recordingStartedAt
+        let notice = pendingNotice
+        pendingNotice = nil
         let duration = Double(samples.count) / Double(sampleRate)
-        guard duration >= minimumDuration else {
-            hotkey.endEscInterception()
-            appState.captureState = .idle
-            applyPendingSwap()
+
+        if case .refuse(let failure) = DictationPipeline.afterStop(
+            duration: duration,
+            minimumDuration: minimumDuration,
+            peak: TrackSilence.peak(samples),
+            device: recordingDevice
+        ) {
             overlay.hide()
+            publishCaptureState()
+            report(failure)
             return
         }
 
-        appState.captureState = .transcribing
+        jobs.enqueue(generation)
+        publishCaptureState()
         // The model may still be downloading on first launch — say so instead
         // of promising a transcription that is minutes away. With a stand-in
         // ready there is nothing to wait for, so it says "transcribing" and
@@ -604,22 +756,13 @@ final class DictationController: ObservableObject {
         // dictation that a later key-down never asked for.
         let wantsEnhancement = enhanceRequested
         enhanceRequested = false
-        // Read back after every await below. A cancel, a hotkey change or an
-        // engine change bumps it, and the paste for a recording nobody is
-        // waiting for any more must not land in whatever field is focused now.
-        let generation = recordingGeneration
+        let previous = lastJobTask
 
-        postProcessingTask = Task {
+        let task = Task {
             defer {
-                hotkey.endEscInterception()
-                appState.captureState = .idle
-                // Only here, and only after `.idle`: `updateActiveEngine`
-                // refuses to swap while a capture is in flight, so asking
-                // inside the body — where the state is still `.transcribing` —
-                // merely set `pendingSwap` again, and no later path asked. A
-                // model that finished downloading mid-recording then stayed
-                // unused until the next engine change or restart.
-                applyPendingSwap()
+                jobs.finish(generation)
+                jobTasks[generation] = nil
+                publishCaptureState()
             }
             do {
                 let (text, engineUsed) = try await rawTranscript(samples: samples, sampleRate: sampleRate)
@@ -627,26 +770,23 @@ final class DictationController: ObservableObject {
                     ? AppCategory.of(bundleID: targetBundleID)
                     : .unknown
                 // Off the main actor: `polish` is pure, and it sits in the gap
-                // between the key release and the paste — language detection, a
-                // dozen regex passes, the dictionary and the paragraph rebuild.
-                // Milliseconds, but they are main-thread milliseconds in the one
-                // window where the user is waiting for text to appear.
+                // between the key release and the paste.
                 let options = PolishProfile.options(for: category)
                 let polished = await Task.detached(priority: .userInitiated) {
                     TextPolisher.polish(text, options: options)
                 }.value
-                let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else {
-                    overlay.hide()
+                guard isLive(generation) else { return }
+                if let failure = DictationPipeline.afterTranscript(polished) {
+                    hideIfIdle()
+                    report(failure)
                     return
                 }
-                guard generation == recordingGeneration, !Task.isCancelled else { return }
+                let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 // Stopped **here**, before the enhancement branch: this is how
                 // long transcription took. Measured after the paste it also
                 // contained the CLI round-trip of an enhanced dictation, and
-                // those seconds went into `latency_ms` and skewed the engine's
-                // own p50/p95 in the statistics window.
+                // those seconds went into `latency_ms`.
                 let elapsed = releasedAt.duration(to: .now)
                 lastLatencyMillis = Int(Double(elapsed.components.seconds) * 1000
                     + Double(elapsed.components.attoseconds) / 1e15)
@@ -654,13 +794,12 @@ final class DictationController: ObservableObject {
                 // The only place dictation text may leave the device, and it
                 // happens solely because *this* recording was started with the
                 // enhancement hotkey. A normal dictation does not evaluate a
-                // single line of this: no await, no availability check, no
-                // network — it falls straight through to the paste below.
+                // single line of this.
                 var toPaste = trimmed
                 var rawText: String?
                 var enhancementNotice: String?
                 if wantsEnhancement, EnhancementSettings.isEnabled {
-                    overlay.show(.enhancing)
+                    if !isCapturing { overlay.show(.enhancing) }
                     let result = await DictationEnhancer.forDictation().enhance(
                         trimmed,
                         profile: EnhancementSettings.profile(for: category)
@@ -682,62 +821,86 @@ final class DictationController: ObservableObject {
                     enhancementNotice = result.failure
                 }
 
-                guard generation == recordingGeneration, !Task.isCancelled else { return }
-                overlay.hide()
-                do {
-                    try Paster.insert(toPaste)
-                    playCue("Pop")
-                    if let enhancementNotice {
-                        overlay.flashError(enhancementNotice)
-                    } else if let autoStopNotice {
-                        // A notice, not an error: the dictation ended exactly as
-                        // configured. A warning triangle for a working feature
-                        // teaches the user to distrust the triangle.
-                        overlay.flashNotice(autoStopNotice)
-                        self.autoStopNotice = nil
+                // Texts land in the order they were spoken: wait for the job
+                // before this one to paste, fail or be cancelled.
+                await previous?.value
+                guard isLive(generation) else { return }
+                hideIfIdle()
+
+                // The target was frozen at the release. If another app is in
+                // front now, ⌘V would land there.
+                let front = NSWorkspace.shared.frontmostApplication
+                switch DictationPipeline.paste(
+                    target: targetBundleID,
+                    frontmost: front?.bundleIdentifier,
+                    frontmostName: front?.localizedName,
+                    secureInput: IsSecureEventInputEnabled()
+                ) {
+                case .clipboard(let failure):
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(toPaste, forType: .string)
+                    report(failure)
+                case .paste:
+                    do {
+                        try Paster.insert(toPaste)
+                        playCue(.done)
+                        if !isCapturing {
+                            if let enhancementNotice {
+                                overlay.flashError(enhancementNotice)
+                            } else if let notice {
+                                // A notice, not an error: the dictation ended
+                                // exactly as configured.
+                                overlay.flashNotice(notice)
+                            }
+                        }
+                    } catch {
+                        // Without Accessibility the synthesized ⌘V goes nowhere;
+                        // `Paster` left the text on the pasteboard.
+                        report(.pasteBlocked)
                     }
-                } catch {
-                    // Without Accessibility the synthesized ⌘V goes nowhere and
-                    // the transcript would vanish without a trace. It is on the
-                    // pasteboard now — say so, loudly.
-                    overlay.flashError(error.localizedDescription)
                 }
                 lastAudioSeconds = duration
                 lastDictationAt = Date()
                 do {
                     try await RecordingStore.shared.saveDictation(
                         text: toPaste,
-                        startedAt: self.recordingStartedAt,
+                        startedAt: startedAt,
                         duration: duration,
                         engine: engineUsed,
                         latencyMs: lastLatencyMillis,
-                        // Stays in SQLite. It is already part of this path (that
-                        // is how `AppCategory` picks a profile); issue #5 only
-                        // persists it, and it never goes into a prompt or off
-                        // the machine.
+                        // Stays in SQLite and never goes into a prompt.
                         sourceApp: appStatisticsEnabled ? targetBundleID : nil,
                         enhanced: rawText != nil,
-                        // Only set when the model actually changed something —
-                        // otherwise there is nothing to compare against.
+                        // Only set when the model actually changed something.
                         rawText: rawText
                     )
                 } catch {
                     // The text is pasted either way — but history and statistics
-                    // would silently be missing this dictation, and "silently"
-                    // is the part that had to go.
+                    // would silently be missing this dictation.
                     Self.log.error("Diktat nicht gespeichert: \(error.localizedDescription, privacy: .public)")
-                    overlay.flashError(String(localized: "Diktat nicht gespeichert — Text ist eingefügt."))
+                    if !isCapturing {
+                        overlay.flashError(String(localized: "Diktat nicht gespeichert — Text ist eingefügt."))
+                    }
                 }
                 // Keep the native menu's "letztes/letzte Diktate" and the
-                // statistics line current — a `.menu` MenuBarExtra is built from
-                // NSMenuItems and cannot refresh itself on open (no onAppear).
+                // statistics line current — a `.menu` MenuBarExtra cannot refresh
+                // itself on open.
                 await AppContainer.shared.dictationHistory.refresh()
                 await AppContainer.shared.usage.refresh()
             } catch {
-                // flashError hides itself after 3 s — no defer-hide racing it.
-                overlay.flashError(String(localized: "Transkription fehlgeschlagen: \(error.localizedDescription)"))
+                guard isLive(generation) else { return }
+                Self.log.error("Transkription: \(error.localizedDescription, privacy: .public)")
+                hideIfIdle()
+                if let summarization = error as? SummarizationError, case .notConfigured = summarization {
+                    report(.modelMissing)
+                } else {
+                    report(.transcriptionFailed)
+                }
             }
         }
+        jobTasks[generation] = task
+        lastJobTask = task
     }
 
     /// Whole-clip transcription of the finished recording — one pass, no

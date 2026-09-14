@@ -19,7 +19,12 @@ struct PTTStateMachine: Sendable {
     }
 
     /// Presses shorter than this are taps (lock), longer are holds (PTT).
-    var tapThreshold: TimeInterval = 0.35
+    ///
+    /// 0.2 s since Spec 29. At 0.35 s a hold between 0.30 and 0.35 s — a quick
+    /// "ja, mach das" — locked the microphone open, because it was longer than
+    /// the controller's minimum clip and still counted as a tap. A lock should
+    /// take a deliberate tap; a brief hold now finishes and is named too short.
+    var tapThreshold: TimeInterval = 0.2
 
     private(set) var phase: Phase = .idle
     private var pressedAt: TimeInterval = 0

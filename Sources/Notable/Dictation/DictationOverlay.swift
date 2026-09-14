@@ -55,6 +55,15 @@ final class DictationOverlayController {
     /// restart.
     private var builtStyle: OverlayStyle?
 
+    /// Builds the panel and its hosting view without showing anything.
+    ///
+    /// Called once at launch (Spec 29): the first `show` used to construct the
+    /// `NSPanel` and the SwiftUI hierarchy on the key-down path of the very first
+    /// dictation, right where the microphone is being opened.
+    func prepare() {
+        _ = ensurePanel(style: OverlayStyle.current)
+    }
+
     func show(_ state: OverlayState) {
         flashHideTask?.cancel()
         model.state = state

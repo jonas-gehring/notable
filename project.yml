@@ -79,6 +79,11 @@ targets:
       # When a stand-in model carries dictation and when it may be swapped
       # (Spec 10). Pure — the models themselves stay out of the test target.
       - path: Sources/Notable/Dictation/BootstrapPolicy.swift
+      # The decisions of a dictation, taken out of the controller so every silent
+      # dead end of the old path has a test (Spec 29) — and the failures they
+      # name. Pure; the controller that carries them out stays out.
+      - path: Sources/Notable/Dictation/DictationPipeline.swift
+      - path: Sources/Notable/Dictation/DictationFailure.swift
       # Pausing/muting playback during a dictation (Spec 08 B). The "only undo
       # your own doing" rule is the part worth a test.
       - path: Sources/Notable/Dictation/MediaInterrupter.swift

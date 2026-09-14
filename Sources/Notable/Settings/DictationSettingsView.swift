@@ -101,7 +101,7 @@ struct DictationSettingsView: View {
 
             Section {
                 Toggle("Töne bei Aufnahme-Start und -Ende", isOn: $dictationSounds)
-                Stepper(value: $dictationIdleTimeout, in: 0...30, step: 5) {
+                Stepper(value: $dictationIdleTimeout, in: 0...120, step: 15) {
                     Text(dictationIdleTimeout == 0
                         ? String(localized: "Freihändig bei Stille beenden: aus")
                         : String(localized: "Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden"))

@@ -119,16 +119,25 @@ final class HotkeyMonitor {
         ) {
         case .down(let role):
             heldRole = role
-            onKeyDown?(role)
+            // Out of the tap callback (Spec 29): what follows opens the
+            // microphone and starts an audio engine, and macOS disables a tap
+            // that stalls. The routing above stays synchronous — `heldRole` has
+            // to be current for the very next event — and only the work moves to
+            // the next turn of the main queue, which keeps down/up in order.
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.onKeyDown?(role) }
+            }
         case .up(let role):
             heldRole = nil
-            onKeyUp?(role)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.onKeyUp?(role) }
+            }
         case .ignore:
             break
         }
     }
 
-    // MARK: - Esc tap (active, only while recording)
+    // MARK: - Esc tap (active, only while a recording or its processing runs)
 
     /// Called by the controller when a recording begins.
     ///

@@ -21,7 +21,9 @@ final class DefaultsKeyTests: XCTestCase {
     func testUnsetKeyMeansTheDeclaredFallbackAndNotFalse() {
         XCTAssertTrue(DefaultsKey.autoRecordMeetings.value(defaults))
         XCTAssertTrue(DefaultsKey.speakerNamingEnabled.value(defaults))
-        XCTAssertFalse(DefaultsKey.dictationSounds.value(defaults))
+        // On since Spec 29 — with it off, cancel, failure and lock made no sound.
+        XCTAssertTrue(DefaultsKey.dictationSounds.value(defaults))
+        XCTAssertEqual(DefaultsKey.dictationIdleTimeout.value(defaults), 45)
         XCTAssertEqual(DefaultsKey.typingWPM.value(defaults), 40)
         XCTAssertEqual(DefaultsKey.meetingHookPath.value(defaults), "")
         XCTAssertFalse(defaults.bool(forKey: DefaultsKey.autoRecordMeetings.key),

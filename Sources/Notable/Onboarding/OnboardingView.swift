@@ -73,10 +73,19 @@ struct OnboardingView: View {
                     "Meeting-Notizen als Markdown-Datei",
                 ])
         case .microphone:
-            permissionPage(
-                .microphone,
-                title: "Mikrofon",
-                text: "Die einzige Berechtigung, ohne die nichts geht.")
+            VStack(alignment: .leading, spacing: 16) {
+                permissionPage(
+                    .microphone,
+                    title: "Mikrofon",
+                    text: "Die einzige Berechtigung, ohne die nichts geht.")
+                // "Alles bereit" without a microphone was a lie the tour told
+                // (Spec 33 §3.5). Skipping stays possible — it just says what it costs.
+                if permissions.status(of: .microphone) != .granted {
+                    Text("„Weiter“ geht erst mit Mikrofon. Überspringen geht, dann funktioniert kein Diktat.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textMuted)
+                }
+            }
         case .hotkey:
             VStack(alignment: .leading, spacing: 16) {
                 pageHeader(icon: "keyboard", title: "Taste & Einfügen")
@@ -98,7 +107,7 @@ struct OnboardingView: View {
                 permissionRow(.calendar)
                 permissionRow(.notifications)
                 Text("„Systemaudio-Aufnahme“ ist der Ton der anderen — ein eigenes Recht, nicht die Bildschirmaufnahme. Ein Bild wird nie aufgezeichnet.")
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
             }
         case .provider:
@@ -150,8 +159,8 @@ struct OnboardingView: View {
                 }
             }
             .padding(10)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: Theme.radiusControl).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.border, lineWidth: 1))
             if folderExists {
                 Label("Der Ordner ist angelegt.", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Theme.success)
@@ -173,30 +182,21 @@ struct OnboardingView: View {
         return VStack(alignment: .leading, spacing: 16) {
             pageHeader(icon: "mic.fill", title: "Dein erstes Diktat")
             Text("In ein Textfeld einer anderen App klicken, **\(hotkeyLabel)** halten, einen Satz sprechen, loslassen.")
-                .font(.system(size: 15))
-                .foregroundStyle(Theme.textDefault)
-            HStack(spacing: 8) {
-                Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed")
-                    .foregroundStyle(done ? Theme.success : Theme.textMuted)
-                Text(done ? "Sitzt! Dein Diktat ist angekommen." : "Warte auf dein erstes Diktat…")
-                    .foregroundStyle(done ? Theme.textEmphasis : Theme.textSubtle)
-            }
-            .font(.system(size: 13, weight: .medium))
-            .padding(.top, 4)
+                .font(.title3)
+                .foregroundStyle(Theme.textEmphasis)
+            // The product showing itself (Spec 33 §3.5): the HUD's own waveform,
+            // fed by the live input while the key is held — then what arrived.
+            FirstDictationPreview(meter: dictation.meter, text: dictation.lastDictationText, done: done)
 
-            // On a cold cache the real model is still coming down. Saying so —
-            // and saying that dictation already works — is the whole point of
-            // the stand-in; a bare progress bar would just look like waiting.
+            // On a cold cache the real model is still coming down. Saying that
+            // dictation already works is the whole point of the stand-in.
             if dictation.isUsingBootstrap {
-                Text(dictation.downloadProgress.map {
-                    "Du kannst schon diktieren. Das große Modell lädt noch: \(Int($0 * 100)) % — danach wird es genauer."
-                } ?? "Du kannst schon diktieren. Das große Modell lädt noch — danach wird es genauer.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSubtle)
-            } else if dictation.modelState != .ready, let progress = dictation.downloadProgress {
-                Text("ASR-Modell lädt: \(Int(progress * 100)) %")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textSubtle)
+                DownloadProgressRow(
+                    fraction: dictation.downloadProgress,
+                    caption: "Du kannst schon diktieren — danach wird es genauer."
+                )
+            } else if dictation.modelState != .ready {
+                DownloadProgressRow(fraction: dictation.downloadProgress)
             }
         }
     }
@@ -217,14 +217,14 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 16) {
             pageHeader(icon: icon, title: title)
             Text(text)
-                .font(.system(size: 15))
-                .foregroundStyle(Theme.textDefault)
+                .font(.title3)
+                .foregroundStyle(Theme.textEmphasis)
             if !bullets.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(Array(bullets.enumerated()), id: \.offset) { _, bullet in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.caption2.weight(.bold))
                                 .foregroundStyle(Theme.accent)
                             Text(bullet).foregroundStyle(Theme.textSubtle)
                         }
@@ -240,10 +240,10 @@ struct OnboardingView: View {
     private func pageHeader(icon: String, title: LocalizedStringKey) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 30))
+                .font(Theme.Typography.display)
                 .foregroundStyle(Theme.accent)
             Text(title)
-                .font(.system(size: 22, weight: .semibold))
+                .font(.title.weight(.semibold))
                 .foregroundStyle(Theme.textEmphasis)
         }
     }
@@ -273,8 +273,8 @@ struct OnboardingView: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: Theme.radiusControl).fill(Theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.border, lineWidth: 1))
     }
 
     // MARK: Footer / navigation
@@ -312,6 +312,7 @@ struct OnboardingView: View {
                 Button("Überspringen") { finish() }
                 Button("Weiter") { pageRaw = min(Page.allCases.count - 1, pageRaw + 1) }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(page == .microphone && permissions.status(of: .microphone) != .granted)
             }
         }
         .padding(14)
@@ -347,4 +348,36 @@ struct OnboardingView: View {
     /// Relaunch a fresh instance to pick up TCC grants macOS caches per-process
     /// (screen recording, input monitoring) — mirrors the Settings relaunch.
     private func relaunch() { AppRelauncher.relaunch() }
+}
+
+/// The first-dictation moment: a waiting state, the live waveform while the key
+/// is held, and the text once it has landed.
+private struct FirstDictationPreview: View {
+    @ObservedObject var meter: LevelMeter
+    let text: String?
+    let done: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(spacing: Theme.Spacing.s) {
+                Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed")
+                    .foregroundStyle(done ? Theme.success : Theme.textMuted)
+                Text(done ? "Sitzt! Dein Diktat ist angekommen." : "Warte auf dein erstes Diktat…")
+                    .foregroundStyle(done ? Theme.textEmphasis : Theme.textSubtle)
+                Spacer()
+                WaveformView(level: meter.level, barCount: 24, maxHeight: 22, tint: Theme.accent)
+            }
+            .font(.body.weight(.medium))
+            if done, let text {
+                Text(text)
+                    .font(.callout)
+                    .foregroundStyle(Theme.textEmphasis)
+                    .lineLimit(4)
+                    .padding(Theme.Spacing.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: Theme.radiusControl).fill(Theme.surface))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.border, lineWidth: 1))
+            }
+        }
+    }
 }

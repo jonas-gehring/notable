@@ -401,30 +401,31 @@ struct NotableApp: App {
         // .window panel's custom header/status-dot for nativeness — deliberate.)
         .menuBarExtraStyle(.menu)
 
+        // Sizes from one table (Spec 33 §3.4); each view reads its minimum from it.
         Window("Notizen durchsuchen", id: "search") {
             SearchWindowView()
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 560, height: 440)
+        .defaultSize(WindowSize.search.ideal)
 
         Window("Notizen", id: "notes") {
             NoteListView()
                 .environmentObject(AppContainer.shared.notes)
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 520, height: 480)
+        .defaultSize(WindowSize.notes.ideal)
 
         Window("Letzte Diktate", id: "recent") {
             RecentDictationsView()
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 560, height: 440)
+        .defaultSize(WindowSize.recent.ideal)
 
         Window("Statistik", id: "stats") {
             StatsView()
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 640, height: 620)
+        .defaultSize(WindowSize.stats.ideal)
 
         // Live notes for the running call. Small and floating on purpose — it
         // sits next to the meeting window, not in front of it.
@@ -433,7 +434,7 @@ struct NotableApp: App {
                 .environmentObject(AppContainer.shared.liveNotes)
                 .environmentObject(AppContainer.shared.meeting)
         }
-        .defaultSize(width: 380, height: 320)
+        .defaultSize(WindowSize.meetingNotes.ideal)
         .windowResizability(.contentMinSize)
 
         Window("Willkommen", id: "onboarding") {
@@ -460,8 +461,11 @@ struct NotableApp: App {
                 .environmentObject(AppContainer.shared.updateChecker)
                 .environmentObject(AppContainer.shared.updateInstaller)
         }
-        .defaultSize(width: 760, height: 520)
+        .defaultSize(WindowSize.settings.ideal)
         .windowResizability(.contentMinSize)
+        // An accessory app still gets a main menu while one of its windows is
+        // key — it just never had About or Help in it (Spec 33 §3.4).
+        .commands { NotableCommands() }
     }
 }
 
@@ -540,7 +544,7 @@ struct MenuContentView: View {
                 String(localized: "Vorläufiges Modell aktiv — \(ASREngineID.current.shortLabel) lädt: \(Int($0 * 100)) %")
             } ?? String(localized: "Vorläufiges Modell aktiv — \(ASREngineID.current.shortLabel) lädt…"))
         } else if dictation.modelState != .ready {
-            Text(dictation.downloadProgress.map { String(localized: "ASR-Modell lädt: \(Int($0 * 100)) %") }
+            Text(dictation.downloadProgress.map { DownloadProgressRow.percent($0) }
                 ?? dictation.modelState.label)
         }
         // Today's numbers at a glance; the window has the full picture. Omitted

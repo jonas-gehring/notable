@@ -143,7 +143,7 @@ struct GeneralSettingsView: View {
         } header: {
             Text("Notizen-Ordner")
         } footer: {
-            Text("Das Symbol wird nur gesetzt, wo kein eigenes ist, und beim Wechsel vom alten Ordner wieder entfernt. Andere Geräte zeigen es womöglich nicht — iCloud trägt eigene Ordnersymbole unzuverlässig mit.")
+            Text("Das Symbol kommt nur auf Ordner ohne eigenes Symbol.")
         }
         // The plan first, like the cleanup: what moves, and where to.
         .confirmationDialog("Notizen in iCloud Drive verschieben?", isPresented: relocationBinding, presenting: relocationPlan) { plan in
@@ -246,16 +246,7 @@ struct GeneralSettingsView: View {
         } header: {
             Text("Updates")
         } footer: {
-            Text("""
-            Prüft GitHub-Releases beim Start und dann alle sechs Stunden. Ein gefundenes \
-            Update wird sofort geladen und seine Signatur geprüft — eine fremd signierte \
-            Datei wird nie installiert. Installiert wird im nächsten ruhigen Moment: nie \
-            während eines Meetings, einer Notiz in Arbeit, eines Diktats oder offener \
-            eigener Notizen. Offene Notable-Fenster halten es nur auf, solange jemand am \
-            Mac arbeitet — nach zehn Minuten ohne Eingabe oder bei gesperrtem Bildschirm \
-            geht es los, und die Fenster kommen danach zurück. Der Neustart dauert etwa \
-            eine Sekunde.
-            """)
+            Text("Installiert wird im nächsten ruhigen Moment — nie während einer Aufnahme, eines Diktats oder offener Notizen.")
         }
     }
 
@@ -273,15 +264,7 @@ struct GeneralSettingsView: View {
     private func installRow(_ update: UpdateInfo) -> some View {
         switch updateInstaller.phase {
         case .downloading:
-            if let fraction = updateInstaller.downloadProgress {
-                VStack(alignment: .leading, spacing: 4) {
-                    ProgressView(value: fraction)
-                    Text("Wird geladen — \(Int(fraction * 100)) %")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            } else {
-                statusRow("Wird geladen…")
-            }
+            DownloadProgressRow(fraction: updateInstaller.downloadProgress)
         case .unpacking:
             statusRow("Wird entpackt…")
         case .installing:

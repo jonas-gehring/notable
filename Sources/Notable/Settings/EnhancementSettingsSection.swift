@@ -155,7 +155,7 @@ private struct ProfileEditor: View {
                         .foregroundStyle(.secondary)
                     TextEditor(text: $profile.systemPrompt)
                         .frame(minHeight: 120)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(.separator))
                 }
             }
             .formStyle(.grouped)

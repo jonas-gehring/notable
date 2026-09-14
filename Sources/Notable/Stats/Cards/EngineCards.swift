@@ -56,19 +56,19 @@ struct EnginePerformanceCard: View {
                 ForEach(stats, id: \.engine) { entry in
                     HStack(spacing: 8) {
                         Text(ASREngineID(rawValue: entry.engine)?.label ?? UsageMetrics.displayKey(entry.engine))
-                            .font(.system(size: 11))
+                            .font(.subheadline)
                             .frame(width: 200, alignment: .leading)
                             .lineLimit(1)
                         if let value = entry.stats {
                             Text("\(Int(value.p50)) ms · p95 \(Int(value.p95)) ms")
-                                .font(.system(size: 11).monospacedDigit())
-                                .foregroundStyle(Theme.textDefault)
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(Theme.textEmphasis)
                             Text("(\(value.count))")
-                                .font(.system(size: 10))
+                                .font(.caption2)
                                 .foregroundStyle(Theme.textMuted)
                         } else {
                             Text("zu wenig Daten")
-                                .font(.system(size: 11))
+                                .font(.subheadline)
                                 .foregroundStyle(Theme.textMuted)
                         }
                         Spacer()
@@ -77,7 +77,7 @@ struct EnginePerformanceCard: View {
                 if wordsPerMinute > 0 {
                     Divider().overlay(Theme.border)
                     Text("Du sprichst im Schnitt \(Int(wordsPerMinute.rounded())) Wörter pro Minute Aufnahme.")
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textSubtle)
                 }
             }

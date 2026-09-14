@@ -20,7 +20,7 @@ struct MenuBarSettingsView: View {
             } header: {
                 Text("Statistik")
             } footer: {
-                Text("Zeigt die heutigen Zahlen direkt im Menü — Wörter, Meetings und die gegenüber dem Tippen gesparte Zeit. An Tagen ohne Aktivität bleibt die Zeile weg.")
+                Text("Wörter, Meetings und gesparte Zeit von heute, direkt im Menü.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

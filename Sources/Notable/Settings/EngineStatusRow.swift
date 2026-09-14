@@ -23,9 +23,9 @@ struct EngineStatusRow: View {
                     // A percentage only once there is one. A phantom 0 % on a
                     // warm cache would be a lie about work that is not happening.
                     if let progress = dictation.downloadProgress {
-                        Text("lädt: \(Int(progress * 100)) %")
+                        Text(DownloadProgressRow.percent(progress))
                     } else {
-                        Text("lädt…")
+                        Text("Lädt…")
                     }
                 case .failed(let message):
                     Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -63,13 +63,7 @@ struct SpokenLanguagesRow: View {
                 }
             }
         }
-        Text("""
-        Schränkt die Spracherkennung der Textnachbearbeitung ein — ohne das kann \
-        ein kurzes „Ok, dann machen wir das“ als Dänisch durchgehen und verliert \
-        Wörter an die englische Füllwortliste. Bei genau einer Sprache stellt \
-        Whisper zusätzlich fest darauf ein. Auf Parakeet wirkt es nicht: das Modell \
-        erkennt selbst und hat keinen Schalter dafür.
-        """)
+        Text("Hilft der Textaufbereitung, die Sprache richtig zu erkennen.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }

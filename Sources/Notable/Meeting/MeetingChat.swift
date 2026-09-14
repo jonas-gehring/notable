@@ -131,10 +131,10 @@ struct MeetingChatView: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Chat mit dem Meeting")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.textEmphasis)
                 Text(recording.title ?? String(localized: "Meeting"))
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textSubtle)
                     .lineLimit(1)
             }
@@ -167,12 +167,12 @@ struct MeetingChatView: View {
                     if controller.isThinking {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.small)
-                            Text("Denkt nach…").font(.system(size: 12)).foregroundStyle(Theme.textSubtle)
+                            Text("Denkt nach…").font(.callout).foregroundStyle(Theme.textSubtle)
                         }
                     }
                     if let error = controller.errorMessage {
                         Text(error)
-                            .font(.system(size: 12))
+                            .font(.callout)
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -190,13 +190,13 @@ struct MeetingChatView: View {
             Text(controller.isReady
                 ? String(localized: "Frag alles über dieses Meeting.")
                 : String(localized: "Für dieses Meeting gibt es kein Transkript."))
-                .font(.system(size: 13))
+                .font(.body)
                 .foregroundStyle(Theme.textSubtle)
             if controller.isReady {
                 ForEach(suggestions, id: \.self) { suggestion in
                     Button(suggestion) { send(suggestion) }
                         .buttonStyle(.plain)
-                        .font(.system(size: 12))
+                        .font(.callout)
                         .foregroundStyle(Theme.accent)
                 }
             }
@@ -209,16 +209,16 @@ struct MeetingChatView: View {
         return HStack {
             if isUser { Spacer(minLength: 40) }
             Text(message.text)
-                .font(.system(size: 13))
+                .font(.body)
                 .foregroundStyle(Theme.textEmphasis)
                 .textSelection(.enabled)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
                         .fill(isUser ? Theme.surfaceSubtle : Theme.surface))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
                         .strokeBorder(Theme.border, lineWidth: isUser ? 0 : 1))
             if !isUser { Spacer(minLength: 40) }
         }
@@ -231,13 +231,13 @@ struct MeetingChatView: View {
                 .lineLimit(1...4)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Theme.surface))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: Theme.radiusControl).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl).strokeBorder(Theme.border, lineWidth: 1))
                 .onSubmit { send(draft) }
             Button {
                 send(draft)
             } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 20))
+                Image(systemName: "arrow.up.circle.fill").font(.title2)
             }
             .buttonStyle(.plain)
             .foregroundStyle(canSend ? Theme.accent : Theme.textMuted)

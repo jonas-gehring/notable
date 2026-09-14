@@ -32,7 +32,8 @@ struct SearchWindowView: View {
                 .listStyle(.inset)
             }
         }
-        .frame(minWidth: 480, minHeight: 360)
+        .windowMinimum(WindowSize.search)
+        .windowFrameAutosave(WindowSize.search)
         .task(id: query) {
             try? await Task.sleep(for: .milliseconds(250)) // debounce
             guard !Task.isCancelled else { return }

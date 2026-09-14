@@ -36,7 +36,9 @@ struct CLIProviderStatusRow: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
+            // The argument override is a repair tool, not a setting (Spec 33 §3.1).
             if let tool {
+                DisclosureGroup("Erweitert") {
                 LabeledContent("Aufruf") {
                     HStack {
                         TextField(
@@ -57,6 +59,7 @@ struct CLIProviderStatusRow: View {
                 Text("Leer lassen für den Standardaufruf. Anführungszeichen gruppieren, wie in der Shell.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                }
             }
         }
         .task(id: provider.rawValue) {

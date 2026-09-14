@@ -24,7 +24,6 @@ struct SummarizationSettingsView: View {
                         Text(provider.label).tag(provider.rawValue)
                     }
                 }
-                .pickerStyle(.radioGroup)
             }
 
             if provider == .anthropicAPI {
@@ -83,7 +82,7 @@ struct SummarizationSettingsView: View {
                             }
                         }
                     }
-                    Text("Modell: claude-sonnet-5. Der Key wird ausschließlich im macOS-Schlüsselbund gespeichert.")
+                    Text("Der Key liegt ausschließlich im macOS-Schlüsselbund.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

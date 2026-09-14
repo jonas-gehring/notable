@@ -137,7 +137,8 @@ struct StatsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.windowBackground)
-        .frame(minWidth: 620, minHeight: 600)
+        .windowMinimum(WindowSize.stats)
+        .windowFrameAutosave(WindowSize.stats)
         .task { await reload() }
         .onChange(of: granularity) { _, _ in recompute() }
         // Only the charts here — the menu-bar line rests on the same
@@ -161,20 +162,24 @@ struct StatsView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Statistik")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(Theme.textEmphasis)
                 Text("Was Notable für dich erledigt hat.")
-                    .font(.system(size: 12))
+                    .font(.callout)
                     .foregroundStyle(Theme.textSubtle)
             }
             Spacer(minLength: 16)
-            CalSegmented(
-                options: [
-                    (.day, String(localized: "Tag")), (.week, String(localized: "Woche")),
-                    (.month, String(localized: "Monat")), (.year, String(localized: "Jahr")),
-                ],
-                selection: $granularity)
-                .frame(width: 248)
+            // The system control (Spec 33 §3.3): a hand-built `CalSegmented` sat here
+            // while "Letzte Diktate" used `.segmented` for the same job.
+            Picker("Zeitraum", selection: $granularity) {
+                Text("Tag").tag(Granularity.day)
+                Text("Woche").tag(Granularity.week)
+                Text("Monat").tag(Granularity.month)
+                Text("Jahr").tag(Granularity.year)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 248)
         }
     }
 
@@ -194,7 +199,7 @@ struct StatsView: View {
             .padding(.top, 10)
         } label: {
             Text("Details")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(Theme.textEmphasis)
         }
     }
@@ -206,12 +211,12 @@ struct StatsView: View {
             HStack(alignment: .top, spacing: 20) {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Zeit gespart · \(granularity.periodLabel)")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.callout.weight(.medium))
                         .foregroundStyle(Theme.textSubtle)
                     // Proportional figures on purpose: tabular digits look loose at
                     // display size (they are for columns that must align).
                     Text(Self.duration(model.periodTotals.savedSeconds))
-                        .font(.system(size: 40, weight: .semibold))
+                        .font(Theme.Typography.hero)
                         .foregroundStyle(Theme.textEmphasis)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -228,18 +233,18 @@ struct StatsView: View {
             Divider().overlay(Theme.border)
             HStack(spacing: 6) {
                 Image(systemName: "infinity")
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                 Text("Insgesamt \(Self.duration(model.allTotals.savedSeconds)) gespart\(sinceSuffix)")
                 // A line, not a chart: a streak is one number and deserves no
                 // more room than that.
                 if model.streak > 1 {
                     Text("·")
                     Image(systemName: "flame")
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                     Text("\(model.streak) Tage in Folge")
                 }
             }
-            .font(.system(size: 12))
+            .font(.callout)
             .foregroundStyle(Theme.textSubtle)
         }
         .padding(18)
@@ -383,29 +388,29 @@ struct StatsView: View {
                 .foregroundStyle(Theme.textMuted)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Tippgeschwindigkeit")
-                    .foregroundStyle(Theme.textDefault)
+                    .foregroundStyle(Theme.textEmphasis)
                 Text("Grundlage der gesparten Zeit: Sprechen gegen Tippen.")
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textSubtle)
             }
             Spacer(minLength: 12)
             TypingSpeedStepper(style: .card)
                 .fixedSize()
         }
-        .font(.system(size: 13))
+        .font(.body)
         .calCard(padding: 12)
     }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 30))
+                .font(Theme.Typography.display)
                 .foregroundStyle(Theme.chartPrimary.opacity(0.7))
             Text("Noch keine Diktate")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(Theme.textEmphasis)
             Text("Halt die Diktattaste und leg los — hier erscheinen dann deine Statistiken.")
-                .font(.system(size: 13))
+                .font(.body)
                 .foregroundStyle(Theme.textSubtle)
                 .multilineTextAlignment(.center)
         }
@@ -503,14 +508,14 @@ private struct StatTile: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                 Text(caption)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.subheadline.weight(.medium))
             }
             .foregroundStyle(Theme.textSubtle)
 
             Text(value)
-                .font(.system(size: 24, weight: .semibold))
+                .font(.title.weight(.semibold))
                 .foregroundStyle(Theme.textEmphasis)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -518,7 +523,7 @@ private struct StatTile: View {
             HStack(spacing: 6) {
                 DeltaChip(delta: delta, baseline: nil)
                 Text(footnote)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
                     .lineLimit(1)
             }
@@ -541,7 +546,7 @@ private struct DeltaChip: View {
             let tint = up ? Theme.success : Theme.danger
             HStack(spacing: 3) {
                 Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.caption2.weight(.bold))
                 Text(percent(delta))
                     .monospacedDigit()
                 if let baseline {
@@ -549,7 +554,7 @@ private struct DeltaChip: View {
                         .foregroundStyle(Theme.textSubtle)
                 }
             }
-            .font(.system(size: 11, weight: .medium))
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(tint)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -558,7 +563,7 @@ private struct DeltaChip: View {
                     .fill(tint.opacity(0.12)))
         } else {
             Text(baseline.map { String(localized: "unverändert \($0)") } ?? "–")
-                .font(.system(size: 11, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(Theme.textMuted)
                 .padding(.vertical, 2)
         }
@@ -603,11 +608,11 @@ private struct BucketChart: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(Theme.textEmphasis)
                 Spacer(minLength: 12)
                 Text(readout)
-                    .font(.system(size: 12))
+                    .font(.callout)
                     .monospacedDigit()
                     .foregroundStyle(hoveredBucket == nil ? Theme.textMuted : Theme.textSubtle)
                     .lineLimit(1)
@@ -650,7 +655,7 @@ private struct BucketChart: View {
                 .annotation(position: .top, spacing: 4) {
                     if hovered == nil, bucket.id == peak?.id {
                         Text(UsageMetrics.integer(value(bucket)))
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.caption2.weight(.medium))
                             .monospacedDigit()
                             .foregroundStyle(Theme.textSubtle)
                     }
@@ -662,7 +667,7 @@ private struct BucketChart: View {
                 AxisValueLabel {
                     if let date = mark.as(Date.self) {
                         Text(granularity.axisLabel(date))
-                            .font(.system(size: 11))
+                            .font(.subheadline)
                             .foregroundStyle(Theme.textMuted)
                     }
                 }
@@ -672,7 +677,7 @@ private struct BucketChart: View {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
                 AxisGridLine().foregroundStyle(Theme.border)
                 AxisValueLabel()
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
             }
         }

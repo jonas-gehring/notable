@@ -817,3 +817,35 @@
 "Modell in den Einstellungen laden, dann im Menü wiederholen." = "Load the model in Settings, then retry from the menu.";
 "Das Diktat ist aufbewahrt — im Menü wiederholen." = "The dictation is kept — retry it from the menu.";
 "Zahlen & Daten formatieren" = "Format numbers & dates";
+
+/* Spec 33 — settings diet, main menu, onboarding */
+"Notable fragt, sobald ein Call das Mikrofon öffnet, und nimmt erst nach „Aufnehmen“ auf." = "Notable asks as soon as a call opens the microphone, and records only after “Record”.";
+"Automatisch nimmt das Gerät, das der Call benutzt — gilt auch fürs Diktat." = "Automatic uses the device the call uses — dictation too.";
+"Liest während einer Aufnahme nur Namen aus dem Call-Fenster, nie ein Bild." = "While recording, reads only names from the call window, never an image.";
+"Echo unterdrücken" = "Cancel echo";
+"Nur einschalten, wenn du ohne Kopfhörer aufnimmst und die Gegenseite doppelt im Transkript landet." = "Turn on only if you record without headphones and the other side appears twice in the transcript.";
+"⌘T setzt einen Zeitstempel; die Notizen landen wörtlich in der Meeting-Notiz." = "⌘T inserts a timestamp; the notes go into the meeting note verbatim.";
+"Erweitert" = "Advanced";
+"Sprechererkennung: unterstützte Apps" = "Speaker recognition: supported apps";
+"Schreibt den Aufbau des laufenden Call-Fensters als Text in die Logs." = "Writes the structure of the running call window to the logs as text.";
+"Bekommt nach jeder fertigen Meeting-Notiz den Pfad der Markdown-Datei." = "Receives the path of the Markdown file after every finished meeting note.";
+"Alles, was Notable auf die Platte legt." = "Everything Notable puts on disk.";
+"Frist und Budget gelten beide; fehlgeschlagene Aufnahmen bekommen mehr Zeit." = "Age and budget both apply; failed recordings get more time.";
+"Gelöscht wird nur der Text — die Statistik bleibt unverändert." = "Only the text is deleted — statistics stay unchanged.";
+"Notizen, Statistik und KI-Kosten werden nie gelöscht; du siehst immer erst den Plan." = "Notes, statistics and AI costs are never deleted; you always see the plan first.";
+"Unvollständige und nicht mehr benutzte Modelle lassen sich hier entfernen." = "Incomplete and unused models can be removed here.";
+"Verlustfrei als .m4a — die Rohspur geht erst, wenn die neue geprüft ist." = "Lossless as .m4a — the raw track goes only after the new one is verified.";
+"Der Key liegt ausschließlich im macOS-Schlüsselbund." = "The key is stored only in the macOS Keychain.";
+"Das Symbol kommt nur auf Ordner ohne eigenes Symbol." = "The icon goes only on folders without an icon of their own.";
+"Installiert wird im nächsten ruhigen Moment — nie während einer Aufnahme, eines Diktats oder offener Notizen." = "Installs at the next quiet moment — never during a recording, a dictation or open notes.";
+"Wörter, Meetings und gesparte Zeit von heute, direkt im Menü." = "Today’s words, meetings and time saved, right in the menu.";
+"Eingabeüberwachung und Bedienungshilfen werden erst nach einem Neustart grün." = "Input Monitoring and Accessibility turn green only after a restart.";
+"Lädt…" = "Downloading…";
+"Lädt: %lld %" = "Downloading: %lld %";
+"Hilft der Textaufbereitung, die Sprache richtig zu erkennen." = "Helps text processing recognize the language correctly.";
+"Über Notable" = "About Notable";
+"Notable-Hilfe" = "Notable Help";
+"Absätze und gesprochene Befehle wie „neue Zeile“ oder „Stichpunkt“ — nie in Code-Editoren." = "Paragraphs and spoken commands like “new line” or “bullet” — never in code editors.";
+"Locker in Chats, Schlusspunkt in Mails, wörtlich in Code-Editoren." = "Casual in chats, final period in mail, verbatim in code editors.";
+"„Weiter“ geht erst mit Mikrofon. Überspringen geht, dann funktioniert kein Diktat." = "“Next” needs the microphone. You can skip, but dictation will not work.";
+"Du kannst schon diktieren — danach wird es genauer." = "You can already dictate — it gets more accurate afterwards.";

@@ -52,7 +52,8 @@ struct SettingsView: View {
                 .navigationTitle((selection ?? .general).label)
                 .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 700, minHeight: 460)
+        .windowMinimum(WindowSize.settings)
+        .windowFrameAutosave(WindowSize.settings)
         // Both, because the window may be opening for the first time or may
         // already be standing open behind something else.
         .task { if let requested = route.consume() { selection = requested } }

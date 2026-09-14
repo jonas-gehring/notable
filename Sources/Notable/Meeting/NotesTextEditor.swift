@@ -365,7 +365,7 @@ struct NotesFormatBar<Trailing: View>: View {
     private func iconButton(_ symbol: String, _ help: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         Button { action(); editor.focus() } label: {
             Image(systemName: symbol)
-                .font(.system(size: 12))
+                .font(.callout)
                 .frame(width: 24, height: 20)
         }
         .buttonStyle(.borderless)

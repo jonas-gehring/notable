@@ -27,7 +27,7 @@ struct PermissionsSettingsView: View {
                     Button("Notable neu starten") { Self.relaunch() }
                 }
             } footer: {
-                Text("Eingabeüberwachung und Bedienungshilfen werden erst nach einem Neustart grün. Die Systemaudio-Aufnahme lässt sich nicht auslesen — macOS fragt sie beim ersten Mitschnitt ab. Häkchen bleiben über Updates erhalten.")
+                Text("Eingabeüberwachung und Bedienungshilfen werden erst nach einem Neustart grün.")
             }
         }
         .formStyle(.grouped)

@@ -35,7 +35,8 @@ struct NoteListView: View {
                 .listStyle(.inset)
             }
         }
-        .frame(minWidth: 460, minHeight: 360)
+        .windowMinimum(WindowSize.notes)
+        .windowFrameAutosave(WindowSize.notes)
         .task { await noteManager.reload() }
         // An open draft holds an update back — a restart would discard it
         // (Spec 25). Closing the window discards it anyway, so that clears it.
@@ -203,7 +204,7 @@ struct NoteListView: View {
             NotesFormatBar(editor: notesEditor)
             NotesTextEditor(text: $draftNotes, proxy: notesEditor, isEditable: true)
                 .frame(height: 180)
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).strokeBorder(.quaternary))
             NotesEditorShortcuts(editor: notesEditor)
             HStack {
                 Button("Speichern") {

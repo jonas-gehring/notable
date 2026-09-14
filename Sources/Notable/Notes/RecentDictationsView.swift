@@ -53,19 +53,25 @@ struct RecentDictationsView: View {
 
             Divider()
 
-            if items.isEmpty {
+            if items.isEmpty, !loaded {
+                // Loading is not an empty state (Spec 33 §3.6): a large "no
+                // content" graphic for the half second a query takes read as
+                // "there is nothing" before there was an answer.
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if items.isEmpty {
                 ContentUnavailableView(
-                    loaded ? "Keine Diktate" : "Wird geladen…",
+                    "Keine Diktate",
                     systemImage: "mic",
-                    description: Text(loaded
-                        ? String(localized: "Im gewählten Zeitraum wurde nicht diktiert.")
-                        : "")
+                    description: Text("Im gewählten Zeitraum wurde nicht diktiert.")
                 )
             } else {
                 RecentDictationsList(items: items)
             }
         }
-        .frame(minWidth: 480, minHeight: 360)
+        .windowMinimum(WindowSize.recent)
+        .windowFrameAutosave(WindowSize.recent)
         .task(id: reloadKey) {
             loaded = false
             // Filtered in SQL, not here: with a mixed `LIMIT 200` the meetings

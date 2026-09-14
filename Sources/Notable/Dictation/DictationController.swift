@@ -46,6 +46,12 @@ final class DictationController: ObservableObject {
     /// Timestamp of the most recent successful dictation — the onboarding flow
     /// watches this to confirm the user's first dictation landed.
     @Published private(set) var lastDictationAt: Date?
+    /// The text of the most recent pasted dictation — onboarding shows it back.
+    @Published private(set) var lastDictationText: String?
+    /// The live input level, on its own object: thirty updates a second should
+    /// re-render the one view that draws them (onboarding, Spec 33 §3.5), not
+    /// every view that observes this controller.
+    let meter = LevelMeter()
 
     private let appState: AppState
     private let hotkey = HotkeyMonitor()
@@ -539,6 +545,7 @@ final class DictationController: ObservableObject {
                 guard let self, self.isCapturing else { return }
                 let level = self.recorder.level
                 self.overlay.updateLevel(level)
+                self.meter.level = level
 
                 // Hands-free idle-timeout: a forgotten lock stops on its own,
                 // a soft speaker does not (hysteresis, `IdleDetector`).
@@ -659,6 +666,7 @@ final class DictationController: ObservableObject {
     private func stopLevelTimer() {
         levelTimer?.invalidate()
         levelTimer = nil
+        meter.level = 0
     }
 
     /// Plays the sound for a moment of the dictation (Spec 08 C; on by default
@@ -983,6 +991,7 @@ final class DictationController: ObservableObject {
                     do {
                         try Paster.insert(toPaste)
                         playCue(.done)
+                        lastDictationText = toPaste
                         if !isCapturing {
                             if let stageNotice {
                                 overlay.flashError(stageNotice)
@@ -1095,4 +1104,10 @@ final class DictationController: ObservableObject {
             return (result.text, name, result.tokens)
         }
     }
+}
+
+/// See `DictationController.meter`.
+@MainActor
+final class LevelMeter: ObservableObject {
+    @Published var level: Float = 0
 }

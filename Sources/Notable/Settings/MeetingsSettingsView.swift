@@ -52,7 +52,7 @@ struct MeetingsSettingsView: View {
                 Toggle("Erkannte Calls anbieten", isOn: $autoRecord)
                 Toggle("Benachrichtigen, wenn die Notiz fertig ist", isOn: $notifyOnReady)
             } footer: {
-                Text("Sobald Zoom, Teams, Webex, FaceTime, Slack oder ein Browser-Call das Mikrofon öffnet, meldet sich Notable per Benachrichtigung: »Aufnehmen«, »Immer für diese App« oder »Später«. Aufgezeichnet wird erst nach »Aufnehmen«. Endet der Call, stoppt die Aufnahme automatisch, die Notiz wird erzeugt und zusammengefasst. Ohne Benachrichtigungsrecht erscheint stattdessen ein kleines Fenster oben rechts.")
+                Text("Notable fragt, sobald ein Call das Mikrofon öffnet, und nimmt erst nach „Aufnehmen“ auf.")
             }
 
             Section {
@@ -71,7 +71,7 @@ struct MeetingsSettingsView: View {
             } header: {
                 Text("Mikrofon")
             } footer: {
-                Text("Automatisch: das Gerät, das der Call selbst benutzt, sonst der Systemstandard — außer dem eingebauten Mikrofon bei geschlossenem Deckel, das dann abgeschaltet ist. Ein Bluetooth-Headset wird für Meetings nur übernommen, wenn es schon aufnimmt, damit die Wiedergabe nicht in den Headset-Modus springt. Gilt auch fürs Diktat.")
+                Text("Automatisch nimmt das Gerät, das der Call benutzt — gilt auch fürs Diktat.")
             }
             .onAppear {
                 inputDevices = AudioDevices.inputDevices().filter { $0.transport != .aggregate }
@@ -79,33 +79,18 @@ struct MeetingsSettingsView: View {
 
             Section {
                 Toggle("Sprecher anhand genannter Namen benennen", isOn: $speakerNaming)
-            }
-
-            // Spec 24: the call shows who takes part and who is speaking.
-            Section {
+                // Spec 24: the call shows who takes part and who is speaking.
                 Toggle("Sprecher am Bildschirm erkennen", isOn: $screenSpeakers)
-                LabeledContent("Unterstützte Apps") {
-                    Text(CallScreenAdapters.all.isEmpty
-                         ? String(localized: "noch keine — erst messen")
-                         : CallScreenAdapters.all.flatMap(\.bundleIDPrefixes).joined(separator: ", "))
-                        .foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button("Call-Fenster jetzt auslesen") { probe() }
-                    if let probeMessage {
-                        Text(probeMessage).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                }
             } header: {
-                Text("Sprechererkennung am Bildschirm")
+                Text("Sprecher")
             } footer: {
-                Text("Liest während einer Aufnahme, der du zugestimmt hast, nur das Fenster des Calls — wer teilnimmt und wer gerade spricht — über die Bedienungshilfen, die Notable fürs Einfügen ohnehin hat. Es wird kein Bild gespeichert, nur Namen und Zeiten. Welche App das hergibt, zeigt erst eine Messung im echten Call: der Knopf schreibt den Aufbau des Call-Fensters als Text nach ~/Library/Logs/Notable/screen-probe.")
+                Text("Liest während einer Aufnahme nur Namen aus dem Call-Fenster, nie ein Bild.")
             }
 
             Section {
-                Toggle("Echo-Unterdrückung im Meeting (VPIO)", isOn: $echoCancellation)
+                Toggle("Echo unterdrücken", isOn: $echoCancellation)
             } footer: {
-                Text("Standard: aus. Verhindert, dass die Gegenseite über die Lautsprecher zurück ins Mikrofon läuft (bei Kopfhörern unnötig). Nur einschalten, wenn du ohne Kopfhörer aufnimmst und die Gegenseite doppelt im Transkript landet — VPIO war die Ursache leerer Transkripte und wird nur mit diesem Schalter aktiv.")
+                Text("Nur einschalten, wenn du ohne Kopfhörer aufnimmst und die Gegenseite doppelt im Transkript landet.")
             }
 
             Section {
@@ -113,8 +98,6 @@ struct MeetingsSettingsView: View {
                 LabeledContent("Modell für Meetings", value: effectiveMeetingEngineLabel)
             } header: {
                 Text("Transkriptionsmodell")
-            } footer: {
-                Text("Standard: aus → Meetings nutzen immer Parakeet v3 (am genauesten, mehrsprachig). An: Meetings folgen dem ASR-Motor aus den Diktat-Einstellungen. Parakeet Unified ist Streaming-only und für Meetings nicht nutzbar — dann wird auf Parakeet v3 zurückgefallen.")
             }
 
             Section {
@@ -127,25 +110,46 @@ struct MeetingsSettingsView: View {
             } header: {
                 Text("Notizen während des Calls")
             } footer: {
-                Text("Das Notizfenster (⇧⌘N) begleitet die laufende Aufnahme: ⌘T setzt die Laufzeit als Zeitstempel, die Diktattaste funktioniert auch dort hinein. Beim Beenden landen die Notizen wörtlich als „Eigene Notizen“ in der Notiz im Inbox-Ordner und gehen als Grundwahrheit in die Zusammenfassung ein. Das Fenster öffnet sich, ohne den Call in den Hintergrund zu schieben.")
+                Text("⌘T setzt einen Zeitstempel; die Notizen landen wörtlich in der Meeting-Notiz.")
             }
 
+            // Measuring and scripting, one level down (Spec 33 §3.1): the probe
+            // is a harness for Spec 24's Stufe 0, the hook a power-user escape.
             Section {
-                if meetingHookPath.isEmpty {
-                    Text("Kein Skript gewählt").foregroundStyle(.secondary)
-                } else {
-                    Text(meetingHookPath).font(.callout).lineLimit(1).truncationMode(.middle)
-                }
-                HStack {
-                    Button("Skript wählen…") { chooseHookScript() }
-                    if !meetingHookPath.isEmpty {
-                        Button("Entfernen", role: .destructive) { meetingHookPath = "" }
+                DisclosureGroup("Erweitert") {
+                    LabeledContent("Sprechererkennung: unterstützte Apps") {
+                        Text(CallScreenAdapters.all.isEmpty
+                             ? String(localized: "noch keine — erst messen")
+                             : CallScreenAdapters.all.flatMap(\.bundleIDPrefixes).joined(separator: ", "))
+                            .foregroundStyle(.secondary)
                     }
+                    HStack {
+                        Button("Call-Fenster jetzt auslesen") { probe() }
+                        if let probeMessage {
+                            Text(probeMessage).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                    Text("Schreibt den Aufbau des laufenden Call-Fensters als Text in die Logs.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    LabeledContent("Skript nach Meeting-Ende") {
+                        if meetingHookPath.isEmpty {
+                            Text("Kein Skript gewählt").foregroundStyle(.secondary)
+                        } else {
+                            Text(meetingHookPath).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                    HStack {
+                        Button("Skript wählen…") { chooseHookScript() }
+                        if !meetingHookPath.isEmpty {
+                            Button("Entfernen", role: .destructive) { meetingHookPath = "" }
+                        }
+                    }
+                    Text("Bekommt nach jeder fertigen Meeting-Notiz den Pfad der Markdown-Datei.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-            } header: {
-                Text("Skript nach Meeting-Ende")
-            } footer: {
-                Text("Wird nach jeder fertigen Meeting-Notiz ausgeführt und bekommt den Pfad der Markdown-Datei als Argument — z. B. um sie nach Obsidian zu kopieren oder einen Webhook auszulösen.")
             }
 
             RememberedConsentSection()
@@ -173,8 +177,7 @@ private struct RememberedConsentSection: View {
     var body: some View {
         Section("Gemerkte Entscheidungen pro App") {
             if decisions.isEmpty {
-                Text("Noch keine gemerkten Entscheidungen pro Quelle.")
-                    .foregroundStyle(.secondary)
+                EmptyState("Noch keine gemerkten Entscheidungen pro Quelle.")
             } else {
                 ForEach(decisions, id: \.key) { entry in
                     HStack {

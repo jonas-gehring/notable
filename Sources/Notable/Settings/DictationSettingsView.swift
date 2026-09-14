@@ -20,7 +20,6 @@ struct DictationSettingsView: View {
     @AppStorage(DefaultsKey.bootstrapModel.key) private var bootstrapModel = DefaultsKey.bootstrapModel.fallback
     @AppStorage(MediaInterrupter.Key.pausePlayback) private var pauseMedia = false
     @AppStorage(MediaInterrupter.Key.muteOutput) private var muteOutput = false
-    @State private var history: [RecordingStore.ActivityItem] = []
     @State private var dictionary: [String: String] = PersonalDictionary.load()
     @State private var suggestions: [String: String] = PersonalDictionary.learnedSuggestions()
     @State private var newWrong = ""
@@ -63,16 +62,11 @@ struct DictationSettingsView: View {
                         dictation.whisperModelChanged()
                     }
                 }
-                Picker("Einfügemethode", selection: $pasteMethodRaw) {
-                    Text("Zwischenablage (⌘V, Standard)").tag("pasteboard")
-                    Text("Tastatureingabe simulieren").tag("typing")
-                }
                 Picker("Anzeige während der Aufnahme", selection: $overlayStyleRaw) {
                     ForEach(OverlayStyle.allCases) { style in
                         Text(style.label).tag(style.rawValue)
                     }
                 }
-                Toggle("Beim ersten Start ein kleines Modell vorschalten", isOn: $bootstrapModel)
                 Toggle("Wiedergabe während des Diktats pausieren", isOn: $pauseMedia)
                 Toggle("Systemton während des Diktats stummschalten", isOn: $muteOutput)
                 SpokenLanguagesRow()
@@ -88,7 +82,7 @@ struct DictationSettingsView: View {
             } header: {
                 Text("Textqualität")
             } footer: {
-                Text("Absätze: alle drei Sätze ein Umbruch, nie mitten im Satz — ohne das kommt ein langes Diktat als eine einzige Zeile an. Struktur: „neue Zeile“, „neuer Absatz“ und „Stichpunkt“ werden ausgeführt statt geschrieben, „erstens … zweitens“ wird zur nummerierten Liste (ab zwei Ordnungszahlen, damit ein einzelnes „erstens“ Prosa bleibt). In Code-Editoren passiert beides nicht.")
+                Text("Absätze und gesprochene Befehle wie „neue Zeile“ oder „Stichpunkt“ — nie in Code-Editoren.")
             }
 
             Section {
@@ -96,7 +90,7 @@ struct DictationSettingsView: View {
             } header: {
                 Text("App-Anpassung")
             } footer: {
-                Text("Passt Ton und Format an die App an, in die du diktierst: locker in Chats (Slack, Messages), Satzpunkt in E-Mail, wörtlich in Code-Editoren (Xcode, Terminal). Läuft vollständig lokal.")
+                Text("Locker in Chats, Schlusspunkt in Mails, wörtlich in Code-Editoren.")
             }
 
             if appContextFormatting {
@@ -120,8 +114,7 @@ struct DictationSettingsView: View {
 
             Section {
                 if dictionary.isEmpty {
-                    Text("Keine Einträge.")
-                        .foregroundStyle(.secondary)
+                    EmptyState("Keine Einträge.")
                 }
                 ForEach(dictionary.keys.sorted(), id: \.self) { wrong in
                     HStack {
@@ -194,41 +187,32 @@ struct DictationSettingsView: View {
                 }
             }
 
-            if let latency = dictation.lastLatencyMillis {
-                Section("Leistung") {
-                    LabeledContent(
-                        String(localized: "Letzte Latenz (Loslassen → Einfügen)"),
-                        // Not `String(format:)`: `%.1f` formats with a C locale,
-                        // so a German window printed "1.5 s" where every other
-                        // number on the pane reads "1,5 s".
-                        value: String(localized: """
-                        \(latency) ms bei \(dictation.lastAudioSeconds ?? 0, format: .number.precision(.fractionLength(1))) s Audio
-                        """)
-                    )
-                }
-            }
-
             EnhancementSettingsSection(onHotkeyChange: { dictation.hotkeyChanged() })
 
             SmartReplaceSection()
 
-            Section("Letzte Diktate") {
-                if history.isEmpty {
-                    Text("Noch keine Diktate.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    // The same list as the "Letzte Diktate" window, just
-                    // shorter — including Kopieren and Korrigieren, which this
-                    // section used to be missing for no stated reason.
-                    RecentDictationsList(items: history, compact: true)
+            // Repair tools and a measurement, one level down (Spec 33 §3.1). The
+            // recent-dictations list that used to close this page has its own
+            // window; a copy of it here was a convenience for development.
+            Section {
+                DisclosureGroup("Erweitert") {
+                    Picker("Einfügemethode", selection: $pasteMethodRaw) {
+                        Text("Zwischenablage (⌘V, Standard)").tag("pasteboard")
+                        Text("Tastatureingabe simulieren").tag("typing")
+                    }
+                    Toggle("Beim ersten Start ein kleines Modell vorschalten", isOn: $bootstrapModel)
+                    if let latency = dictation.lastLatencyMillis {
+                        LabeledContent(
+                            String(localized: "Letzte Latenz (Loslassen → Einfügen)"),
+                            // Not `String(format:)`: `%.1f` formats with a C locale.
+                            value: String(localized: """
+                            \(latency) ms bei \(dictation.lastAudioSeconds ?? 0, format: .number.precision(.fractionLength(1))) s Audio
+                            """)
+                        )
+                    }
                 }
             }
         }
         .formStyle(.grouped)
-        .task(id: dictation.lastLatencyMillis) {
-            history = (try? await RecordingStore.shared.recentActivity(
-                kind: .dictation, within: 0, limit: 8
-            )) ?? []
-        }
     }
 }

@@ -34,7 +34,8 @@ struct LiveNotesView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 380, minHeight: 300)
+        .windowMinimum(WindowSize.meetingNotes)
+        .windowFrameAutosave(WindowSize.meetingNotes)
         .background(Theme.windowBackground)
         .background(FloatingWindowConfigurator(floating: floating))
         .onChange(of: notes.isActive) { _, active in
@@ -51,13 +52,13 @@ struct LiveNotesView: View {
                 .foregroundStyle(notes.isActive ? Theme.accent : Theme.textMuted)
             VStack(alignment: .leading, spacing: 1) {
                 Text(notes.isActive ? notes.title : String(localized: "Kein Meeting aktiv"))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(Theme.textEmphasis)
                     .lineLimit(1)
                 Text(notes.isActive
                      ? String(localized: "Notizen kommen als „Eigene Notizen“ in die Notiz und in die Zusammenfassung.")
                      : String(localized: "Notizen gehören zu einer laufenden Aufnahme."))
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textSubtle)
                     .lineLimit(2)
             }
@@ -82,7 +83,7 @@ struct LiveNotesView: View {
         NotesFormatBar(editor: editor) {
             Button("Zeitstempel") { insertTimestamp() }
                 .buttonStyle(.borderless)
-                .font(.system(size: 11))
+                .font(.subheadline)
                 .help("Fügt die Laufzeit an der Schreibmarke ein (⌘T).")
         }
         .padding(.horizontal, 10)
@@ -103,7 +104,7 @@ struct LiveNotesView: View {
                     .accessibilityHidden(true)
 
                 Text("⌘⌥1–6 formatiert · Tab rückt ein · ⌘⏎ hakt ab · ⌘T stempelt")
-                    .font(.system(size: 10))
+                    .font(.caption2)
                     .foregroundStyle(Theme.textMuted)
                 Spacer(minLength: 0)
                 Button("Meeting beenden") { meeting.toggle() }
@@ -119,7 +120,7 @@ struct LiveNotesView: View {
                 Spacer(minLength: 0)
                 Toggle("Immer im Vordergrund", isOn: $floating)
                     .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
             }
         }
         .padding(.horizontal, 12)
@@ -177,7 +178,7 @@ private struct ElapsedLabel: View {
 
     var body: some View {
         Text(LiveNotes.timestamp(elapsed: notes.elapsed(at: now)))
-            .font(.system(size: 12, weight: .medium))
+            .font(.callout.weight(.medium))
             .monospacedDigit()
             .foregroundStyle(Theme.textSubtle)
             .onReceive(clock) { now = $0 }

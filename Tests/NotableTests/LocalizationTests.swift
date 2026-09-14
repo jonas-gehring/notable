@@ -123,7 +123,7 @@ final class LocalizationTests: XCTestCase {
     /// (`%@`, `%1$@`) that cannot be reconstructed from the source text, so they are
     /// covered by the export instead.
     private static func sourceKeys() -> [(key: String, location: String)] {
-        let calls = "Text|Button|Toggle|LabeledContent|Picker|Label|Stepper|TextField|SecureField|Link|Section|Menu"
+        let calls = "Text|Button|Toggle|LabeledContent|Picker|Label|Stepper|TextField|SecureField|Link|Section|Menu|DisclosureGroup|EmptyState"
         let patterns = [
             "\\b(?:\(calls))\\(\\s*\"((?:[^\"\\\\]|\\\\.)+)\"",
             "\\.help\\(\\s*\"((?:[^\"\\\\]|\\\\.)+)\"",

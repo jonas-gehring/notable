@@ -25,11 +25,11 @@ struct HeatmapCard: View {
                 ForEach(Array(matrix.enumerated()), id: \.offset) { index, row in
                     HStack(spacing: 3) {
                         Text(weekdaySymbol(index))
-                            .font(.system(size: 9))
+                            .font(.caption2)
                             .foregroundStyle(Theme.textMuted)
                             .frame(width: 24, alignment: .leading)
                         ForEach(Array(row.enumerated()), id: \.offset) { hour, totals in
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: Theme.radiusMark)
                                 .fill(Theme.chartPrimary.opacity(intensity(totals.dictationWords)))
                                 .frame(height: 11)
                                 .help("\(weekdaySymbol(index)) \(hour):00 — \(UsageMetrics.integer(totals.dictationWords)) Wörter")
@@ -47,7 +47,7 @@ struct HeatmapCard: View {
                     Spacer()
                     Text("23")
                 }
-                .font(.system(size: 9))
+                .font(.caption2)
                 .foregroundStyle(Theme.textMuted)
             }
         }

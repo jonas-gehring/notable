@@ -16,8 +16,9 @@ enum Theme {
     static let border = Color(nsColor: .separatorColor)
 
     // MARK: Text (native label ramp)
+    /// The label colour. There used to be a `textDefault` with the identical
+    /// value next to it — a token that carried no information (Spec 33 §3.3).
     static let textEmphasis = Color(nsColor: .labelColor)
-    static let textDefault = Color(nsColor: .labelColor)
     static let textSubtle = Color(nsColor: .secondaryLabelColor)
     static let textMuted = Color(nsColor: .tertiaryLabelColor)
 
@@ -39,6 +40,36 @@ enum Theme {
     static let radiusCard: CGFloat = 10
     static let radiusControl: CGFloat = 7
     static let radiusSmall: CGFloat = 6
+    /// Chart marks such as heatmap cells — a mark, not a surface.
+    static let radiusMark: CGFloat = 2
+
+    // MARK: Spacing, typography, motion (Spec 33 §3.3)
+
+    /// The only spacing steps. A value between two of them is a decision nobody
+    /// made on purpose; `StatsView` alone used to have twelve different ones.
+    enum Spacing {
+        static let xs: CGFloat = 4
+        static let s: CGFloat = 8
+        static let m: CGFloat = 12
+        static let l: CGFloat = 16
+        static let xl: CGFloat = 24
+    }
+
+    /// The two sizes no text style covers: the big numbers in the statistics
+    /// window and the onboarding icons. Everything else uses a semantic font
+    /// (`.callout`, `.headline`, …), so it follows the system text size.
+    enum Typography {
+        static let display = Font.system(size: 30)
+        static let hero = Font.system(size: 40, weight: .semibold)
+    }
+
+    /// Durations for appearing, disappearing and changing state — the HUD's
+    /// numbers from Spec 30, named once.
+    enum Motion {
+        static let appear: Double = 0.12
+        static let disappear: Double = 0.16
+        static let state: Double = 0.20
+    }
 
     // MARK: Private
 
@@ -76,38 +107,4 @@ struct CalCard: ViewModifier {
 
 extension View {
     func calCard(padding: CGFloat = 14) -> some View { modifier(CalCard(padding: padding)) }
-}
-
-/// A restrained segmented control: a recessed track with a raised surface pill
-/// under the selection.
-struct CalSegmented<Value: Hashable>: View {
-    let options: [(value: Value, label: String)]
-    @Binding var selection: Value
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(options, id: \.value) { option in
-                Button {
-                    selection = option.value
-                } label: {
-                    Text(option.label)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(selection == option.value ? Theme.textEmphasis : Theme.textSubtle)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.radiusSmall, style: .continuous)
-                                .fill(selection == option.value ? Theme.surface : .clear)
-                                .shadow(color: .black.opacity(selection == option.value ? 0.08 : 0),
-                                        radius: 1, y: 0.5))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(2)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radiusControl, style: .continuous)
-                .fill(Theme.surfaceSubtle))
-    }
 }

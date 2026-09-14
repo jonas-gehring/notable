@@ -22,17 +22,17 @@ struct DetailCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(Theme.textEmphasis)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(.subheadline)
                         .foregroundStyle(Theme.textSubtle)
                 }
             }
             if isEmpty {
                 Text(emptyMessage)
-                    .font(.system(size: 11))
+                    .font(.subheadline)
                     .foregroundStyle(Theme.textMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 8)
@@ -62,8 +62,8 @@ struct ShareRow: View {
                     .frame(width: 14, height: 14)
             }
             Text(label)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textDefault)
+                .font(.subheadline)
+                .foregroundStyle(Theme.textEmphasis)
                 .lineLimit(1)
                 .frame(width: 150, alignment: .leading)
             GeometryReader { proxy in
@@ -76,7 +76,7 @@ struct ShareRow: View {
             }
             .frame(height: 8)
             Text(value)
-                .font(.system(size: 11).monospacedDigit())
+                .font(.subheadline.monospacedDigit())
                 .foregroundStyle(Theme.textSubtle)
                 .frame(width: 90, alignment: .trailing)
         }

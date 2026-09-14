@@ -39,7 +39,7 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [30](30-hud-und-fehlerflaeche.md) | **HUD und Fehlerfläche** — ein Gesicht, Ein-/Ausblenden, Töne an, `DictationFailure` statt `localizedDescription`, letzter Clip bleibt wiederholbar | S–M + S + S | Stufe 3 (klickbares HUD) berührt die Nie-key-Invariante | Stufen 1 + 2 gebaut (2026-09-14), Abweichungen §8; Handtests offen |
 | [31](31-regeln-nachziehen.md) | **Regeln nachziehen** — Satzanfänge, `GermanITN`, Füllwörter mit Position, App-Tabelle + Picker, Absätze an Sprechpausen aus `tokenTimings` | ~1 Woche | eine falsche Zahl ist schlimmer als ein ausgeschriebenes Wort | gebaut (2026-09-14), Abweichungen §8; Handtests offen |
 | [32](32-lokales-sprachmodell.md) | **Lokales Sprachmodell als Textstufe** — FoundationModels (macOS 26) für Selbstkorrektur, Satzzeichen, Listen; nichts verlässt das Gerät | ½ T Messung + M | Latenz: 119 ms gegen voraussichtlich das Zehnfache — **erst messen** | Stufe 1 gebaut, **aus** (2026-09-14); Messung offen, weil Apple Intelligence auf dem Build-Rechner aus ist (§8) |
-| [33](33-einstellungen-diaet-und-craft.md) | **Einstellungen-Diät und Craft** — Messinstrumente hinter ⌥, ein Satz je Footer, Tokens, Fenster-Autosave, Über/Hilfe, Onboarding ohne Mikrofon blockiert | M | 62 sichtbare Stellen, optisches Risiko | 📋 Entwurf (2026-09-14) |
+| [33](33-einstellungen-diaet-und-craft.md) | **Einstellungen-Diät und Craft** — Messinstrumente hinter ⌥, ein Satz je Footer, Tokens, Fenster-Autosave, Über/Hilfe, Onboarding ohne Mikrofon blockiert | M | 62 sichtbare Stellen, optisches Risiko | gebaut (2026-09-14), Abweichungen §9; Handtests offen |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
 

@@ -219,3 +219,52 @@ Keine Migration; kein Defaults-Key wird umbenannt oder gelöscht.
 
 *Noch nicht gelaufen.* ⌘C/⌘V/⌘Z/⌘A in Chat, Notiz-Editor, Snippet-Editor — Datum und
 Ergebnis hierher.
+
+## 9. Stand des Baus (2026-09-14)
+
+**Gebaut:**
+
+- **Tokens** (§3.3): `Theme.Spacing`, `Theme.Typography` (die zwei Größen, die kein
+  Textstil abdeckt), `Theme.Motion`, `Theme.radiusMark` für Diagramm-Marken;
+  `textDefault` ist in `textEmphasis` aufgegangen. Alle 62 festen Schriftgrößen sind
+  semantische Stile, alle 17 freien Radien Tokens, `CalSegmented` ist gelöscht und die
+  Statistik benutzt das System-Segment. `ThemeTests` prüft das am Quelltext.
+- **Fenster** (§3.4): `WindowSize` ist die eine Tabelle für Szene und View; jedes
+  Fenster merkt sich seinen Rahmen (`windowFrameAutosave`). Das Hauptmenü hat
+  „Über Notable", „Notable-Hilfe" und „Einführung zeigen".
+- **Einstellungen** (§3.1, §3.2): Footer in einem Satz auf den Seiten Diktat, Meetings,
+  Speicherplatz, Allgemein, Menüleiste und Berechtigungen. Unter „Erweitert":
+  Einfügemethode, Vorschaltmodell und Latenzzeile (Diktat), Call-Fenster-Probe,
+  unterstützte Apps und Hook-Skript (Meetings), CLI-Argumente (Zusammenfassung). Die
+  Kopie der Diktat-Historie ist von der Diktat-Seite verschwunden. „VPIO" heißt „Echo
+  unterdrücken", der Satz mit ⇧⌘N ist gestrichen (Vorschlag aus §7), destruktive
+  Knöpfe tragen `role: .destructive`, die eine Radio-Gruppe ist ein Popup.
+- **Onboarding** (§3.5): „Weiter" ist auf der Mikrofon-Seite ohne Freigabe aus, mit
+  einem Satz, was Überspringen kostet. Die Erste-Diktat-Seite zeigt die Wellenform live
+  (`LevelMeter`, ein eigenes Objekt, damit 30 Updates pro Sekunde nicht jede Ansicht des
+  Controllers neu zeichnen) und danach den angekommenen Text.
+- **Leerzustände und Fortschritt** (§3.6): `EmptyState` für Listen in Formularen,
+  `DownloadProgressRow` mit einer Formulierung („Lädt: 40 %"); „Letzte Diktate" zeigt
+  beim Laden einen Spinner statt eines Leerzustands. `LocalizationTests` scannt
+  `DisclosureGroup` und `EmptyState` mit.
+
+**Abweichungen und nicht gebaut:**
+
+1. **⌥-Alternative im Menü → „Erweitert" in den Einstellungen.** SwiftUIs
+   `modifierKeyAlternate` braucht macOS 15, das Deployment-Target ist 14.4.
+2. **Kein Sammelschalter „Text aufbereiten"** mit Sheet (§3.2); die fünf Schalter
+   bleiben, jetzt mit einem Footer-Satz.
+3. **Vorschaltmodell und Einfügemethode sind nicht entfernt** (§3.1 Regel 3), sondern
+   unter „Erweitert". Ein automatischer Wechsel zur Tastatureingabe bräuchte ein Signal,
+   ob ⌘V ankam, und das gibt macOS nicht (Spec 29 §3.5).
+4. **Abstände nicht migriert.** Die Tokens existieren und die neuen Bausteine benutzen
+   sie; die bestehenden Paddings umzustellen ist optisches Risiko ohne Vorher/Nachher-
+   Bilder, also ein eigener Schritt.
+5. **Offene Entscheidungen aus §7 unberührt:** neues Icon, Engine-Rollen statt Namen,
+   zwölf statt vierzig Menüleisten-Motive. Die eigene Leer-Karte der Statistik bleibt.
+6. README-Screenshots nicht erneuert.
+
+**Tests:** `ThemeTests` 3 (neu); 148 Tests der betroffenen Klassen grün. **Nicht
+verifiziert:** alles, was man sehen oder bedienen muss — Abnahme 1, 3, 5–8, darunter ob
+der Frame-Autosave bei SwiftUI-`Window`-Szenen tatsächlich greift und ob
+⌘C/⌘V/⌘Z/⌘A in den Editoren funktionieren (§8).

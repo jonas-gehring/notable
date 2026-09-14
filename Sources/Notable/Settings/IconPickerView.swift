@@ -97,14 +97,14 @@ struct IconPickerView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: Theme.radiusControl)
                             .fill(selectedSymbol == icon.symbol ? Color.accentColor.opacity(0.18) : Color.clear)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: Theme.radiusControl)
                             .strokeBorder(selectedSymbol == icon.symbol ? Color.accentColor : Color.secondary.opacity(0.25))
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                    .contentShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(icon.label)

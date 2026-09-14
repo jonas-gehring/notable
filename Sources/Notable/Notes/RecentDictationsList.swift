@@ -121,7 +121,7 @@ struct RecentDictationRow: View {
             TextEditor(text: $draft)
                 .font(.body)
                 .frame(minHeight: 120)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(.secondary.opacity(0.3)))
             HStack {
                 Spacer()
                 Button("Abbrechen") { correcting = false }

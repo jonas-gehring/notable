@@ -187,7 +187,7 @@ private struct SmartReplaceEditor: View {
                     TextEditor(text: $item.replacement)
                         .font(.body)
                         .frame(minHeight: 90)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(.separator))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSmall).stroke(.separator))
                 }
                 Toggle("Groß-/Kleinschreibung beachten", isOn: $item.caseSensitive)
             }

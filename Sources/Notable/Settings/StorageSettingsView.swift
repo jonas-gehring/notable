@@ -49,10 +49,7 @@ struct StorageSettingsView: View {
             } header: {
                 Text("Belegung")
             } footer: {
-                Text("""
-                Alle vier Posten, weil zwei davon lange keiner genannt hat — die \
-                Modelle sind der größte, und sie kamen hier nie vor.
-                """)
+                Text("Alles, was Notable auf die Platte legt.")
             }
 
             modelSection
@@ -66,12 +63,7 @@ struct StorageSettingsView: View {
             } header: {
                 Text("Aufnahmen")
             } footer: {
-                Text("""
-                Zwei Regeln, weil eine nicht reicht: eine Frist erwischt keine einzelne \
-                riesige Aufnahme, ein Budget allein bremst das stille Wachsen nicht. \
-                Fehlgeschlagene Aufnahmen bekommen mehr Zeit — sie liegen dort, um von \
-                Hand gerettet zu werden.
-                """)
+                Text("Frist und Budget gelten beide; fehlgeschlagene Aufnahmen bekommen mehr Zeit.")
             }
 
             Section {
@@ -81,18 +73,14 @@ struct StorageSettingsView: View {
             } header: {
                 Text("Texte in der Datenbank")
             } footer: {
-                Text("""
-                Gelöscht wird der Text, nie die Zeile: die Wortzahl bleibt stehen, \
-                also bleibt die Statistik danach exakt dieselbe. Standardmäßig aus.
-                """)
+                Text("Gelöscht wird nur der Text — die Statistik bleibt unverändert.")
             }
 
             Section {
                 Toggle("Ziel-App der Diktate erfassen", isOn: $appStatistics)
                 // Confirmed and counted: it is a database write with no undo,
                 // and it used to give no sign that anything had happened.
-                Button("Erfasste Ziel-Apps löschen") { confirmClearApps = true }
-                    .buttonStyle(.link)
+                Button("Erfasste Ziel-Apps löschen", role: .destructive) { confirmClearApps = true }
                     .confirmationDialog(
                         "Erfasste Ziel-Apps löschen?",
                         isPresented: $confirmClearApps
@@ -121,8 +109,7 @@ struct StorageSettingsView: View {
                     } else {
                         Text("\(Self.sessions(pending.removals.count)), \(byteText(pending.reclaimedBytes)) werden gelöscht.")
                         HStack {
-                            Button("Endgültig löschen") { runPlan(pending) }
-                                .buttonStyle(.borderedProminent)
+                            Button("Endgültig löschen", role: .destructive) { runPlan(pending) }
                             Button("Abbrechen") { self.pending = nil }
                         }
                     }
@@ -146,11 +133,7 @@ struct StorageSettingsView: View {
             } header: {
                 Text("Manuell aufräumen")
             } footer: {
-                Text("""
-                Was nie automatisch gelöscht wird: deine Markdown-Notizen im Notiz-Ordner, \
-                die Statistik und das Kassenbuch der KI-Kosten. Aufräumen zeigt immer erst \
-                den Plan.
-                """)
+                Text("Notizen, Statistik und KI-Kosten werden nie gelöscht; du siehst immer erst den Plan.")
             }
         }
         .formStyle(.grouped)
@@ -199,7 +182,7 @@ struct StorageSettingsView: View {
     private var modelSection: some View {
         Section {
             if models.isEmpty {
-                Text("Noch keine Modelle geladen.").foregroundStyle(.secondary)
+                EmptyState("Noch keine Modelle geladen.")
             }
             ForEach(models) { entry in
                 LabeledContent {
@@ -217,10 +200,9 @@ struct StorageSettingsView: View {
                 // Same shape as the retention cleanup below: show the plan
                 // first, delete only on confirmation. A gigabyte removed
                 // unasked is irreversible.
-                Button("\(Self.models(plan.entries.count)) entfernen (\(byteText(plan.bytes)))") {
+                Button("\(Self.models(plan.entries.count)) entfernen (\(byteText(plan.bytes)))", role: .destructive) {
                     confirmModelCleanup = true
                 }
-                .buttonStyle(.link)
                 .confirmationDialog("Modellordner entfernen?", isPresented: $confirmModelCleanup) {
                     Button("Entfernen", role: .destructive) { removeModels(plan) }
                     Button("Abbrechen", role: .cancel) {}
@@ -237,11 +219,7 @@ struct StorageSettingsView: View {
         } header: {
             Text("Modelle")
         } footer: {
-            Text("""
-            Die Spracherkennung lädt ihre Modelle beim ersten Start von HuggingFace. \
-            Welche Fassung das ist, entscheidet die eingebundene Bibliothek — benennt \
-            sie ein Verzeichnis um, bleibt das alte liegen und steht hier als verwaist.
-            """)
+            Text("Unvollständige und nicht mehr benutzte Modelle lassen sich hier entfernen.")
         }
     }
 
@@ -262,11 +240,7 @@ struct StorageSettingsView: View {
             } header: {
                 Text("Bestand umrechnen")
             } footer: {
-                Text("""
-                Verlustfrei: dieselben Abtastwerte, weniger Bytes, als .m4a auch von \
-                QuickTime abspielbar. Die Rohspur wird erst gelöscht, nachdem die neue \
-                zurückgelesen und verglichen wurde. Neue Aufnahmen macht das von selbst.
-                """)
+                Text("Verlustfrei als .m4a — die Rohspur geht erst, wenn die neue geprüft ist.")
             }
         }
         if let compressionResult, compressionResult.compressedTracks > 0 {

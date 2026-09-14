@@ -307,3 +307,23 @@ vollständige Lauf wurde bei den Modelltests vom System wegen Speichermangels be
 `LatencyProbeTests` — sie laden echte Modelle, und Spec 29 berührt keinen Transcriber. **Nicht verifiziert:** die Handtests 1–8 der Abnahme
 (zweites Diktat, Esc in jeder Phase, entzogenes Mikrofon, ⌘Tab, AirPods, Passwortfeld,
 kurzes Halten) — sie brauchen die installierte App und echte Hardware.
+
+### Nachtrag: zweiter Durchgang (2026-09-14)
+
+Vier der sieben Abweichungen sind geschlossen:
+
+- **Abweichung 2 → gebaut.** `DictationController.swift` hat 498 Zeilen (Abnahme 9).
+  Herausgelöst: `DictationEngines` (Laden, Vorschaltmodell, Tausch, Transkription),
+  `DictationInput` (Gerätewahl, Berechtigung, Gerätewechsel), `DictationFeedback`
+  (Fehlerzeilen, Töne, aufgeschobene Fehler) und `DictationTextStages` (Regeln, lokale
+  Stufe, CLI, Einfügen, Speichern). Die Views lesen den Modellzustand weiter über den
+  Controller; er reicht die Änderungen von `DictationEngines` durch.
+- **Abweichung 3 → gebaut.** Ein Mikrofonwechsel wird sofort neben der Wellenform
+  gesagt („Mikrofon: AirPods", 2,5 s über die Partial-Zeile) — ohne das HUD
+  auszublenden, was der Grund für die Abweichung war.
+- **Abweichung 4 → gebaut.** `AudioRecorder.stop()` ruft `engine.prepare()`.
+- **Abweichung 5 → gebaut.** `HotkeyMonitor.acceptsEscape` statt `isRecordingActive`.
+
+Bleibt: **Abweichung 1** (keine Wirkungsliste — die Entscheidungen sind pure
+Funktionen, das Ziel der Testbarkeit ist erreicht, ohne den Kontrollfluss doppelt zu
+führen), **6** (Töne; Spec 30) und **7** (Pfad-Einträge im Testziel, kein Mangel).

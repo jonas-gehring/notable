@@ -196,6 +196,10 @@ final class AudioRecorder: @unchecked Sendable {
         }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        // Allocates the graph for the next start while nobody waits (Spec 29
+        // §3.10). It does not open the device — no microphone indicator — and
+        // `installTapAndStart` prepares again if the device changed meanwhile.
+        engine.prepare()
         return downsampler.drain()
     }
 }

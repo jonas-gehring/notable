@@ -19,8 +19,9 @@ final class HotkeyMonitor {
     var onKeyUp: ((HotkeyRole) -> Void)?
     /// Esc pressed while a recording is active — cancel it.
     var onEscape: (() -> Void)?
-    /// Supplied by the controller: is a recording (held or locked) running?
-    var isRecordingActive: () -> Bool = { false }
+    /// Supplied by the controller: does Esc have something to abort — a running
+    /// recording, or a released one still on its way to the paste (Spec 29 §3.4)?
+    var acceptsEscape: () -> Bool = { false }
 
     /// Which modifier key acts as push-to-talk; set before start().
     var spec: HotkeySpec = .rightOption
@@ -199,7 +200,7 @@ final class HotkeyMonitor {
             if let escTap { CGEvent.tapEnable(tap: escTap, enable: true) }
             return false
         }
-        guard type == .keyDown, isRecordingActive(),
+        guard type == .keyDown, acceptsEscape(),
               event.getIntegerValueField(.keyboardEventKeycode) == 53
         else { return false }
         onEscape?()

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Every way a dictation can end without its text landing where it was meant
@@ -119,6 +120,10 @@ enum SoundCue: String, Sendable, CaseIterable {
     case done
     case cancelled
     case failed
+
+    func play() {
+        NSSound(named: systemSoundName)?.play()
+    }
 
     /// The system sound standing in until Notable ships its own.
     var systemSoundName: String {

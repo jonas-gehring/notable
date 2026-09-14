@@ -10,11 +10,12 @@ import NaturalLanguage
 /// runs at the very *end* of `polish()`, after `tidy` — which is why `tidy`
 /// itself stays a plain whitespace-collapsing function and needs no change.
 ///
-/// **Deliberately not done here: breaking at speech pauses.** That is the better
-/// signal, but the dictation path has no timings — `TranscriptionEngine.transcribe`
-/// returns a bare `String` for all three engines. Faking a pause from sentence
-/// counts alone would be a guess dressed up as a measurement, so the pause rule
-/// waits for real word timings and this type ships the counting fallback.
+/// **Paragraphs at speech pauses, when there are timings** (Spec 31 §3.5).
+/// Parakeet reports token timings; `SpeechPauses` turns them into one flag per
+/// sentence boundary and `Options.sentencePauses` carries them here. A pause
+/// allows a paragraph, and without one the old count still caps it. Whisper and
+/// Unified report no timings, and a text whose sentences no longer line up with
+/// the transcript is treated the same — those get the count, never a guessed pause.
 ///
 /// Pure and unit-tested (`ParagraphFormatterTests`). Never reached in verbatim
 /// mode: `polish()` returns before `tidy` there, and a code/terminal dictation
@@ -27,6 +28,11 @@ enum ParagraphFormatter {
         var sentencesPerParagraph = 3
         /// Honour spoken structure commands ("neue Zeile", "Stichpunkt", …).
         var structureCommands = true
+        /// One flag per sentence boundary of the *whole* text: did the speaker
+        /// pause there? Used only when the text is one block and the count
+        /// matches its sentences — anything else would attach a pause to the
+        /// wrong sentence.
+        var sentencePauses: [Bool]? = nil
     }
 
     static func format(_ text: String, options: Options = Options()) -> String {
@@ -186,7 +192,12 @@ enum ParagraphFormatter {
     private static func render(_ marked: String, options: Options) -> String {
         var rendered: [(line: String, attachment: Block.Attachment)] = []
 
-        for block in split(marked) {
+        let blocks = split(marked)
+        // Pauses were measured on the transcript. Once spoken commands or kept
+        // line breaks have cut the text into blocks, sentence numbers no longer
+        // match it.
+        let pauses = blocks.count == 1 ? options.sentencePauses : nil
+        for block in blocks {
             let raw = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty else { continue }
 
@@ -198,7 +209,7 @@ enum ParagraphFormatter {
             if let prefix = block.prefix {
                 rendered.append((prefix + body, block.attachment))
             } else if options.paragraphs, !isListItem(body) {
-                let parts = paragraphs(of: body, per: options.sentencesPerParagraph)
+                let parts = paragraphs(of: body, per: options.sentencesPerParagraph, pauses: pauses)
                 for (index, part) in parts.enumerated() {
                     // Only the first part inherits the spoken attachment; the
                     // breaks this type inserts itself are always paragraphs.
@@ -260,10 +271,22 @@ enum ParagraphFormatter {
         return blocks
     }
 
-    /// Groups a prose block's sentences into paragraphs of `count`.
-    private static func paragraphs(of text: String, per count: Int) -> [String] {
+    /// Groups a prose block's sentences into paragraphs: at a pause when there
+    /// are timings, and never more than `count` without one.
+    private static func paragraphs(of text: String, per count: Int, pauses: [Bool]? = nil) -> [String] {
         guard count > 0 else { return [text] }
         let sentences = self.sentences(in: text)
+        if let pauses, !pauses.isEmpty, pauses.count == sentences.count - 1 {
+            var groups: [[String]] = [[]]
+            for (index, sentence) in sentences.enumerated() {
+                groups[groups.count - 1].append(sentence)
+                guard index < pauses.count else { continue }
+                if pauses[index] || groups[groups.count - 1].count >= count {
+                    groups.append([])
+                }
+            }
+            return groups.filter { !$0.isEmpty }.map { $0.joined(separator: " ") }
+        }
         guard sentences.count > count else { return [text] }
 
         return stride(from: 0, to: sentences.count, by: count).map { start in

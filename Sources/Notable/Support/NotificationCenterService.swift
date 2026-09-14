@@ -66,7 +66,7 @@ final class NotificationCenterService: NSObject {
         let consent = UNNotificationCategory(
             identifier: Category.meetingConsent.rawValue,
             actions: [
-                UNNotificationAction(identifier: Action.record.rawValue, title: "Aufnehmen", options: []),
+                UNNotificationAction(identifier: Action.record.rawValue, title: String(localized: "Aufnehmen"), options: []),
                 UNNotificationAction(identifier: Action.remember.rawValue, title: String(localized: "Immer für diese App"), options: []),
                 UNNotificationAction(identifier: Action.later.rawValue, title: String(localized: "Später"), options: []),
             ],
@@ -78,7 +78,7 @@ final class NotificationCenterService: NSObject {
         let consentNoRemember = UNNotificationCategory(
             identifier: Category.meetingConsent.rawValue + ".once",
             actions: [
-                UNNotificationAction(identifier: Action.record.rawValue, title: "Aufnehmen", options: []),
+                UNNotificationAction(identifier: Action.record.rawValue, title: String(localized: "Aufnehmen"), options: []),
                 UNNotificationAction(identifier: Action.later.rawValue, title: String(localized: "Später"), options: []),
             ],
             intentIdentifiers: [],

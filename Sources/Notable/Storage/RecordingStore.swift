@@ -56,6 +56,11 @@ actor RecordingStore {
         /// nothing was enhanced — otherwise it would be impossible to see what
         /// the model did.
         var rawText: String? = nil
+        /// Which stage shaped the text last: "rules", "local" or "cli" (Spec 32).
+        /// Nil for every row written before the column existed.
+        var polisher: String? = nil
+        /// How long the on-device stage took, when it ran.
+        var polishMs: Int? = nil
         /// The calendar event's title as it stood when the meeting was recorded.
         ///
         /// In SQLite because "SQLite is the truth" was not true for it: the
@@ -213,7 +218,9 @@ actor RecordingStore {
         latencyMs: Int? = nil,
         sourceApp: String? = nil,
         enhanced: Bool = false,
-        rawText: String? = nil
+        rawText: String? = nil,
+        polisher: String? = nil,
+        polishMs: Int? = nil
     ) throws {
         let recording = Recording(
             id: UUID().uuidString,
@@ -225,7 +232,9 @@ actor RecordingStore {
             latencyMs: latencyMs,
             sourceApp: sourceApp,
             enhanced: enhanced,
-            rawText: rawText
+            rawText: rawText,
+            polisher: polisher,
+            polishMs: polishMs
         )
         try db().transaction {
             try insert(recording)
@@ -245,8 +254,8 @@ actor RecordingStore {
             (id, kind, started_at, ended_at, title, calendar_event_id, markdown_path,
              summary, subtitle, folder, title_is_auto, user_notes, word_count,
              engine, latency_ms, source_app, enhanced, raw_text, calendar_event_title, attendees,
-             participants)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+             participants, polisher, polish_ms)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
         """
         try db().run(sql) { s in
             s.bind(1, recording.id)
@@ -270,6 +279,8 @@ actor RecordingStore {
             s.bind(19, recording.calendarEventTitle)
             s.bind(20, recording.attendees.isEmpty ? nil : recording.attendees.joined(separator: "\n"))
             s.bind(21, recording.participants.isEmpty ? nil : recording.participants.joined(separator: "\n"))
+            s.bind(22, recording.polisher)
+            s.bind(23, recording.polishMs)
         }
     }
 

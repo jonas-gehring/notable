@@ -132,6 +132,29 @@ final class DictationOverlayTests: XCTestCase {
         overlay.updatePartial("halber Satz")
         overlay.updateLocked(true)
         overlay.hide()
+        // Spec 30: the panel fades before it is ordered out.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         XCTAssertFalse(overlay.panel?.isVisible ?? false)
+    }
+
+    /// A dictation that is done before the delay never shows its spinner.
+    func testDelayedStateIsDroppedWhenHiddenFirst() {
+        let overlay = controller(style: .bottom)
+        overlay.show(.recording)
+        overlay.showAfterDelay(.transcribing, delay: .milliseconds(100))
+        overlay.hide()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        XCTAssertFalse(overlay.panel?.isVisible ?? false, "ein schnelles Diktat zeigt keinen Spinner")
+    }
+
+    func testDelayedStateAppearsWhenNothingOvertakesIt() throws {
+        let overlay = controller(style: .bottom)
+        overlay.show(.recording)
+        overlay.showAfterDelay(.transcribing, delay: .milliseconds(50))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let panel = try XCTUnwrap(overlay.panel)
+        XCTAssertTrue(panel.isVisible)
+        XCTAssertFalse(panel.canBecomeKey)
+        overlay.hide()
     }
 }

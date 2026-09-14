@@ -65,12 +65,16 @@ final class TextPolisherTests: XCTestCase {
         XCTAssertEqual(polished, "Das ist ein Test, wirklich.")
     }
 
-    func testITNIsSkippedForGermanText() {
+    /// Until Spec 31 this pinned the opposite — German number words untouched,
+    /// because only English had an ITN. `GermanITN` now normalizes them, and the
+    /// English rules still never run on German text.
+    func testGermanTextGetsGermanITN() {
         let polished = TextPolisher.polish(
             "das kostet zweihundert Euro und ist morgen fertig.",
             options: .init(removeFillers: false, applyITN: true)
         )
-        XCTAssertTrue(polished.contains("zweihundert"), "Deutsche Zahlwörter dürfen nicht angefasst werden")
+        XCTAssertTrue(polished.contains("200\u{00A0}€"), polished)
+        XCTAssertFalse(polished.contains("$"), "Englische Regeln laufen nicht auf deutschem Text")
     }
 
     // MARK: - Pure-Swift English ITN

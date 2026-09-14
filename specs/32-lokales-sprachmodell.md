@@ -209,4 +209,55 @@ Pfad nicht und die Pipeline ist die von Spec 29.
 
 ## 8. Stand der Messung
 
-*Noch nicht gemessen.* Hier kommen die Zahlen aus Stufe 0 hin, mit Datum.
+**Nicht gemessen (2026-09-14): Apple Intelligence ist auf dem Build-Rechner aus.**
+`LocalModelProbeTests` lief mit `TEST_RUNNER_NOTABLE_LOCAL_MODEL=1` und hat sich mit
+`appleIntelligenceOff` übersprungen, wie vorgesehen. Einschalten ist eine
+Systemeinstellung (Systemeinstellungen → Apple Intelligence & Siri, danach lädt macOS
+das Modell) und damit Sache des Owners. Danach:
+
+    TEST_RUNNER_NOTABLE_LOCAL_MODEL=1 xcodebuild -project Notable.xcodeproj -scheme Notable \
+        -derivedDataPath "$TMPDIR/notable" test -only-testing:NotableTests/LocalModelProbeTests
+
+Die Zeilen `LOCAL_POLISH_PROBE bucket=…` und `accepted=…` gehören hierher.
+
+## 9. Stand des Baus (2026-09-14)
+
+**Abweichung von der eigenen Regel „ohne Messung wird nichts gebaut":** Stufe 1 ist
+gebaut, aber **nicht eingeschaltet**. Die Vorgabe der Betriebsart ist `off`, und solange
+das Modell nicht verfügbar ist, ist der Picker ausgegraut und der Grund steht darunter.
+Auf diesem Rechner läuft also kein einziger Modellaufruf, bis jemand Apple Intelligence
+einschaltet *und* die Betriebsart wählt. Gebaut wurde, weil die Messung von einer
+Systemeinstellung abhängt und nicht vom Code — und weil der Messtest die fertige Hülle
+braucht, um das zu messen, was später tatsächlich läuft.
+
+**Gebaut:**
+
+- `LocalPolish` (pur): Betriebsart `off`/`long`/`always` (Schlüssel `localPolishMode`),
+  Schwelle 25 Wörter, nie in `.code`, die feste Instruktion, der Prompt je Kategorie und
+  die Prüfung der Antwort.
+- `LocalPolisher` (Actor, macOS 26): eine frische Session je Diktat, die nächste wird
+  sofort vorgewärmt; 4 s Zeitgrenze; `@Generable PolishedDictation`; wirft nie.
+- `LocalModelAvailability` mit Grund für jeden Fall, `LocalPolishSection` in den
+  Einstellungen, Zustand „Formatiere…" im HUD (nach 300 ms), Migration 6 mit
+  `recordings.polisher` und `recordings.polish_ms`.
+- Im Controller: nach den Regeln, vor der CLI-Verbesserung; `enhanced` zählt nur noch
+  die CLI, `polisher` sagt, welche Stufe den Text zuletzt geformt hat. Kein Eintrag in
+  `llm_usage`.
+
+**Abweichungen:**
+
+1. **Die Prüfung ist umgedreht** (§3.3): nicht „alle Zahlen und Namen der Eingabe
+   bleiben", sondern „keine Zahl und kein großgeschriebenes Wort, das nicht in der
+   Eingabe stand". Die ursprüngliche Regel hätte jede Selbstkorrektur verworfen — „an
+   Max, ich meine an Moritz" löscht Max absichtlich. Was nie passieren darf, ist ein
+   erfundener Name oder eine erfundene Zahl; das prüft sie.
+2. **Keine Statistik-Karte** (§3.7, §3.8): die Spalten werden geschrieben, die
+   Verteilung Regeln/lokal/CLI und Median/p95 von `polish_ms` sind noch nicht in
+   `Stats/`. Ohne Messwerte gäbe es darin nichts zu sehen.
+3. **Stufe 2** (Kontext, Spec 04 lokal, Wörterbuch-Quelle C) ist nicht angefasst — wie
+   vorgesehen erst nach einem Monat Stufe 1.
+4. `CLAUDE.md` bekam den Absatz zur Datengrenze nicht, weil dort unkommittierte
+   Änderungen des Owners liegen; er steht in `specs/README.md`.
+
+**Tests:** `LocalPolishTests` 14 (neu, ohne Modell), `LocalModelProbeTests` 1 (opt-in,
+übersprungen). **Nicht verifiziert:** alles in §6, was ein laufendes Modell braucht (2–7).

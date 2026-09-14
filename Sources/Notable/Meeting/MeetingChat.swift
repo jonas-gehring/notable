@@ -133,7 +133,7 @@ struct MeetingChatView: View {
                 Text("Chat mit dem Meeting")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.textEmphasis)
-                Text(recording.title ?? "Meeting")
+                Text(recording.title ?? String(localized: "Meeting"))
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textSubtle)
                     .lineLimit(1)

@@ -37,6 +37,9 @@ struct TextPolisher: Sendable {
         /// Passed in rather than read from `UserDefaults` so this stays pure and
         /// the tests can set a profile without touching global state.
         var spokenLanguages: [String] = SpokenLanguages.default
+        /// Pauses at the transcript's sentence boundaries, when the engine
+        /// reported timings (Spec 31 §3.5). Set per dictation, never from defaults.
+        var sentencePauses: [Bool]? = nil
 
         /// Reads the five polish switches.
         ///
@@ -93,11 +96,21 @@ struct TextPolisher: Sendable {
                 result = removing(fillers: universalFillers, from: result)
                 if english {
                     result = removing(fillers: englishFillers, from: result)
+                    result = applying(englishFillerRules, to: result)
+                    result = removingRepetitions(of: englishRepeatableWords, from: result)
+                } else {
+                    result = applying(germanFillerRules, to: result)
+                    result = removingRepetitions(of: germanRepeatableWords, from: result)
                 }
             }
-            // ITN rules (spoken-form numbers, currency, dates) are English-specific.
-            if options.applyITN, english {
-                result = EnglishITN.normalize(result)
+            // Spoken-form numbers, currency, dates and times — per language, and
+            // German only when German is in the profile (Spec 31 §3.2).
+            if options.applyITN {
+                if english {
+                    result = EnglishITN.normalize(result)
+                } else if options.spokenLanguages.contains("de") {
+                    result = GermanITN.normalize(result)
+                }
             }
         }
 
@@ -123,6 +136,11 @@ struct TextPolisher: Sendable {
             return result.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         var tidied = tidy(result, capitalizeStart: options.capitalizeStart)
+        // Every sentence, not only the first (Spec 31 §3.1). Off where the first
+        // word is left alone too — a lowercase chat line is a choice.
+        if options.capitalizeStart {
+            tidied = capitalizingSentenceStarts(tidied)
+        }
         if options.enforceFinalPunctuation {
             tidied = ensuringFinalPunctuation(tidied)
         }
@@ -132,7 +150,8 @@ struct TextPolisher: Sendable {
         guard options.paragraphs || options.structureCommands else { return tidied }
         return ParagraphFormatter.format(tidied, options: ParagraphFormatter.Options(
             paragraphs: options.paragraphs,
-            structureCommands: options.structureCommands
+            structureCommands: options.structureCommands,
+            sentencePauses: options.sentencePauses
         ))
     }
 
@@ -203,7 +222,8 @@ struct TextPolisher: Sendable {
     /// The templates carry **real** newlines, not `\\n`: a template treats a
     /// backslash as an escape, so `"\\n"` would insert the letter n.
     private static let tidyPatterns: [(regex: NSRegularExpression, template: String)] = [
-        ("[^\\S\\n]+", " "),
+        // Not the no-break space: German ITN puts one between "22,50" and "€".
+        ("[^\\S\\n\\x{00A0}]+", " "),
         (" *\\n *", "\n"),
         ("\\n{3,}", "\n\n"),
         (" ([.,!?;:])", "$1"),
@@ -237,6 +257,138 @@ struct TextPolisher: Sendable {
         let word = text.prefix { !$0.isWhitespace }
         guard word.allSatisfy({ !$0.isUppercase }) else { return text }
         return first.uppercased() + text.dropFirst()
+    }
+
+    /// Capitalizes the first word of every sentence, with the same guard as
+    /// `capitalizingFirstWord`: only an entirely lowercase word — "iPhone" and
+    /// "macOS" stay as they are.
+    ///
+    /// A scan, not `NLTokenizer`: the tokenizer uses the capital letter as its
+    /// cue for a sentence start, so "gut. dann weiter" — exactly the case this
+    /// exists for — comes back as one sentence. The scan looks at what stands
+    /// before the punctuation instead and leaves three things alone: an ordinal
+    /// ("vom 3. bis"), a single-letter or listed abbreviation ("z. B. das",
+    /// "usw. und"), and anything across a line break, which only an expansion
+    /// can have put there and which is already written the way the user wants
+    /// (the rule `ParagraphFormatter` keeps for kept breaks). It never invents
+    /// the period itself.
+    static func capitalizingSentenceStarts(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "([.!?])[ \\t]+(?=\\p{Ll})") else { return text }
+        var result = text
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex ..< text.endIndex, in: text))
+        for match in matches.reversed() {
+            guard let whole = Range(match.range, in: result),
+                  let mark = Range(match.range(at: 1), in: result) else { continue }
+            if result[mark] == ".", isAbbreviationOrOrdinal(before: mark.lowerBound, in: result) { continue }
+            let rest = String(result[whole.upperBound...])
+            let capitalized = capitalizingFirstWord(rest)
+            guard capitalized != rest else { continue }
+            result.replaceSubrange(whole.upperBound..., with: capitalized)
+        }
+        return result
+    }
+
+    private static let abbreviations: Set<String> = [
+        "bzw", "usw", "ca", "vgl", "nr", "evtl", "ggf", "inkl", "exkl", "zzgl", "bspw", "etc",
+        "dr", "prof", "hr", "fr", "str", "abs", "mio", "mrd", "tel", "mr", "mrs", "ms", "vs",
+    ]
+
+    /// The word right before a period at `index`: a number ("3."), one letter
+    /// ("z.", "B."), a dotted short form ("e.g.") or a listed abbreviation.
+    private static func isAbbreviationOrOrdinal(before index: String.Index, in text: String) -> Bool {
+        var start = index
+        while start > text.startIndex {
+            let previous = text.index(before: start)
+            if text[previous].isWhitespace { break }
+            start = previous
+        }
+        let word = text[start ..< index]
+        guard !word.isEmpty else { return false }
+        if word.allSatisfy(\.isNumber) { return true }
+        if word.count == 1, word.first?.isLetter == true { return true }
+        if word.contains(".") { return true }
+        return abbreviations.contains(word.lowercased())
+    }
+
+    // MARK: - Positional fillers and repetitions (Spec 31 §3.3)
+
+    /// A filler that is also an ordinary word, and so only goes where its
+    /// position gives it away: "Also, ich denke" is a filler, "also ist es so" is
+    /// not; ", sozusagen," is, "das ist sozusagen fertig" is left alone.
+    struct FillerRule: Sendable {
+        enum Position: Sendable {
+            /// At the start of a sentence, followed by a comma.
+            case sentenceStart
+            /// Between commas, or between a comma and the sentence end.
+            case commaBounded
+        }
+
+        var phrase: String
+        var position: Position
+    }
+
+    static let germanFillerRules: [FillerRule] = [
+        FillerRule(phrase: "also", position: .sentenceStart),
+        FillerRule(phrase: "sozusagen", position: .sentenceStart),
+        FillerRule(phrase: "sozusagen", position: .commaBounded),
+        FillerRule(phrase: "quasi", position: .sentenceStart),
+        FillerRule(phrase: "quasi", position: .commaBounded),
+        FillerRule(phrase: "halt", position: .commaBounded),
+    ]
+
+    /// "like" is not here: it is a verb and a comparison far more often than a
+    /// filler, and no position rule tells them apart.
+    static let englishFillerRules: [FillerRule] = [
+        FillerRule(phrase: "you know", position: .commaBounded),
+        FillerRule(phrase: "i mean", position: .sentenceStart),
+        FillerRule(phrase: "i mean", position: .commaBounded),
+        FillerRule(phrase: "sort of", position: .commaBounded),
+        FillerRule(phrase: "kind of", position: .commaBounded),
+    ]
+
+    private static func applying(_ rules: [FillerRule], to text: String) -> String {
+        var result = text
+        for rule in rules {
+            let phrase = NSRegularExpression.escapedPattern(for: rule.phrase)
+                .replacingOccurrences(of: " ", with: "\\s+")
+            switch rule.position {
+            case .sentenceStart:
+                result = result.replacingOccurrences(
+                    of: "(?iu)(^|[.!?]\\s+)\(phrase),\\s*", with: "$1", options: .regularExpression
+                )
+            case .commaBounded:
+                result = result.replacingOccurrences(
+                    of: "(?iu),\\s*\(phrase)\\s*,", with: ",", options: .regularExpression
+                )
+                result = result.replacingOccurrences(
+                    of: "(?iu),\\s*\(phrase)(?=\\s*[.!?]|\\s*$)", with: "", options: .regularExpression
+                )
+            }
+        }
+        return result
+    }
+
+    /// Words that are never said twice on purpose. "die die", "das das", "der
+    /// der" and "that that" are not in it — "Leute, die die Regeln kennen" and
+    /// "I know that that works" are grammar — and neither are "sehr sehr" or "ja
+    /// ja", where the repetition is the meaning.
+    static let germanRepeatableWords = ["ich", "wir", "dass", "ist"]
+    static let englishRepeatableWords = ["I", "the", "we"]
+
+    /// "ich ich habe" → "ich habe", "Ich ich habe" → "Ich habe". A stutter, not
+    /// a false start: "ich hab— ich habe" needs a model (Spec 32).
+    private static func removingRepetitions(of words: [String], from text: String) -> String {
+        var result = text
+        for word in words {
+            let lower = NSRegularExpression.escapedPattern(for: word)
+            let capital = NSRegularExpression.escapedPattern(for: word.prefix(1).uppercased() + word.dropFirst())
+            result = result.replacingOccurrences(
+                of: "(?<![\\p{L}\\p{N}])(\(lower)|\(capital))\\s+\(lower)(?![\\p{L}\\p{N}])",
+                with: "$1",
+                options: .regularExpression
+            )
+        }
+        return result
     }
 
     /// Appends a period when the text ends without sentence-final punctuation.

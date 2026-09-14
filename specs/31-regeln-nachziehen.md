@@ -194,3 +194,51 @@ kommt kein zusätzlicher ASR-Aufruf hinzu — nur ein Feld, das bisher verworfen
   ohnehin wandeln.
 - **Datum als „3.3.2024"** statt „3. März 2024" als Option? Vorschlag: nein, keine
   Einstellung dafür (Spec 22 §3.4).
+
+## 8. Stand des Baus (2026-09-14)
+
+**Gebaut:** alle fünf Teile, mit den Vorschlägen aus §7 (zwei bis zwölf bleiben Wörter,
+das Datum bleibt „3. März", keine Einstellung dafür).
+
+- **Satzanfänge** — nach `tidy`, nur wenn `capitalizeStart` an ist.
+- **`GermanITN`** — Kardinalzahlen ab dreizehn, „Komma"-Dezimalen, Prozent, Euro mit
+  Cent, andere Währungen mit Wort, Uhrzeiten („halb drei", „Viertel nach acht", „um
+  acht [Uhr [dreißig]]"), Datum mit Monat und Jahr, Ordinalzahl nach „am/vom/ab/bis
+  (zum)". Ein großgeschriebenes Wort nach der Zahl ist ein Nomen, das sie zählt.
+  Tausender von zehntausend an mit Punkt gruppiert.
+- **Füllwörter mit Position** und **Stotterer**.
+- **App-Tabelle** von 20 auf 70 Einträge, dazu Nutzer-Zuordnungen neben der Tabelle
+  (`AppCategory.overridesKey`) und `AppCategorySection` in den Einstellungen: zeigt
+  installierte eingebaute Apps und eigene Zuordnungen, fügt laufende Apps per Name und
+  Symbol hinzu. Eine Zuordnung, die nur die Tabelle wiederholt, wird wieder entfernt.
+- **Pausen** — `ParakeetTranscriber.transcribeDetailed` behält `tokenTimings`,
+  `SpeechPauses` macht daraus eine Pause je Satzgrenze, `ParagraphFormatter` bricht an
+  einer Pause oder spätestens nach drei Sätzen.
+
+Gemessen vor dem Bau, an dieser Installation (`recordings.source_app`): Ship Studio 25,
+Safari 16, die Claude-App 15, Ghostty 6 Diktate — keine der vier stand in der Tabelle.
+Jetzt stehen alle vier drin.
+
+**Abweichungen:**
+
+1. **Satzanfänge per Scan, nicht per `NLTokenizer`.** Der Tokenizer nimmt den
+   Großbuchstaben als Signal für einen Satzbeginn und liefert „gut. dann weiter" als
+   *einen* Satz — genau der Fall, für den die Regel da ist. Der Scan schaut vor den
+   Punkt: Ordinalzahl, Ein-Buchstaben- oder gelistete Abkürzung, oder ein Zeilenumbruch
+   dazwischen lassen das Wort in Ruhe.
+2. **Wiederholungsliste enger** als in §3.3: „die die", „der der", „das das" und „that
+   that" sind Grammatik („Leute, die die Regeln kennen"), also nicht in der Liste.
+   Bleiben: ich, wir, dass, ist; I, the, we.
+3. **Ein Absatz ist schon nach einem Satz erlaubt**, wenn eine Pause folgt — eine Anrede
+   mit Atempause wird so ihr eigener Absatz. Die Schwelle 0,8 s ist ein Startwert.
+4. **`tidy` lässt das geschützte Leerzeichen stehen**, das die ITN zwischen „22,50" und
+   „€" setzt; vorher wurde jedes Leerzeichen zu einem normalen.
+5. Zwei bestehende Tests nagelten das alte Verhalten „ITN nur Englisch" fest
+   (`TextPolisherTests`, `SpokenLanguagesTests`); der erste prüft jetzt das Gegenteil,
+   der zweite schaltet die ITN ab, weil er Füllwörter prüft.
+
+**Tests:** `GermanITNTests` 17, `SpeechPausesTests` 10, `PolishRulesTests` 14 (alle
+neu), `AppCategoryTests` +6. **Nicht verifiziert:** die Token-Abbildung an echter
+Parakeet-Ausgabe — sie ist mit synthetischen SentencePiece-Tokens getestet; weicht die
+echte Ausgabe ab, liefert sie keine Pausen und der Formatter zählt wie vorher. Die
+Handtests an der App stehen aus.

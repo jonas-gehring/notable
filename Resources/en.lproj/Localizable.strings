@@ -785,3 +785,35 @@
 "Liest während einer Aufnahme, der du zugestimmt hast, nur das Fenster des Calls — wer teilnimmt und wer gerade spricht — über die Bedienungshilfen, die Notable fürs Einfügen ohnehin hat. Es wird kein Bild gespeichert, nur Namen und Zeiten. Welche App das hergibt, zeigt erst eine Messung im echten Call: der Knopf schreibt den Aufbau des Call-Fensters als Text nach ~/Library/Logs/Notable/screen-probe." = "During a recording you agreed to, reads only the call's window — who takes part and who is speaking — through Accessibility, which Notable already has for pasting. No image is stored, only names and times. Which app provides this only a measurement in a real call can tell: the button writes the structure of the call window as text to ~/Library/Logs/Notable/screen-probe.";
 "Bedienungshilfen sind für Notable nicht erlaubt." = "Accessibility is not allowed for Notable.";
 "Kein laufender Call erkannt." = "No running call detected.";
+
+/* Specs 30–32 — HUD, failed dictation, app categories, on-device text stage */
+"Ohne Titel" = "Untitled";
+"(kein Text)" = "(no text)";
+"locker, ohne Absätze" = "casual, no paragraphs";
+"ganze Sätze, Schlusspunkt" = "full sentences, final period";
+"wörtlich, nichts geglättet" = "verbatim, nothing smoothed";
+"Standard" = "Standard";
+"Zuordnung für %@ entfernen" = "Remove the assignment for %@";
+"App hinzufügen…" = "Add app…";
+"Apps und Kategorien" = "Apps and categories";
+"Gilt, solange „Text an die Ziel-App anpassen“ an ist. Nicht aufgeführte Apps bekommen den Standard." = "Applies while “Adapt text to the target app” is on. Apps not listed get the standard polish.";
+"Ab 25 Wörtern" = "From 25 words";
+"Immer" = "Always";
+"Braucht macOS 26." = "Requires macOS 26.";
+"Dieser Mac unterstützt Apple Intelligence nicht." = "This Mac does not support Apple Intelligence.";
+"Apple Intelligence ist aus — Systemeinstellungen → Apple Intelligence & Siri." = "Apple Intelligence is off — System Settings → Apple Intelligence & Siri.";
+"Das Modell wird noch geladen." = "The model is still loading.";
+"Das lokale Modell ist nicht verfügbar." = "The on-device model is not available.";
+"Formatierung verworfen — Regeltext eingefügt." = "Formatting discarded — rule-based text pasted.";
+"Formatierung dauerte zu lange — Regeltext eingefügt." = "Formatting took too long — rule-based text pasted.";
+"Formatierung fehlgeschlagen — Regeltext eingefügt." = "Formatting failed — rule-based text pasted.";
+"Formatiere…" = "Formatting…";
+"Formatiere" = "Formatting";
+"Fehlgeschlagenes Diktat · %@" = "Failed dictation · %@";
+"Wiederholen" = "Retry";
+"Lokal formatieren" = "Format on device";
+"Textstufe auf dem Gerät" = "On-device text stage";
+"Satzzeichen, Selbstkorrekturen und Listen mit Apples Modell auf diesem Mac. Nichts verlässt das Gerät; das Diktat braucht dafür spürbar länger." = "Punctuation, self-corrections and lists with Apple’s model on this Mac. Nothing leaves the device; dictation takes noticeably longer.";
+"Modell in den Einstellungen laden, dann im Menü wiederholen." = "Load the model in Settings, then retry from the menu.";
+"Das Diktat ist aufbewahrt — im Menü wiederholen." = "The dictation is kept — retry it from the menu.";
+"Zahlen & Daten formatieren" = "Format numbers & dates";

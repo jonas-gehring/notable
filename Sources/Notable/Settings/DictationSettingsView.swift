@@ -82,7 +82,7 @@ struct DictationSettingsView: View {
 
             Section {
                 Toggle("Füllwörter entfernen (ähm, äh …)", isOn: $removeFillers)
-                Toggle("Zahlen & Daten formatieren (nur Englisch)", isOn: $applyITN)
+                Toggle("Zahlen & Daten formatieren", isOn: $applyITN)
                 Toggle("Absätze setzen", isOn: $paragraphs)
                 Toggle("Gesprochene Struktur umsetzen", isOn: $structureCommands)
             } header: {
@@ -98,6 +98,12 @@ struct DictationSettingsView: View {
             } footer: {
                 Text("Passt Ton und Format an die App an, in die du diktierst: locker in Chats (Slack, Messages), Satzpunkt in E-Mail, wörtlich in Code-Editoren (Xcode, Terminal). Läuft vollständig lokal.")
             }
+
+            if appContextFormatting {
+                AppCategorySection()
+            }
+
+            LocalPolishSection()
 
             Section {
                 Toggle("Töne bei Aufnahme-Start und -Ende", isOn: $dictationSounds)

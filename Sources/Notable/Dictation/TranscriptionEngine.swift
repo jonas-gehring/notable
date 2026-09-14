@@ -7,6 +7,23 @@ protocol TranscriptionEngine: Sendable {
     var displayName: String { get }
     /// `samples` are 16 kHz mono Float32 PCM.
     func transcribe(samples: [Float], sampleRate: Int) async throws -> String
+    /// The text and, where the engine reports them, token timings (Spec 31 §3.5).
+    /// A requirement rather than only an extension method, so a call through
+    /// `any TranscriptionEngine` still reaches an engine's own implementation.
+    func transcribeDetailed(samples: [Float], sampleRate: Int) async throws -> TranscriptionResult
+}
+
+/// What a transcription produced. `tokens` is nil for every engine that does
+/// not report timings — the paragraph rule then counts sentences, as before.
+struct TranscriptionResult: Sendable, Equatable {
+    var text: String
+    var tokens: [TimedToken]?
+}
+
+extension TranscriptionEngine {
+    func transcribeDetailed(samples: [Float], sampleRate: Int) async throws -> TranscriptionResult {
+        TranscriptionResult(text: try await transcribe(samples: samples, sampleRate: sampleRate), tokens: nil)
+    }
 }
 
 /// Placeholder until the CoreML model lands. Lets the full dictation flow

@@ -149,6 +149,9 @@ final class DictationController: ObservableObject {
             self.perform(action)
         }
         overlay.prepare()
+        // Stashes of dictations that never finished — a crash or a quit mid-job.
+        LastClipStore.removeStrayStashes()
+        prewarmLocalModel()
         hotkey.onEscape = { [weak self] in self?.cancelRecording() }
         // Esc is live while a recording runs *or* a released one is still on its
         // way to the paste. Only the first half used to count, so Esc during a
@@ -529,7 +532,9 @@ final class DictationController: ObservableObject {
         playCue(.start)
 
         idle = IdleDetector(timeout: DefaultsKey.dictationIdleTimeout.value())
-        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+        // 30 Hz (Spec 30 §3.4): at 10 Hz the waveform stepped instead of moving.
+        // The idle and maximum rules measure time, not ticks, so the rate is free.
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.isCapturing else { return }
                 let level = self.recorder.level
@@ -594,9 +599,9 @@ final class DictationController: ObservableObject {
 
     private func show(_ failure: DictationFailure) {
         if failure.isNotice {
-            overlay.flashNotice(failure.message)
+            overlay.flashNotice(failure.title, hint: failure.hint)
         } else {
-            overlay.flashError(failure.message)
+            overlay.flashError(failure.title, hint: failure.hint)
         }
     }
 
@@ -703,10 +708,6 @@ final class DictationController: ObservableObject {
         // Freeze the target app now: the overlay is non-activating, so the
         // frontmost app is still the field the user dictated into (Spec 03).
         let targetBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let appContextEnabled = DefaultsKey.appContextFormatting.value()
-        // Separate switch from the formatting one: a user may well want per-app
-        // polishing without a per-app tally of where he dictates.
-        let appStatisticsEnabled = DefaultsKey.appStatistics.value()
         stopLevelTimer()
         let samples = recorder.stop()
         // Restored as soon as the microphone is closed — not after the paste.
@@ -716,7 +717,6 @@ final class DictationController: ObservableObject {
         ptt.reset()
         isCapturing = false
         let generation = recordingGeneration
-        let startedAt = recordingStartedAt
         let notice = pendingNotice
         pendingNotice = nil
         let duration = Double(samples.count) / Double(sampleRate)
@@ -733,14 +733,113 @@ final class DictationController: ObservableObject {
             return
         }
 
+        // Consumed once per recording: the release must not be able to enhance a
+        // dictation that a later key-down never asked for.
+        let wantsEnhancement = enhanceRequested
+        enhanceRequested = false
+        startJob(Job(
+            generation: generation,
+            samples: samples,
+            sampleRate: sampleRate,
+            duration: duration,
+            startedAt: recordingStartedAt,
+            releasedAt: releasedAt,
+            targetBundleID: targetBundleID,
+            wantsEnhancement: wantsEnhancement,
+            notice: notice
+        ))
+    }
+
+    /// A released recording on its way to the paste. A value, so a retried clip
+    /// (Spec 30 §3.7) runs through exactly the same path as a fresh one.
+    private struct Job: Sendable {
+        let generation: Int
+        let samples: [Float]
+        let sampleRate: Int
+        let duration: TimeInterval
+        let startedAt: Date
+        let releasedAt: ContinuousClock.Instant
+        let targetBundleID: String?
+        let wantsEnhancement: Bool
+        let notice: String?
+    }
+
+    /// Retries the dictation whose transcription failed — from the menu, so the
+    /// app the text is meant for is the frontmost one again.
+    func retryLastClip() {
+        guard !isCapturing, let clip = LastClipStore.pending() else { return }
+        let samples = LastClipStore.samples()
+        LastClipStore.clear()
+        Task { await AppContainer.shared.dictationHistory.refresh() }
+        if let text = clip.text {
+            do {
+                try Paster.insert(text)
+                playCue(.done)
+            } catch {
+                report(.pasteBlocked)
+            }
+            return
+        }
+        guard !samples.isEmpty else { return }
+        recordingGeneration += 1
+        let sampleRate = recorder.targetSampleRate
+        startJob(Job(
+            generation: recordingGeneration,
+            samples: samples,
+            sampleRate: sampleRate,
+            duration: Double(samples.count) / Double(sampleRate),
+            startedAt: clip.recordedAt,
+            releasedAt: .now,
+            targetBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            wantsEnhancement: false,
+            notice: nil
+        ))
+    }
+
+    func discardLastClip() {
+        LastClipStore.clear()
+        Task { await AppContainer.shared.dictationHistory.refresh() }
+    }
+
+    /// The setting changed: warm the model now rather than on the first dictation.
+    func localPolishModeChanged() {
+        prewarmLocalModel()
+    }
+
+    private func prewarmLocalModel() {
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, *), LocalPolish.Mode.current() != .off else { return }
+        Task { await LocalPolisher.shared.prewarm() }
+        #endif
+    }
+
+    /// The on-device stage, when this system has it (Spec 32). Nil means the
+    /// stage does not exist here — not that it failed.
+    private func runLocalPolish(_ text: String, category: AppCategory) async -> LocalPolishResult? {
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, *) else { return nil }
+        if !isCapturing { overlay.showAfterDelay(.formatting) }
+        return await LocalPolisher.shared.polish(text, category: category)
+        #else
+        return nil
+        #endif
+    }
+
+    private func startJob(_ job: Job) {
+        let generation = job.generation
         jobs.enqueue(generation)
         publishCaptureState()
         // The model may still be downloading on first launch — say so instead
         // of promising a transcription that is minutes away. With a stand-in
-        // ready there is nothing to wait for, so it says "transcribing" and
-        // marks the result as provisional instead.
+        // ready there is nothing to wait for, so it marks the result as
+        // provisional instead. A normal transcription shows its spinner only
+        // once it has taken long enough to be worth seeing (Spec 30 §3.3).
         overlay.setProvisional(isUsingBootstrap)
-        overlay.show(modelState == .loading && !isUsingBootstrap ? .loadingModel : .transcribing)
+        if modelState == .loading && !isUsingBootstrap {
+            overlay.show(.loadingModel)
+        } else {
+            overlay.showAfterDelay(.transcribing)
+        }
 
         let selectedTaskMissing: Bool
         switch ASREngineID.current {
@@ -752,28 +851,52 @@ final class DictationController: ObservableObject {
             loadModel() // earlier download failed — retry now
         }
 
-        // Consumed once per recording: the release must not be able to enhance a
-        // dictation that a later key-down never asked for.
-        let wantsEnhancement = enhanceRequested
-        enhanceRequested = false
+        let appContextEnabled = DefaultsKey.appContextFormatting.value()
+        // Separate switch from the formatting one: a user may well want per-app
+        // polishing without a per-app tally of where he dictates.
+        let appStatisticsEnabled = DefaultsKey.appStatistics.value()
+        let overrides = AppCategory.loadOverrides()
+        let localMode = LocalPolish.Mode.current()
         let previous = lastJobTask
+        // The safety copy is written next to the transcription, off the main
+        // actor; it only has to exist by the time a failure wants to keep it.
+        let stash = Task.detached(priority: .utility) {
+            try? LastClipStore.stash(job.samples, generation: generation)
+        }
 
         let task = Task {
+            var keptClip: LastClip?
             defer {
                 jobs.finish(generation)
                 jobTasks[generation] = nil
                 publishCaptureState()
+                let kept = keptClip
+                Task.detached(priority: .utility) {
+                    await stash.value
+                    if let kept {
+                        try? LastClipStore.keep(kept, generation: generation)
+                        await AppContainer.shared.dictationHistory.refresh()
+                    } else {
+                        LastClipStore.discard(generation: generation)
+                    }
+                }
             }
+
             do {
-                let (text, engineUsed) = try await rawTranscript(samples: samples, sampleRate: sampleRate)
+                let transcription = try await rawTranscript(samples: job.samples, sampleRate: job.sampleRate)
                 let category: AppCategory = appContextEnabled
-                    ? AppCategory.of(bundleID: targetBundleID)
+                    ? AppCategory.of(bundleID: job.targetBundleID, overrides: overrides)
                     : .unknown
                 // Off the main actor: `polish` is pure, and it sits in the gap
-                // between the key release and the paste.
+                // between the key release and the paste. Pauses are read off the
+                // raw transcript, whose sentences the tokens spell (Spec 31 §3.5).
                 let options = PolishProfile.options(for: category)
                 let polished = await Task.detached(priority: .userInitiated) {
-                    TextPolisher.polish(text, options: options)
+                    var withPauses = options
+                    withPauses.sentencePauses = transcription.tokens.flatMap {
+                        SpeechPauses.sentenceBoundaryPauses(tokens: $0, text: transcription.text)
+                    }
+                    return TextPolisher.polish(transcription.text, options: withPauses)
                 }.value
                 guard isLive(generation) else { return }
                 if let failure = DictationPipeline.afterTranscript(polished) {
@@ -783,25 +906,39 @@ final class DictationController: ObservableObject {
                 }
                 let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                // Stopped **here**, before the enhancement branch: this is how
-                // long transcription took. Measured after the paste it also
-                // contained the CLI round-trip of an enhanced dictation, and
-                // those seconds went into `latency_ms`.
-                let elapsed = releasedAt.duration(to: .now)
+                // Stopped **here**, before any model stage: this is how long
+                // transcription took. The on-device stage books its own time
+                // (`polish_ms`), the CLI enhancement none.
+                let elapsed = job.releasedAt.duration(to: .now)
                 lastLatencyMillis = Int(Double(elapsed.components.seconds) * 1000
                     + Double(elapsed.components.attoseconds) / 1e15)
 
-                // The only place dictation text may leave the device, and it
-                // happens solely because *this* recording was started with the
-                // enhancement hotkey. A normal dictation does not evaluate a
-                // single line of this.
                 var toPaste = trimmed
                 var rawText: String?
-                var enhancementNotice: String?
-                if wantsEnhancement, EnhancementSettings.isEnabled {
+                var polisher = "rules"
+                var polishMs: Int?
+                var stageNotice: String?
+
+                // On the device, nothing leaves it (Spec 32).
+                if LocalPolish.shouldRun(mode: localMode, category: category, text: trimmed),
+                   let result = await runLocalPolish(trimmed, category: category) {
+                    guard isLive(generation) else { return }
+                    polishMs = result.milliseconds
+                    if result.didPolish {
+                        rawText = trimmed
+                        toPaste = result.text
+                        polisher = "local"
+                    }
+                    stageNotice = result.failure
+                }
+
+                // The only place dictation text may leave the device, and it
+                // happens solely because *this* recording was started with the
+                // enhancement hotkey.
+                if job.wantsEnhancement, EnhancementSettings.isEnabled {
                     if !isCapturing { overlay.show(.enhancing) }
                     let result = await DictationEnhancer.forDictation().enhance(
-                        trimmed,
+                        toPaste,
                         profile: EnhancementSettings.profile(for: category)
                     )
                     // Booked even when the guardrails rejected the answer: the
@@ -815,10 +952,11 @@ final class DictationController: ObservableObject {
                         countEvenWhenUnknown: true
                     )
                     if result.didEnhance {
-                        rawText = trimmed
+                        rawText = rawText ?? trimmed
                         toPaste = result.text
+                        polisher = "cli"
                     }
-                    enhancementNotice = result.failure
+                    stageNotice = result.failure ?? stageNotice
                 }
 
                 // Texts land in the order they were spoken: wait for the job
@@ -831,7 +969,7 @@ final class DictationController: ObservableObject {
                 // front now, ⌘V would land there.
                 let front = NSWorkspace.shared.frontmostApplication
                 switch DictationPipeline.paste(
-                    target: targetBundleID,
+                    target: job.targetBundleID,
                     frontmost: front?.bundleIdentifier,
                     frontmostName: front?.localizedName,
                     secureInput: IsSecureEventInputEnabled()
@@ -846,9 +984,9 @@ final class DictationController: ObservableObject {
                         try Paster.insert(toPaste)
                         playCue(.done)
                         if !isCapturing {
-                            if let enhancementNotice {
-                                overlay.flashError(enhancementNotice)
-                            } else if let notice {
+                            if let stageNotice {
+                                overlay.flashError(stageNotice)
+                            } else if let notice = job.notice {
                                 // A notice, not an error: the dictation ended
                                 // exactly as configured.
                                 overlay.flashNotice(notice)
@@ -860,20 +998,24 @@ final class DictationController: ObservableObject {
                         report(.pasteBlocked)
                     }
                 }
-                lastAudioSeconds = duration
+                lastAudioSeconds = job.duration
                 lastDictationAt = Date()
                 do {
                     try await RecordingStore.shared.saveDictation(
                         text: toPaste,
-                        startedAt: startedAt,
-                        duration: duration,
-                        engine: engineUsed,
+                        startedAt: job.startedAt,
+                        duration: job.duration,
+                        engine: transcription.engine,
                         latencyMs: lastLatencyMillis,
                         // Stays in SQLite and never goes into a prompt.
-                        sourceApp: appStatisticsEnabled ? targetBundleID : nil,
-                        enhanced: rawText != nil,
-                        // Only set when the model actually changed something.
-                        rawText: rawText
+                        sourceApp: appStatisticsEnabled ? job.targetBundleID : nil,
+                        // "Enhanced" counts text that left the device — the CLI
+                        // stage only, never the local one.
+                        enhanced: polisher == "cli",
+                        // Set whenever a model changed the text.
+                        rawText: rawText,
+                        polisher: polisher,
+                        polishMs: polishMs
                     )
                 } catch {
                     // The text is pasted either way — but history and statistics
@@ -892,11 +1034,20 @@ final class DictationController: ObservableObject {
                 guard isLive(generation) else { return }
                 Self.log.error("Transkription: \(error.localizedDescription, privacy: .public)")
                 hideIfIdle()
+                var failure = DictationFailure.transcriptionFailed
                 if let summarization = error as? SummarizationError, case .notConfigured = summarization {
-                    report(.modelMissing)
-                } else {
-                    report(.transcriptionFailed)
+                    failure = .modelMissing
                 }
+                // The words never existed, so the audio is the dictation: kept,
+                // and offered for a retry from the menu (Spec 30 §3.7).
+                keptClip = LastClip(
+                    recordedAt: job.startedAt,
+                    duration: job.duration,
+                    failure: failure.title,
+                    targetBundleID: job.targetBundleID,
+                    text: nil
+                )
+                report(failure)
             }
         }
         jobTasks[generation] = task
@@ -910,15 +1061,16 @@ final class DictationController: ObservableObject {
     /// text, not the one that is selected. On a cold cache those differ, and
     /// booking a stand-in run under the chosen engine put Tiny's latency into
     /// v3's p50/p95 and its word count into v3's share of the engine card.
+    /// Token timings come back only from Parakeet v3 (Spec 31 §3.5).
     private func rawTranscript(
         samples: [Float],
         sampleRate: Int
-    ) async throws -> (text: String, engine: String) {
+    ) async throws -> (text: String, engine: String, tokens: [TimedToken]?) {
         // The stand-in, while it is the one carrying dictation. Its own slot, so
         // it can never be confused with a user-chosen Whisper of another size.
         if isUsingBootstrap, let bootstrapTask {
             let text = try await bootstrapTask.value.transcribe(samples: samples, sampleRate: sampleRate)
-            return (text, BootstrapPolicy.bootstrapStatisticsName)
+            return (text, BootstrapPolicy.bootstrapStatisticsName, nil)
         }
         let name = activeEngine.statisticsName
         switch activeEngine {
@@ -926,7 +1078,7 @@ final class DictationController: ObservableObject {
             guard let whisperTask else {
                 throw SummarizationError.notConfigured(String(localized: "Kein ASR-Modell verfügbar."))
             }
-            return (try await whisperTask.value.transcribe(samples: samples, sampleRate: sampleRate), name)
+            return (try await whisperTask.value.transcribe(samples: samples, sampleRate: sampleRate), name, nil)
         case .unifiedEnglish:
             guard let streamTask else {
                 throw SummarizationError.notConfigured(String(localized: "Kein ASR-Modell verfügbar."))
@@ -934,12 +1086,13 @@ final class DictationController: ObservableObject {
             let engine = try await streamTask.value
             try await engine.beginUtterance()
             try await engine.feed(samples)
-            return (try await engine.finish(), name)
+            return (try await engine.finish(), name, nil)
         case .parakeetV3:
             guard let engineTask else {
                 throw SummarizationError.notConfigured(String(localized: "Kein ASR-Modell verfügbar."))
             }
-            return (try await engineTask.value.transcribe(samples: samples, sampleRate: sampleRate), name)
+            let result = try await engineTask.value.transcribeDetailed(samples: samples, sampleRate: sampleRate)
+            return (result.text, name, result.tokens)
         }
     }
 }

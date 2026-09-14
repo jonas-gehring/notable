@@ -42,9 +42,15 @@ final class DictationHistory: ObservableObject {
     /// The newest dictation, if any is loaded.
     var last: Item? { recent.first }
 
+    /// The dictation whose transcription failed, while it waits for a retry
+    /// (Spec 30 §3.7). Read from its two files, not from SQLite — it never made
+    /// it into the store.
+    @Published private(set) var failedClip: LastClip?
+
     /// Reloads `recent` from the store. Best-effort: a read failure leaves the
     /// previously loaded list untouched rather than blanking the menu.
     func refresh() async {
+        failedClip = LastClipStore.pending()
         guard let rows = try? await store.recentDictations(limit: limit) else { return }
         recent = rows.enumerated().map { index, row in
             Item(id: index, date: row.date, text: row.text, rawText: row.rawText)

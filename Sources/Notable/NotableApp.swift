@@ -596,6 +596,15 @@ struct MenuContentView: View {
         Divider()
 
         // Dictation
+        // The dictation that failed keeps its audio (Spec 30 §3.7) and comes
+        // first: it is the one thing in this section that is otherwise lost.
+        if let failed = history.failedClip {
+            Menu("Fehlgeschlagenes Diktat · \(failed.recordedAt.formatted(date: .omitted, time: .shortened))") {
+                Text(failed.failure)
+                Button("Wiederholen") { AppContainer.shared.dictation.retryLastClip() }
+                Button("Verwerfen") { AppContainer.shared.dictation.discardLastClip() }
+            }
+        }
         Button("Letztes Diktat einfügen") {
             Task {
                 do {
@@ -604,7 +613,8 @@ struct MenuContentView: View {
                     // Same reasoning as the notification path: the transcript is
                     // on the clipboard, and only this line says why nothing
                     // appeared in the field.
-                    AppContainer.shared.dictation.overlay.flashError(error.localizedDescription)
+                    let failure = DictationFailure.pasteBlocked
+                    AppContainer.shared.dictation.overlay.flashError(failure.title, hint: failure.hint)
                 }
             }
         }
@@ -637,7 +647,18 @@ struct MenuContentView: View {
         } else {
             Menu("Letzte Diktate") {
                 ForEach(history.recent.prefix(8)) { item in
-                    Button(item.menuTitle) { Task { try? await history.paste(item.text) } }
+                    Button(item.menuTitle) {
+                        Task {
+                            // It used to be `try?`: without Accessibility the
+                            // click did nothing, and nothing said why.
+                            do {
+                                try await history.paste(item.text)
+                            } catch {
+                                let failure = DictationFailure.pasteBlocked
+                                AppContainer.shared.dictation.overlay.flashError(failure.title, hint: failure.hint)
+                            }
+                        }
+                    }
                 }
                 Divider()
                 Button("Alle anzeigen…") { open("recent") }

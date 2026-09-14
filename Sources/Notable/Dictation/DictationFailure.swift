@@ -81,8 +81,8 @@ enum DictationFailure: Equatable, Sendable {
         case .tooShort: String(localized: "Länger halten oder kurz tippen für freihändig.")
         case .targetChanged: String(localized: "⌘V im richtigen Fenster.")
         case .pasteBlocked: String(localized: "Text liegt in der Zwischenablage.")
-        case .modelMissing: String(localized: "Einstellungen → Diktat: Modell erneut laden.")
-        case .transcriptionFailed: String(localized: "Noch einmal diktieren.")
+        case .modelMissing: String(localized: "Modell in den Einstellungen laden, dann im Menü wiederholen.")
+        case .transcriptionFailed: String(localized: "Das Diktat ist aufbewahrt — im Menü wiederholen.")
         case .deviceLost: String(localized: "Mikrofon wieder verbinden.")
         }
     }

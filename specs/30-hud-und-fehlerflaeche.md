@@ -197,3 +197,43 @@ derselbe ist. Erst bauen, wenn Stufe 1 und 2 stehen, und nur mit diesem Test.
   einer freien Bibliothek, entscheidet der Owner.
 - **Stufe 3** überhaupt: ein klickbares HUD ist die einzige Änderung hier mit einem
   echten Risiko im Paste-Mechanismus.
+
+## 8. Stand des Baus (2026-09-14)
+
+**Stufe 1 gebaut:** ein Material für beide Stile (`.regularMaterial`, keine schwarze
+Kapsel mehr), Einblenden 120 ms und Ausblenden 160 ms am Panel, Reduce-Motion live
+gelesen, „Transkribiere…" und „Formatiere…" erst nach 300 ms (`showAfterDelay`), die
+Wellenform mit 30 Hz.
+
+**Stufe 2 gebaut:** Fehler und Hinweise zeigen Titel und Hinweiszeile aus
+`DictationFailure` (4 s, mit Hinweis 6 s); im Diktatpfad erreicht keine
+`localizedDescription` mehr die Kapsel. Die vier Lokalisierungslecks sind behoben, und
+`LocalizationTests` hat einen Test, der genau dieses Muster findet — er schlägt auf die
+Form selbst an, weil keine Übersetzung ein wörtlich gerendertes Literal erreicht.
+Ein fehlgeschlagenes Diktat bleibt als `last.i16` + `last.json` erhalten und steht im
+Menü als „Fehlgeschlagenes Diktat · 14:02" mit Wiederholen und Verwerfen.
+
+**Stufe 3 nicht gebaut** (§7).
+
+**Abweichungen:**
+
+1. **Keine eigenen Klänge.** `SoundCue` spielt weiter Systemklänge; die Klangsprache ist
+   eine offene Entscheidung (§7). Die Stellen, an denen Töne ausgelöst werden, sind fertig.
+2. **30 Hz über den Level-Timer**, nicht über einen Callback aus dem Audio-Thread. Die
+   Idle- und Maximaldauer-Regeln messen seit Spec 29 Zeit statt Ticks, also war die
+   Rate frei; ein Callback hätte den Consumer-Thread mit dem Main-Actor verbunden.
+3. **Eine Stash-Datei je Job** (`pending-<n>.i16`) statt einer überschriebenen: seit
+   Spec 29 können zwei Jobs gleichzeitig laufen. Nur ein Fehlschlag wird zu `last.i16`;
+   Reste räumt der Start auf.
+4. **Aufbewahrt wird nur, wenn die Worte nie entstanden sind** — Transkription oder
+   Modell fehlgeschlagen. Bei blockiertem Einfügen oder gewechselter App liegt der Text
+   schon in Zwischenablage und Historie; das Audio dafür zu behalten, hätte eine zweite
+   Kopie derselben Worte erzeugt. `LastClip` kann einen reinen Text-Clip trotzdem tragen.
+5. Die Zeile steht im Menü, nicht im Fenster „Letzte Diktate": das Menü ist der Ort,
+   an dem die Ziel-App noch vorne ist, und Wiederholen fügt ein.
+6. `.regularMaterial` ist gesetzt, ohne die Kontrastmessung aus §7 — die steht aus.
+
+**Tests:** `LastClipTests` 9 (neu), `DictationOverlayTests` +2 (verzögerter Zustand
+fällt weg, verzögerter Zustand erscheint; Ausblenden wartet die Animation ab),
+`LocalizationTests` +1. **Nicht verifiziert:** alle Abnahmepunkte, die man sehen oder
+hören muss (1–6) — Handtest an der installierten App.

@@ -35,10 +35,20 @@ final class ParakeetTranscriber: TranscriptionEngine, @unchecked Sendable {
     }
 
     func transcribe(samples: [Float], sampleRate: Int) async throws -> String {
+        try await transcribeDetailed(samples: samples, sampleRate: sampleRate).text
+    }
+
+    /// The text and the token timings FluidAudio computes with every whole-clip
+    /// pass anyway — they used to be dropped with the rest of `ASRResult`
+    /// (Spec 31 §3.5). No extra decoding, no extra latency: one field kept.
+    func transcribeDetailed(samples: [Float], sampleRate: Int) async throws -> TranscriptionResult {
         precondition(sampleRate == 16_000, "Parakeet erwartet 16 kHz mono")
         // Decoder state is per-utterance; push-to-talk clips are independent.
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
         let result = try await manager.transcribe(samples, decoderState: &decoderState)
-        return result.text
+        let tokens = result.tokenTimings?.map {
+            TimedToken(text: $0.token, start: $0.startTime, end: $0.endTime)
+        }
+        return TranscriptionResult(text: result.text, tokens: tokens)
     }
 }

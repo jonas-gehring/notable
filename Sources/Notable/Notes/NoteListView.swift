@@ -86,7 +86,7 @@ struct NoteListView: View {
                         .onExitCommand { editingID = nil }
                 } else {
                     HStack(spacing: 6) {
-                        Text(note.title ?? "Ohne Titel")
+                        Text(note.title ?? String(localized: "Ohne Titel"))
                             .font(.headline)
                         if note.titleIsAuto {
                             Text("auto")

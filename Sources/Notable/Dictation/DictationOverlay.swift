@@ -12,6 +12,9 @@ final class DictationOverlayController {
         /// The deliberate LLM round-trip after a dictation started with the
         /// second hotkey. Seconds, not milliseconds — so it says so.
         case enhancing
+        /// The on-device text stage (Spec 32). Says nothing about leaving the
+        /// device, because nothing does.
+        case formatting
         case loadingModel
         case error(String)
         /// Something worth saying that is not a failure — the model swap, for
@@ -40,6 +43,8 @@ final class DictationOverlayController {
         /// bottom; trailing at the right edge, so a state that needs more words
         /// grows the capsule inwards instead of pulling it off the edge (Spec 28).
         @Published var alignment: Alignment = .center
+        /// The second line of a failure: what to do (Spec 30 §3.6).
+        @Published var hint: String?
     }
 
     private let model = Model()
@@ -50,6 +55,16 @@ final class DictationOverlayController {
     /// even at the price of a non-private property.
     private(set) var panel: NSPanel?
     private var flashHideTask: Task<Void, Never>?
+    private var delayedShowTask: Task<Void, Never>?
+    /// Bumped by every `show` and `hide`, so a fade-out or a delayed state that
+    /// is overtaken by something newer does nothing when it lands.
+    private var visibilityGeneration = 0
+
+    /// Read live: a `static let` kept the value from launch, so changing the
+    /// system setting did nothing until a restart.
+    private static var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
     /// The style the current panel was built for. A change swaps the hosted view,
     /// so switching the setting takes effect on the next dictation without a
     /// restart.
@@ -66,12 +81,21 @@ final class DictationOverlayController {
 
     func show(_ state: OverlayState) {
         flashHideTask?.cancel()
+        delayedShowTask?.cancel()
+        visibilityGeneration += 1
         model.state = state
-        if case .recording = state {
+        switch state {
+        case .recording:
             model.partial = ""
-        } else {
+            model.hint = nil
+        case .error, .notice:
+            // The hint was set by the caller just before.
             model.level = 0
             model.locked = false
+        default:
+            model.level = 0
+            model.locked = false
+            model.hint = nil
         }
         let style = OverlayStyle.current
         // "Aus" is a deliberate option: whoever wants only the sound cue gets it.
@@ -83,7 +107,34 @@ final class DictationOverlayController {
         }
         let panel = ensurePanel(style: style)
         position(panel, style: style)
+        let alreadyShown = panel.isVisible && panel.alphaValue > 0.99
         panel.orderFrontRegardless() // never makeKey
+        // Appears like an object, not like a switch (Spec 30 §3.2). A state
+        // change inside a visible panel does not fade again.
+        guard !alreadyShown, !Self.reduceMotion else {
+            panel.alphaValue = 1
+            return
+        }
+        panel.alphaValue = 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    /// For states that are usually over before they are worth seeing
+    /// (Spec 30 §3.3). A 119 ms transcription used to flash a spinner for a
+    /// frame or two; now the waveform simply goes. Anything shown or hidden in
+    /// the meantime wins.
+    func showAfterDelay(_ state: OverlayState, delay: Duration = .milliseconds(300)) {
+        delayedShowTask?.cancel()
+        let generation = visibilityGeneration
+        delayedShowTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, !Task.isCancelled, self.visibilityGeneration == generation else { return }
+            self.show(state)
+        }
     }
 
     /// "Aus" still shows failures and the model-swap notice — those are not a
@@ -119,28 +170,47 @@ final class DictationOverlayController {
     }
 
     /// Like `flashError`, for something that is not an error.
-    func flashNotice(_ message: String) {
+    func flashNotice(_ message: String, hint: String? = nil) {
+        model.hint = hint
         show(.notice(message))
         flashHideTask = Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(hint == nil ? 4 : 6))
             guard !Task.isCancelled else { return }
             hide()
         }
     }
 
     func hide() {
+        delayedShowTask?.cancel()
+        visibilityGeneration += 1
         model.level = 0
         model.partial = ""
         model.locked = false
-        panel?.orderOut(nil)
+        guard let panel, panel.isVisible else { return }
+        guard !Self.reduceMotion else {
+            panel.orderOut(nil)
+            return
+        }
+        let generation = visibilityGeneration
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            panel.animator().alphaValue = 0
+        }
+        // Ordered out after the fade, unless something was shown meanwhile.
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(170))
+            guard let self, self.visibilityGeneration == generation else { return }
+            self.panel?.orderOut(nil)
+        }
     }
 
     /// Shows an error briefly, then hides — unless something newer was
     /// shown in the meantime (show() cancels the pending hide).
-    func flashError(_ message: String) {
+    func flashError(_ message: String, hint: String? = nil) {
+        model.hint = hint
         show(.error(message))
         flashHideTask = Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(hint == nil ? 4 : 6))
             guard !Task.isCancelled else { return }
             hide()
         }
@@ -241,7 +311,7 @@ final class DictationOverlayController {
 private struct DictationOverlayView: View {
     @ObservedObject var model: DictationOverlayController.Model
 
-    private static let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var body: some View {
         pill
@@ -259,16 +329,19 @@ private struct DictationOverlayView: View {
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(.white.opacity(0.14)))
+                    .background(Capsule().fill(Color.primary.opacity(0.10)))
             }
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 8)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .background {
+            // One material for every style (Spec 30 §3.1). The fixed black
+            // capsule was a second identity next to the notch strip, and the
+            // only surface in the app that ignored light and dark.
             Capsule()
-                .fill(Color.black.opacity(0.78))
-                .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 1))
+                .fill(.regularMaterial)
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
         }
         .shadow(color: .black.opacity(0.30), radius: 10, y: 3)
         .animation(Self.reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.85),
@@ -287,18 +360,17 @@ private struct DictationOverlayView: View {
             if !model.partial.isEmpty {
                 Text(String(model.partial.suffix(48)))
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.head)
             } else if model.locked {
                 Text(model.escapeAvailable ? "Taste beendet · Esc verwirft" : "Taste beendet")
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(.secondary)
             }
         case .transcribing:
             ProgressView()
                 .controlSize(.small)
-                .tint(.white)
             Text("Transkribiere…").font(.callout.weight(.medium))
         case .enhancing:
             Image(systemName: "wand.and.stars")
@@ -308,13 +380,26 @@ private struct DictationOverlayView: View {
         case .loadingModel:
             Image(systemName: "arrow.down.circle.fill")
             Text("Modell lädt — Diktat folgt…").font(.callout.weight(.medium))
+        case .formatting:
+            Image(systemName: "text.badge.checkmark")
+            Text("Formatiere…").font(.callout.weight(.medium))
         case .error(let message):
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
-            Text(message).font(.callout.weight(.medium)).lineLimit(2)
+            messageStack(message)
         case .notice(let message):
             Image(systemName: "checkmark.circle.fill")
+            messageStack(message)
+        }
+    }
+
+    /// What happened, and — when there is something to do — what to do.
+    private func messageStack(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
             Text(message).font(.callout.weight(.medium)).lineLimit(2)
+            if let hint = model.hint {
+                Text(hint).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
         }
     }
 
@@ -323,9 +408,10 @@ private struct DictationOverlayView: View {
         case .recording: model.locked ? String(localized: "Aufnahme fixiert") : String(localized: "Aufnahme läuft")
         case .transcribing: String(localized: "Transkribiere")
         case .enhancing: String(localized: "Verbessere")
+        case .formatting: String(localized: "Formatiere")
         case .loadingModel: String(localized: "Modell lädt")
-        case .error(let message): message
-        case .notice(let message): message
+        case .error(let message), .notice(let message):
+            [message, model.hint].compactMap { $0 }.joined(separator: " ")
         }
     }
 }
@@ -342,11 +428,11 @@ struct WaveformView: View {
     let level: Float
     var barCount = 18
     var maxHeight: CGFloat = 18
-    var tint: Color = .white
+    var tint: Color = .primary
 
     @State private var history: [CGFloat] = []
 
-    private static let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -358,7 +444,7 @@ struct WaveformView: View {
             }
         }
         .frame(height: maxHeight)
-        .animation(Self.reduceMotion ? nil : .easeOut(duration: 0.12), value: history)
+        .animation(Self.reduceMotion ? nil : .easeOut(duration: 0.04), value: history)
         .onAppear { if history.isEmpty { history = Array(repeating: 0, count: barCount) } }
         .onChange(of: level) { _, new in push(new) }
         .accessibilityHidden(true)
@@ -458,6 +544,7 @@ struct NotchOverlayView: View {
                 : String(localized: "Aufnahme… (Esc verwirft)")
         case .transcribing: return String(localized: "Transkribiere…")
         case .enhancing: return String(localized: "Verbessere…")
+        case .formatting: return String(localized: "Formatiere…")
         case .loadingModel: return String(localized: "Modell lädt…")
         case .error(let message): return message
         case .notice(let message): return message

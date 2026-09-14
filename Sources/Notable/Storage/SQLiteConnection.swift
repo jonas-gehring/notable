@@ -284,6 +284,7 @@ final class SQLiteConnection: @unchecked Sendable {
         SQLiteConnection.migration3_fullTextSearch,
         SQLiteConnection.migration4_attendees,
         SQLiteConnection.migration5_speakers,
+        SQLiteConnection.migration6_textStage,
     ]
 
     /// Every table in its **current** shape, plus the ADD COLUMNs that lift a
@@ -482,6 +483,15 @@ final class SQLiteConnection: @unchecked Sendable {
             PRIMARY KEY (recording_id, cluster)
         )
         """)
+    }
+
+    /// Which stage shaped a dictation's text last — `rules`, `local` (the
+    /// on-device model) or `cli` — and how long the on-device stage took
+    /// (Spec 32 §3.5, §3.8). Nullable and never backfilled, like every
+    /// measurement column: six weeks of rows never had a stage to name.
+    private static func migration6_textStage(_ db: SQLiteConnection) throws {
+        try db.addColumn("polisher", type: "TEXT", to: "recordings")
+        try db.addColumn("polish_ms", type: "INTEGER", to: "recordings")
     }
 
     /// Idempotent `ADD COLUMN`: only "duplicate column name" is ignored.

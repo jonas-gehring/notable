@@ -73,7 +73,7 @@ struct RecentDictationRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                Text(text.isEmpty ? "(kein Text)" : text)
+                Text(text.isEmpty ? String(localized: "(kein Text)") : text)
                     .font(.callout)
                     .lineLimit(compact ? 2 : 4)
                     .textSelection(.enabled)

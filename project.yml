@@ -84,6 +84,16 @@ targets:
       # name. Pure; the controller that carries them out stays out.
       - path: Sources/Notable/Dictation/DictationPipeline.swift
       - path: Sources/Notable/Dictation/DictationFailure.swift
+      # Spec 30: the failed dictation that survives the task that failed it.
+      - path: Sources/Notable/Dictation/LastClip.swift
+      # Spec 31: German numbers, and paragraphs at pauses from token timings.
+      # TextPolisher and TranscriptionEngine reference both.
+      - path: Sources/Notable/Dictation/GermanITN.swift
+      - path: Sources/Notable/Dictation/SpeechPauses.swift
+      # Spec 32: the on-device text stage — the pure rules, and the thin shell
+      # the opt-in probe measures.
+      - path: Sources/Notable/Dictation/LocalPolish.swift
+      - path: Sources/Notable/Dictation/LocalPolisher.swift
       # Pausing/muting playback during a dictation (Spec 08 B). The "only undo
       # your own doing" rule is the part worth a test.
       - path: Sources/Notable/Dictation/MediaInterrupter.swift

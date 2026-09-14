@@ -214,6 +214,47 @@ final class LocalizationTests: XCTestCase {
             """)
     }
 
+    /// `Text(title ?? "Ohne Titel")` and `Text(text.isEmpty ? "(kein Text)" : text)`.
+    ///
+    /// The shape the two scans above cannot see (Spec 30 §3.8): one side of the
+    /// expression is a `String`, so the whole expression is a `String`, SwiftUI
+    /// picks the verbatim initializer, and the literal is rendered exactly as
+    /// written — German in every language, **whether or not the table has an
+    /// entry for it**. That is why this fails on the shape itself instead of
+    /// asking for a translation: no translation can reach it.
+    func testNoGermanFallbackLiteralInsideAVerbatimText() throws {
+        let literal = #""((?:[^"\\]|\\.)+)""#
+        let patterns = [
+            // Text(optional ?? "…")
+            #"\bText\(\s*[^"()]+\?\?\s*"# + literal,
+            // Text(condition ? "…" : variable)
+            #"\bText\([^"()]*\?\s*"# + literal + #"\s*:\s*[A-Za-z_]"#,
+            // Text(condition ? variable : "…")
+            #"\bText\([^"()]*\?\s*[A-Za-z_][\w.]*\s*:\s*"# + literal,
+        ].compactMap { try? NSRegularExpression(pattern: $0) }
+        XCTAssertEqual(patterns.count, 3, "a pattern failed to compile")
+
+        let sources = Self.repoRoot.appendingPathComponent("Sources/Notable")
+        let walker = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        var found: [String] = []
+        for case let file as URL in walker where file.pathExtension == "swift" {
+            let relative = file.path.replacingOccurrences(of: sources.path + "/", with: "")
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+            for (number, line) in text.components(separatedBy: .newlines).enumerated() {
+                if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { continue }
+                let range = NSRange(line.startIndex ..< line.endIndex, in: line)
+                if patterns.contains(where: { $0.firstMatch(in: line, range: range) != nil }) {
+                    found.append("  \(relative):\(number + 1): \(line.trimmingCharacters(in: .whitespaces))")
+                }
+            }
+        }
+        XCTAssertTrue(found.isEmpty, """
+            A literal inside a Text whose other side is a String is rendered verbatim \
+            and never localized. Wrap the literal in String(localized:):
+            \(found.joined(separator: "\n"))
+            """)
+    }
+
     /// An empty translation is worse than a missing one: the key falls back to
     /// itself when it is absent, but renders as nothing at all when it is blank.
     func testNoTranslationIsEmpty() throws {

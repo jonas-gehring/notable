@@ -60,6 +60,10 @@ final class SpokenLanguagesTests: XCTestCase {
         options.applyFuzzyDictionary = false
         options.paragraphs = false
         options.structureCommands = false
+        // These tests are about which *fillers* a profile removes. Since Spec 31
+        // German numbers are normalized too ("um acht" → "um 8 Uhr"), which is
+        // GermanITNTests' business, not this file's.
+        options.applyITN = false
         options.spokenLanguages = languages
         return options
     }

@@ -5,6 +5,9 @@ import Foundation
 enum OverlayStyle: String, CaseIterable, Identifiable, Sendable {
     /// Today's behaviour: a capsule near the bottom edge.
     case bottom
+    /// At the right edge of the visible frame, vertically centred (Spec 28). The
+    /// capsule grows leftwards, so the edge it sits against stays put.
+    case right
     /// At the top: around the notch on a MacBook that has one, otherwise a pill
     /// just under the menu bar.
     case notch
@@ -22,6 +25,7 @@ enum OverlayStyle: String, CaseIterable, Identifiable, Sendable {
     var label: String {
         switch self {
         case .bottom: String(localized: "Unten mittig (Standard)")
+        case .right: String(localized: "Rechts am Rand")
         case .notch: String(localized: "Oben an der Notch")
         case .off: String(localized: "Aus — nur Ton")
         }
@@ -58,16 +62,29 @@ enum NotchGeometry {
         case pillUnderMenuBar(CGRect)
         /// The existing bottom-centre capsule.
         case bottomCenter(CGRect)
+        /// Flush against the right edge of the visible frame, vertically centred.
+        case rightEdge(CGRect)
     }
 
     /// Distance from the bottom of the visible frame, unchanged from the original
     /// implementation — a regression test pins it.
     static let bottomInset: CGFloat = 80
 
+    /// How far the *panel* stands off the right edge. The panel is transparent
+    /// and the capsule's shadow is drawn inside it, so the visible gap is this
+    /// plus `rightEdgePadding` inside the panel — split so a radius-10 shadow is
+    /// never clipped at the panel border. A test pins the sum, not the split.
+    static let rightInset: CGFloat = 4
+    /// Trailing padding between the capsule and the panel border at the right
+    /// edge; applied by the view.
+    static let rightEdgePadding: CGFloat = 12
+
     static func placement(for screen: Screen, size: CGSize, style: OverlayStyle) -> Placement {
         switch style {
         case .bottom, .off:
             return .bottomCenter(bottomCenterFrame(for: screen, size: size))
+        case .right:
+            return .rightEdge(rightEdgeFrame(for: screen, size: size))
         case .notch:
             if screen.hasNotch, let left = screen.auxLeft, let right = screen.auxRight,
                left.width > 0, right.width > 0 {
@@ -86,6 +103,22 @@ enum NotchGeometry {
             CGRect(
                 x: screen.visibleFrame.midX - width / 2,
                 y: screen.visibleFrame.minY + bottomInset,
+                width: width,
+                height: size.height
+            ),
+            to: screen.visibleFrame
+        )
+    }
+
+    /// Against the right edge of the *visible* frame — so a Dock on the right
+    /// pushes the capsule beside it instead of behind it — and vertically centred:
+    /// the top-right corner belongs to macOS notifications.
+    private static func rightEdgeFrame(for screen: Screen, size: CGSize) -> CGRect {
+        let width = min(size.width, screen.visibleFrame.width)
+        return clamped(
+            CGRect(
+                x: screen.visibleFrame.maxX - rightInset - width,
+                y: screen.visibleFrame.midY - size.height / 2,
                 width: width,
                 height: size.height
             ),

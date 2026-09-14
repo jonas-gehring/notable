@@ -122,7 +122,63 @@ final class NotchGeometryTests: XCTestCase {
         )
     }
 
+    // MARK: - Right edge (Spec 28)
+
+    func testRightEdgeSitsAgainstTheVisibleFrameVerticallyCentred() {
+        guard case .rightEdge(let frame) =
+            NotchGeometry.placement(for: built_in, size: panel, style: .right)
+        else { return XCTFail("erwartet: .rightEdge") }
+
+        XCTAssertEqual(frame.maxX, built_in.visibleFrame.maxX - NotchGeometry.rightInset, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, built_in.visibleFrame.midY, accuracy: 0.001)
+        XCTAssertEqual(frame.size, panel)
+    }
+
+    /// The visible gap is the panel inset plus the view's trailing padding. The
+    /// split between the two may change; the 16 pt the user sees may not.
+    func testRightEdgeVisibleGapIsSixteenPoints() {
+        XCTAssertEqual(NotchGeometry.rightInset + NotchGeometry.rightEdgePadding, 16)
+    }
+
+    /// A Dock on the right shrinks the visible frame; the capsule must end
+    /// beside it, not behind it.
+    func testRightEdgeStaysLeftOfARightHandDock() {
+        var screen = built_in
+        screen.visibleFrame = CGRect(x: 0, y: 0, width: 1512 - 70, height: 944)
+        guard case .rightEdge(let frame) =
+            NotchGeometry.placement(for: screen, size: panel, style: .right)
+        else { return XCTFail("erwartet: .rightEdge") }
+        XCTAssertLessThanOrEqual(frame.maxX, screen.visibleFrame.maxX)
+        XCTAssertTrue(screen.visibleFrame.contains(frame))
+    }
+
+    func testRightEdgeKeepsThePanelOnAnOffsetScreen() {
+        guard case .rightEdge(let frame) =
+            NotchGeometry.placement(for: external, size: panel, style: .right)
+        else { return XCTFail("erwartet: .rightEdge") }
+        XCTAssertGreaterThanOrEqual(frame.minX, external.frame.minX)
+        XCTAssertLessThanOrEqual(frame.maxX, external.frame.maxX)
+        XCTAssertEqual(frame.midY, external.visibleFrame.midY, accuracy: 0.001)
+    }
+
+    func testRightEdgeShrinksAPanelWiderThanTheScreen() {
+        let narrow = NotchGeometry.Screen(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 480),
+            visibleFrame: CGRect(x: 0, y: 0, width: 320, height: 455),
+            safeAreaTop: 0, auxLeft: nil, auxRight: nil
+        )
+        guard case .rightEdge(let frame) =
+            NotchGeometry.placement(for: narrow, size: panel, style: .right)
+        else { return XCTFail("erwartet: .rightEdge") }
+        XCTAssertGreaterThanOrEqual(frame.minX, 0)
+        XCTAssertTrue(narrow.visibleFrame.contains(frame))
+    }
+
     // MARK: - Setting
+
+    func testPickerOrderKeepsTheEdgesTogetherAndOffLast() {
+        XCTAssertEqual(OverlayStyle.allCases, [.bottom, .right, .notch, .off])
+    }
 
     func testStyleDefaultsToBottom() {
         XCTAssertEqual(OverlayStyle(rawValue: "unsinn"), nil)

@@ -150,3 +150,19 @@ weiteren gültigen Wert, und ein älterer Build, der ihn nicht kennt, fällt auf
 - **Links als Spiegelbild.** `.left` wäre dieselbe Geometrie mit `minX` statt `maxX`
   und `.leading` statt `.trailing`, etwa zwanzig Zeilen und zwei Tests. Nicht gefordert;
   günstig, solange die Spec frisch ist. Entscheidung des Owners.
+
+## 8. Stand des Baus (2026-09-14)
+
+Gebaut mit den Vorschlägen aus §7: **vertikal mittig, kein Links-Spiegel.** Beides ist
+eine Zahl bzw. ein Fall und bleibt billig nachzuziehen.
+
+Eine Abweichung vom Konzept: das Trailing-Padding liegt nicht als Konstante in
+`DictationOverlayView` (die ist `private` und aus Tests nicht erreichbar), sondern als
+`NotchGeometry.rightEdgePadding` neben `rightInset` — beide Hälften der 16 pt an einer
+Stelle, und der Test pinnt ihre Summe.
+
+Abnahme: `NotchGeometryTests` +6 (Kante und Mitte, 16 pt, Dock rechts, versetzter
+Bildschirm, zu schmales Display, Picker-Reihenfolge), `DictationOverlayTests` iteriert
+die Nie-key-Invariante über alle sichtbaren Stile, `LocalizationTests` grün. Punkt 1
+und 3 (sichtbar im Diktat, Kante steht beim Zustandswechsel) sind Handtests an der
+installierten App und noch offen.

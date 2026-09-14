@@ -28,7 +28,8 @@ Loslassen nur noch der Rest zu tun ist.
 - Regelbasierte Nachbearbeitung: Füllwörter, Zahlen und Daten, persönliches Wörterbuch,
   Absätze und gesprochene Struktur-Kommandos („neue Zeile", „Stichpunkt", „erstens…")
 - **Textbausteine**: gesprochene Kürzel expandieren zu beliebigem, auch mehrzeiligem Text
-- Aufnahme-Anzeige an der Notch, als Pille unter der Menüleiste, unten mittig — oder aus
+- Aufnahme-Anzeige an der Notch, als Pille unter der Menüleiste, unten mittig, rechts am
+  Rand — oder aus
 
 **Meetings.** Mikrofon und System-Audio getrennt aufgezeichnet (CoreAudio Process Tap),
 Sprecher getrennt, dem Kalendertermin zugeordnet, als Markdown-Notiz in einem Ordner

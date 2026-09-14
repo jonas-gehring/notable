@@ -32,7 +32,7 @@ final class DictationOverlayTests: XCTestCase {
     // MARK: - The invariant
 
     func testPanelCanNeverBecomeKey() throws {
-        for style in [OverlayStyle.bottom, .notch] {
+        for style in OverlayStyle.allCases where style != .off {
             let overlay = controller(style: style)
             overlay.show(.recording)
             let panel = try XCTUnwrap(overlay.panel, style.rawValue)

@@ -407,6 +407,7 @@
 "Nächstes Meeting in der Menüleiste zeigen" = "Show the next meeting in the menu bar";
 "Nächstes: %@" = "Next: %@";
 "Oben an der Notch" = "Top, around the notch";
+"Rechts am Rand" = "Right edge";
 "oder eine lokale CLI: Claude Code, Gemini, Codex" = "or a local CLI: Claude Code, Gemini, Codex";
 "ohne Echo-Unterdrückung (%@) — bei Lautsprecher-Ton kann die Gegenseite doppelt im Transkript landen" = "without echo cancellation (%@) — with speaker audio the other side can end up twice in the transcript";
 "Ohne Mikrofon kein Diktat. Das ist die einzige zwingende Berechtigung." = "No microphone, no dictation. This is the one permission that is not optional.";

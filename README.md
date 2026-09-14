@@ -26,8 +26,8 @@ while you speak, so releasing the key only leaves the tail to finish.
 - **Offline post-processing** — filler words, numbers and dates, a personal dictionary,
   paragraphs, and the structure you actually spoke ("new line", "bullet", "first…")
 - **Snippets** — spoken shorthands expand to arbitrary, possibly multi-line text
-- **Recording indicator** around the notch, as a pill under the menu bar, bottom-centre —
-  or off
+- **Recording indicator** around the notch, as a pill under the menu bar, bottom-centre,
+  at the right edge — or off
 
 ## Meetings
 

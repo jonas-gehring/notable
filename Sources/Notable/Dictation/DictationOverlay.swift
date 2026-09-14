@@ -36,6 +36,10 @@ final class DictationOverlayController {
         /// The hint is then not shown at all — an exit that does nothing is
         /// worse than no exit hint.
         @Published var escapeAvailable = true
+        /// Where the capsule sits inside the transparent panel. Centred at the
+        /// bottom; trailing at the right edge, so a state that needs more words
+        /// grows the capsule inwards instead of pulling it off the edge (Spec 28).
+        @Published var alignment: Alignment = .center
     }
 
     private let model = Model()
@@ -196,6 +200,11 @@ final class DictationOverlayController {
             )
         case .pillUnderMenuBar(let frame), .bottomCenter(let frame):
             model.notchCutout = nil
+            model.alignment = .center
+            panel.setFrame(CGRect(origin: frame.origin, size: panel.frame.size), display: false)
+        case .rightEdge(let frame):
+            model.notchCutout = nil
+            model.alignment = .trailing
             panel.setFrame(CGRect(origin: frame.origin, size: panel.frame.size), display: false)
         }
     }
@@ -227,7 +236,8 @@ private struct DictationOverlayView: View {
 
     var body: some View {
         pill
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.trailing, model.alignment == .trailing ? NotchGeometry.rightEdgePadding : 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: model.alignment)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(accessibilityText)
     }

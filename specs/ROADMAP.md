@@ -124,6 +124,12 @@ Punkte, deren Fehlermodus still war — die also niemand gemeldet hätte:
 
 ## Offen
 
+- **Parität mit Wispr Flow** — `docs/analyse-wispr-flow-paritaet-2026-09-14.md`:
+  zwölf verifizierte Befunde in der Kernschleife, die Textstufe als eigentliche Lücke
+  (lokales Sprachmodell statt Cloud, Datengrenze unberührt), Craft-Liste, fünf
+  Bausteine — als Specs 28–33 geschrieben (Kernschleife, HUD und Fehlerfläche,
+  Regeln, lokales Sprachmodell, Einstellungen-Diät, Anzeige rechts). Offene
+  Entscheidungen in den Specs unter §7; die Messung für Spec 32 (Stufe 0) steht aus.
 - **Sprecher-Erkennung an einem echten Call messen.** Die Diarisierung ist
   nachgeschärft (Trennschwelle 0,62 statt 0,7 auf der VAD-kompaktierten Spur,
   Mindestdauer 0,4 s, erwartete Sprecherzahl aus der Einladung) und die Namensprüfung

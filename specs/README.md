@@ -34,6 +34,12 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [25](25-auto-update-das-wirklich-installiert.md) | **Updates, die sich tatsächlich installieren** — ruhiger Moment statt „kein Fenster offen", nichts vergessen, hinterher sagen | M | ein kaputtes Release installiert sich jetzt wirklich | gebaut; `test-update.sh` noch nicht gelaufen |
 | [26](26-notizen-einruecken.md) | **Einrücken/Ausrücken in Notizen** — verschachtelte Listen, Tab/⇧Tab, ⌘]/⌘[ | S–M + S | Drift im Markdown-Round-Trip | gebaut |
 | [27](27-notizen-ordner-icloud-und-symbol.md) | **Notizen-Ordner** — Notable-Symbol am Ordner, iCloud Drive als Vorgabe für neue Einrichtungen | S (+ S) | TCC beim ersten Zugriff ohne Open-Panel | gebaut, mit Stufe 2; TCC auf frischem Konto offen |
+| [28](28-overlay-rechts-am-rand.md) | **Diktat-Anzeige rechts am Rand** — vierter Platz im Picker, Kapsel wächst von der Kante nach innen | S | verdeckt für die Dauer eines Diktats den rechten Fensterrand — deshalb Wahl, nicht Standard | 📋 Entwurf (2026-09-14) |
+| [29](29-kernschleife-haerten.md) | **Kernschleife härten** — zweites Diktat sofort, Esc in jeder Phase, Stille nennt die Ursache, Ziel vor dem Paste, Gerätewechsel ohne Verlust; `DictationPipeline` als Testnaht | M | der latenzkritische Pfad wird umgebaut — `LatencyProbeTests` vorher/nachher | 📋 Entwurf (2026-09-14) |
+| [30](30-hud-und-fehlerflaeche.md) | **HUD und Fehlerfläche** — ein Gesicht, Ein-/Ausblenden, Töne an, `DictationFailure` statt `localizedDescription`, letzter Clip bleibt wiederholbar | S–M + S + S | Stufe 3 (klickbares HUD) berührt die Nie-key-Invariante | 📋 Entwurf (2026-09-14) |
+| [31](31-regeln-nachziehen.md) | **Regeln nachziehen** — Satzanfänge, `GermanITN`, Füllwörter mit Position, App-Tabelle + Picker, Absätze an Sprechpausen aus `tokenTimings` | ~1 Woche | eine falsche Zahl ist schlimmer als ein ausgeschriebenes Wort | 📋 Entwurf (2026-09-14) |
+| [32](32-lokales-sprachmodell.md) | **Lokales Sprachmodell als Textstufe** — FoundationModels (macOS 26) für Selbstkorrektur, Satzzeichen, Listen; nichts verlässt das Gerät | ½ T Messung + M | Latenz: 119 ms gegen voraussichtlich das Zehnfache — **erst messen** | 📋 Entwurf (2026-09-14) |
+| [33](33-einstellungen-diaet-und-craft.md) | **Einstellungen-Diät und Craft** — Messinstrumente hinter ⌥, ein Satz je Footer, Tokens, Fenster-Autosave, Über/Hilfe, Onboarding ohne Mikrofon blockiert | M | 62 sichtbare Stellen, optisches Risiko | 📋 Entwurf (2026-09-14) |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
 
@@ -66,6 +72,14 @@ Messung als etwas anderes als gedacht:
   Neustart Arbeit vernichtet. → 25.
 
 26 und 27 sind unabhängig und klein. Offene Entscheidungen stehen in 24 §7 und 27 §7.
+
+**Zu 28–33:** Aus dem Vergleich mit Wispr Flow vom 2026-09-14
+(`docs/analyse-wispr-flow-paritaet-2026-09-14.md`). Die Reihenfolge ist die
+empfohlene Baureihenfolge: 29 zuerst (das „buggy" sitzt dort, und die Testnaht, die
+29 anlegt, tragen 30 und 32), dann 30 und 31 unabhängig, 32 nur nach bestandener
+Messung (Stufe 0), 33 zuletzt. 28 ist unabhängig und klein. Local-First bleibt in
+allen sechs unberührt; 32 ist der Grund, warum das trotz Textintelligenz geht.
+Offene Entscheidungen stehen in 29 §7, 30 §7, 31 §7, 32 §7 und 33 §7.
 
 Daneben liegen die Specs der ersten Ausbaustufe — `note-management-ui.md`,
 `speaker-naming.md`, `auto-detect-consent.md`, `release-and-signing.md` und die

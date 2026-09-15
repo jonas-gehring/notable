@@ -62,7 +62,9 @@ final class UpdateInstallerTests: XCTestCase {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [script.path, String(pid), staged.path, dest.path]
-        // `open` at the end has nothing to open here; its noise is not the point.
+        // `open` at the end has nothing to open here; its noise is not the point,
+        // and one attempt is enough — retrying is tested on its own below.
+        process.environment = ["PATH": "/usr/bin:/bin", "NOTABLE_RELAUNCH_TRIES": "1"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -138,7 +140,7 @@ final class UpdateInstallerTests: XCTestCase {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [script.path, "999999", staged.path, dest.path]
-        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin"]
+        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin", "NOTABLE_RELAUNCH_TRIES": "1"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -147,6 +149,44 @@ final class UpdateInstallerTests: XCTestCase {
         XCTAssertNotEqual(process.terminationStatus, 0)
         XCTAssertEqual(try String(contentsOf: dest.appendingPathComponent("marker"), encoding: .utf8), "alt")
         XCTAssertEqual(try String(contentsOf: log, encoding: .utf8), dest.path + "\n", "die alte App muss wieder starten")
+    }
+
+    /// Measured 2026-09-15: 55 ms after the quit, LaunchServices still believed
+    /// the old process ran, and `open` launched nothing. The script now opens
+    /// again until the app is running. Fake `open` and `pgrep` on the PATH: the
+    /// app "runs" only after the second `open`.
+    func testOpensAgainUntilTheAppActuallyRuns() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("swap-relaunch-\(UUID().uuidString)", isDirectory: true)
+        let dest = dir.appendingPathComponent("Notable.app", isDirectory: true)
+        let staged = dir.appendingPathComponent("new/Notable.app", isDirectory: true)
+        let bin = dir.appendingPathComponent("bin", isDirectory: true)
+        let log = dir.appendingPathComponent("opened.txt")
+        for folder in [dest, staged, bin] { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
+        defer { try? fm.removeItem(at: dir) }
+        let fakes = [
+            "open": "#!/bin/sh\necho \"$1\" >> '\(log.path)'\n",
+            "pgrep": "#!/bin/sh\n[ \"$(wc -l < '\(log.path)')\" -ge 2 ]\n",
+        ]
+        for (name, body) in fakes {
+            let url = bin.appendingPathComponent(name)
+            try body.write(to: url, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let script = dir.appendingPathComponent("swap.sh")
+        try UpdateInstaller.swapScript.write(to: script, atomically: true, encoding: .utf8)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path, "999999", staged.path, dest.path]
+        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        let opened = try String(contentsOf: log, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(opened.count, 2, "öffnet erneut, bis die App läuft — und dann nicht mehr")
     }
 
     /// The script wrote itself into the temp directory and never cleaned up.

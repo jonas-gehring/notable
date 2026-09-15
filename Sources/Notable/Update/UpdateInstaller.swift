@@ -408,6 +408,23 @@ final class UpdateInstaller: ObservableObject {
     pid="$1"
     newapp="$2"
     dest="$3"
+    tries="${NOTABLE_RELAUNCH_TRIES:-10}"
+
+    # Start the app and make sure it runs. The pid being gone is the kernel's
+    # answer; LaunchServices learns it a moment later, and an `open` in that gap
+    # only activates the app it still believes is running — "launch 0 items".
+    # Measured by scripts/test-update.sh (2026-09-15): the swap took 55 ms, the
+    # `open` launched nothing, and Notable stayed gone until started by hand.
+    relaunch() {
+      n=0
+      while [ "$n" -lt "$tries" ]; do
+        open "$dest"
+        sleep 1
+        pgrep -f "$dest/Contents/MacOS/" >/dev/null 2>&1 && return 0
+        n=$((n + 1))
+      done
+      return 1
+    }
 
     # Wait for the running app to quit (max ~20s), so we don't replace a live bundle.
     i=0
@@ -431,7 +448,7 @@ final class UpdateInstaller: ObservableObject {
     # signature, no way back. The old bundle is untouched here, and the app has
     # already quit — so start it again. Unattended, a bare `exit 1` meant no
     # menu-bar item and no dictation until someone noticed.
-    mv "$dest" "$dest.old" || { open "$dest"; rm -f "$0"; exit 1; }
+    mv "$dest" "$dest.old" || { relaunch; rm -f "$0"; exit 1; }
     if /usr/bin/ditto "$newapp" "$dest"; then
       rm -rf "$dest.old" "$newapp"
     else
@@ -443,7 +460,7 @@ final class UpdateInstaller: ObservableObject {
         mv "$dest.old" "$dest"
       fi
     fi
-    open "$dest"
+    relaunch
     rm -f "$0"
     """
 }

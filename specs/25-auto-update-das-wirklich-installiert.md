@@ -187,6 +187,25 @@ Weil der Build-Rechner jedes Release vorab installiert, gibt es sonst keinen Bew
 
 ## 7. Stand des Baus (2026-09-11)
 
+**Nachtrag 2026-09-15 — der erste Lauf von `test-update.sh` hat einen Fehler gefunden.**
+Der Tausch 1.2.0 → 9.9.9-test gelang (Version, unveränderte Designated Requirement),
+aber **die App startete danach nicht wieder**, und ohne Start wurden weder
+„zuletzt aktualisiert" noch „automatisch" vermerkt. Das Systemlog zeigt warum: die
+App beendete sich um 09:06:03.720, das Skript tauschte und rief `open` um .775 auf —
+55 ms später. `open` meldete „LAUNCH: Asking CSUI to launch 0 items"; launchservicesd
+verarbeitete das Ende des alten Prozesses erst um .932. `kill -0` fragt den Kernel,
+`open` fragt LaunchServices, und dazwischen liegt ein Spalt, in dem `open` die
+vermeintlich laufende App nur aktiviert. Von Hand gestartet, las die neue Version die
+Marker korrekt (`updateLastVersion = 9.9.9-test`, `updateLastUnattended = 1`).
+
+**Fix:** `relaunch()` im Tausch-Skript öffnet, wartet eine Sekunde, prüft per
+`pgrep -f "$dest/Contents/MacOS/"`, dass die App läuft, und wiederholt bis zu zehnmal
+— an beiden Stellen, die starten (nach dem Tausch und nach gescheitertem `mv`).
+`UpdateInstallerTests.testOpensAgainUntilTheAppActuallyRuns` prüft es mit gefälschtem
+`open`/`pgrep`. **Folge für installierte Versionen bis 1.2.0:** ihr Skript hat den
+Fehler noch; ein unbeaufsichtigtes Update von dort kann Notable beendet zurücklassen.
+Auf dem Build-Rechner unerheblich, weil `install.sh` installiert.
+
 3.1–3.9 sind gebaut. Abweichungen und was offen ist:
 
 - **`scripts/test-update.sh` ist geschrieben, aber nicht gelaufen.** Es ersetzt

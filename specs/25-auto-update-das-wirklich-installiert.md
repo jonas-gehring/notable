@@ -206,6 +206,13 @@ Marker korrekt (`updateLastVersion = 9.9.9-test`, `updateLastUnattended = 1`).
 Fehler noch; ein unbeaufsichtigtes Update von dort kann Notable beendet zurücklassen.
 Auf dem Build-Rechner unerheblich, weil `install.sh` installiert.
 
+**Zweiter Lauf mit dem Fix (2026-09-15): alle fünf Prüfungen `ok`** — Version
+9.9.9-test, die App startete selbst wieder, Designated Requirement unverändert, als
+letztes Update und als unbeaufsichtigt vermerkt. (Ein Lauf dazwischen wurde vom
+System wegen Speichermangels beim Bauen beendet, bevor er `/Applications` anfasste.)
+Damit ist 3.9 nachgewiesen. Von Hand bleibt: Mitteilung „aktualisiert", die Zeile in
+Einstellungen → Allgemein, Berechtigungen und Hotkey danach (`docs/handtests-1.3.0.md`).
+
 3.1–3.9 sind gebaut. Abweichungen und was offen ist:
 
 - **`scripts/test-update.sh` ist geschrieben, aber nicht gelaufen.** Es ersetzt

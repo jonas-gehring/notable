@@ -181,7 +181,7 @@ The project.yml version bump is on disk — review it, then run the following to
   git add project.yml
   git commit -m "Release $TAG"
   git tag "$TAG"
-  # Only this tag: `--tags` pushes every local tag, including experiments and
+  # Only this tag: \`--tags\` pushes every local tag, including experiments and
   # tags from other branches that were never meant to be published.
   git push origin HEAD "$TAG"
   gh release create "$TAG" "$ZIP" \\

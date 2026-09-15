@@ -159,13 +159,17 @@ final class NotesFolderManager: ObservableObject {
             enabled: DefaultsKey.notesFolderIcon.value(),
             folder: folderURL.path,
             marker: marker,
-            folderHasIcon: FolderIcon.hasCustomIcon(folderURL)
+            folderHasIcon: FolderIcon.hasCustomIcon(folderURL),
+            iconIsCurrent: DefaultsKey.notesFolderIconVersion.value() >= FolderIcon.designVersion
         )
         var done: [FolderIconRule.Action] = []
         for action in actions {
             switch action {
             case .set(let path):
-                if FolderIcon.set(on: URL(fileURLWithPath: path, isDirectory: true)) { done.append(action) }
+                if FolderIcon.set(on: URL(fileURLWithPath: path, isDirectory: true)) {
+                    done.append(action)
+                    UserDefaults.standard.set(FolderIcon.designVersion, forKey: DefaultsKey.notesFolderIconVersion.key)
+                }
             case .remove(let path):
                 FolderIcon.remove(from: URL(fileURLWithPath: path, isDirectory: true))
                 done.append(action)

@@ -89,6 +89,28 @@ enum NotesFolderDisplay {
     }
 }
 
+/// Where the app icon sits on the folder (pure, so the proportions are tested).
+///
+/// Matched by eye against Numbers, Pages and Obsidian in iCloud Drive (owner's
+/// screenshot, 2026-09-15): the app icon's artwork covers about half the
+/// folder's width and sits centred on the folder's front panel, which lies below
+/// the middle of the canvas. At 46 % it read small in a Finder list, at 62 % it
+/// spilled over the folder's edge.
+enum FolderIconLayout {
+    /// Width of the app icon's visible artwork, as a share of the canvas.
+    static let artworkWidth: CGFloat = 0.50
+    /// Centre of the artwork, as a share of the canvas height from the bottom.
+    static let centerY: CGFloat = 0.40
+    /// macOS app icons carry a transparent margin: the artwork is 824 of 1024.
+    static let artworkShareOfIcon: CGFloat = 824.0 / 1024.0
+
+    /// The frame to draw the whole app icon (margin included) into.
+    static func appIconFrame(in rect: CGRect) -> CGRect {
+        let side = rect.width * artworkWidth / artworkShareOfIcon
+        return CGRect(x: rect.midX - side / 2, y: rect.minY + rect.height * centerY - side / 2, width: side, height: side)
+    }
+}
+
 /// When Notable puts its mark on the notes folder, and when it takes it back.
 ///
 /// The marker (`notesFolderIconPath`) is the only way to know whose icon a
@@ -101,7 +123,10 @@ enum FolderIconRule {
         case remove(String)
     }
 
-    static func actions(enabled: Bool, folder: String, marker: String?, folderHasIcon: Bool) -> [Action] {
+    /// - Parameter iconIsCurrent: the icon Notable last set was drawn by the
+    ///   current `FolderIcon.designVersion`. An older Notable icon is replaced;
+    ///   someone else's icon never is, whatever its age.
+    static func actions(enabled: Bool, folder: String, marker: String?, folderHasIcon: Bool, iconIsCurrent: Bool = true) -> [Action] {
         var actions: [Action] = []
         let marker = marker.flatMap { $0.isEmpty ? nil : $0 }
         // Notable's mark on a folder that is no longer the notes folder.
@@ -110,7 +135,11 @@ enum FolderIconRule {
             if marker == folder, folderHasIcon { actions.append(.remove(folder)) }
             return actions
         }
-        if folderHasIcon { return actions } // ours already, or someone else's
+        if folderHasIcon {
+            // Ours, but drawn by an older design: put the current one on.
+            if marker == folder, !iconIsCurrent { actions.append(.set(folder)) }
+            return actions // ours and current, or someone else's
+        }
         actions.append(.set(folder))
         return actions
     }

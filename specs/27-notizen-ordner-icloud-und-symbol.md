@@ -204,3 +204,34 @@ und das Symbol kommt auch an einen selbst gewählten Ordner.
 - **Das Symbol ist nicht im Finder angesehen.** Es wird beim ersten Start einer App mit
   diesem Stand auf den gewählten Ordner gesetzt (`iCloud Drive/Codus/Meetings` hat
   kein eigenes Symbol) — dort ist es zu prüfen.
+
+### Nachtrag 2026-09-15 — Symbol mit vollem App-Icon, eigener Ordner
+
+**Im Finder angesehen, und es war nicht, was gemeint war.** Das Symbol der Version 1
+setzte ein kleines, getöntes `waveform`-Symbol ins untere Drittel. Der Owner will das
+**volle App-Icon**, wie iCloud Drive es für Numbers, Pages und Obsidian zeigt.
+
+- **Design 2:** `FolderIcon` zeichnet den Systemordner und darauf `NSApp.applicationIconImage`.
+  Wo, sagt `FolderIconLayout` (pur, getestet): Grafik = 50 % der Ordnerbreite, zentriert,
+  Mitte bei 40 % der Höhe; der transparente Rand des App-Icons (824/1024) ist
+  eingerechnet. Nach Augenmaß an Numbers und Pages im Screenshot des Owners gewählt,
+  weil `NSWorkspace` für deren iCloud-Container nur den leeren Ordner liefert. Bei 46 %
+  wirkte es in der Finder-Liste klein, bei 62 % ragte es über den Ordner.
+- **Bestehende Ordner bekommen es auch:** `FolderIcon.designVersion` (2) und
+  `DefaultsKey.notesFolderIconVersion` (unset = 1). `FolderIconRule` ersetzt ein Symbol,
+  wenn der Marker auf diesen Ordner zeigt **und** die Version älter ist. Ein fremdes Symbol
+  bleibt unangetastet, egal wie alt.
+- **Befund dabei:** Der gespeicherte Notizordner war die **Wurzel von iCloud Drive**
+  (`com~apple~CloudDocs`), Notables Symbol lag auf iCloud Drive selbst, und die Inbox
+  direkt darin. Der frühere Ordner `Codus/Meetings` lag inzwischen als `Meetings` in der
+  Wurzel. 18 von 33 gespeicherten Notiz-Pfaden zeigten ins Leere, weil die Dateien von
+  Hand verschoben worden waren, 14 Dateien sind nicht mehr auffindbar.
+- **Auf Wunsch des Owners umgestellt:** neuer, leerer Ordner `iCloud Drive/Notable` als
+  Notizordner; `Meetings` bleibt, wo es ist. Die 18 Pfade wurden in einer Transaktion auf
+  die gefundenen Dateien korrigiert (eindeutige Dateinamen, jede Änderung an den exakten
+  alten Pfad gebunden, danach jede Datei geprüft; DB vorher gesichert). Beim Neustart nahm
+  Notable sein Symbol von der iCloud-Wurzel und setzte es auf den neuen Ordner.
+- **Offen:** Der eingebaute Umzug (Stufe 2) kann eine iCloud-Wurzel nicht umziehen — ein
+  Ordner lässt sich nicht in seinen eigenen Unterordner verschieben, und in der Wurzel
+  liegen fremde Ordner. Er wird dort gar nicht erst angeboten (`sync == .local`), aber eine
+  Wurzel als Notizordner sollte die Auswahl verhindern oder zumindest benennen.

@@ -93,6 +93,10 @@ enum DefaultsKey {
     /// Which folder Notable put its icon on — the only way to tell its icon from
     /// one the user designed (`FolderIconRule`). Empty means none.
     static let notesFolderIconPath = DefaultsEntry(key: "notesFolderIconPath", fallback: "")
+    /// Which `FolderIcon.designVersion` drew the icon at `notesFolderIconPath`.
+    /// Unset means version 1 — the waveform icon every folder carried before the
+    /// version was recorded — so those folders get the current design.
+    static let notesFolderIconVersion = DefaultsEntry(key: "notesFolderIconVersion", fallback: 1)
 
     // MARK: Zusammenfassung
 

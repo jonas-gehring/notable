@@ -4,27 +4,26 @@ import UniformTypeIdentifiers
 /// Notable's mark on the notes folder in Finder (Spec 27 §3.3).
 ///
 /// **Composed at runtime, not shipped as a picture:** the current system folder
-/// with Notable's waveform on its front. The folder's look changes between macOS
-/// versions, and a folder baked from an older one looks foreign in Finder. The
-/// image draws itself at whatever size Finder asks for, 16 to 1024 px.
+/// with Notable's full app icon on its front — the way iCloud Drive shows
+/// Numbers, Pages or Obsidian. The folder's look changes between macOS versions,
+/// and a folder baked from an older one looks foreign in Finder. The image draws
+/// itself at whatever size Finder asks for, 16 to 1024 px.
 ///
-/// Only thin AppKit here; *when* to set or remove is `FolderIconRule`.
+/// Version 1 put a small tinted waveform symbol into the lower third; the owner
+/// asked for the whole app icon instead (2026-09-15). Where it sits is
+/// `FolderIconLayout`; *when* to set, replace or remove is `FolderIconRule`.
 @MainActor
 enum FolderIcon {
+    /// Bumped whenever the picture changes, so a folder still carrying an older
+    /// Notable icon gets the current one (`FolderIconRule`).
+    static let designVersion = 2
+
     static func image() -> NSImage {
         let folder = NSWorkspace.shared.icon(for: .folder)
+        let appIcon: NSImage = NSApp?.applicationIconImage ?? NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
         return NSImage(size: NSSize(width: 512, height: 512), flipped: false) { rect in
             folder.draw(in: rect)
-            let glyphHeight = rect.height * 0.26
-            let tint = NSColor.systemBlue.blended(withFraction: 0.45, of: .black) ?? .systemBlue
-            let configuration = NSImage.SymbolConfiguration(pointSize: glyphHeight, weight: .semibold)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [tint.withAlphaComponent(0.8)]))
-            guard let glyph = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil)?
-                .withSymbolConfiguration(configuration) else { return true }
-            // The front panel of the macOS folder sits in the lower two thirds.
-            let size = glyph.size
-            let origin = NSPoint(x: rect.midX - size.width / 2, y: rect.minY + rect.height * 0.38 - size.height / 2)
-            glyph.draw(in: NSRect(origin: origin, size: size))
+            appIcon.draw(in: FolderIconLayout.appIconFrame(in: rect))
             return true
         }
     }

@@ -75,8 +75,35 @@ final class NotesFolderRulesTests: XCTestCase {
 
     // MARK: - Icon: never someone else's
 
-    private func actions(enabled: Bool = true, folder: String = "/n", marker: String? = nil, hasIcon: Bool = false) -> [FolderIconRule.Action] {
-        FolderIconRule.actions(enabled: enabled, folder: folder, marker: marker, folderHasIcon: hasIcon)
+    private func actions(enabled: Bool = true, folder: String = "/n", marker: String? = nil, hasIcon: Bool = false,
+                         current: Bool = true) -> [FolderIconRule.Action] {
+        FolderIconRule.actions(enabled: enabled, folder: folder, marker: marker, folderHasIcon: hasIcon, iconIsCurrent: current)
+    }
+
+    /// The waveform icon of version 1 gives way to the full app icon.
+    func testAnOlderNotableIconIsReplaced() {
+        XCTAssertEqual(actions(marker: "/n", hasIcon: true, current: false), [.set("/n")])
+    }
+
+    /// Age says nothing about whose icon it is: without our marker it stays.
+    func testAnOutdatedVersionNeverTouchesSomeoneElsesIcon() {
+        XCTAssertEqual(actions(marker: nil, hasIcon: true, current: false), [])
+        XCTAssertEqual(actions(folder: "/new", marker: "/old", hasIcon: true, current: false), [.remove("/old")])
+    }
+
+    func testSwitchedOffAnOlderIconIsRemovedNotReplaced() {
+        XCTAssertEqual(actions(enabled: false, marker: "/n", hasIcon: true, current: false), [.remove("/n")])
+    }
+
+    /// Half the folder's width, centred, below the middle — like Numbers in iCloud Drive.
+    func testTheAppIconSitsCentredOnTheFolderFront() {
+        let canvas = CGRect(x: 0, y: 0, width: 512, height: 512)
+        let frame = FolderIconLayout.appIconFrame(in: canvas)
+        XCTAssertEqual(frame.midX, canvas.midX, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, 512 * 0.40, accuracy: 0.001)
+        XCTAssertEqual(frame.width * FolderIconLayout.artworkShareOfIcon, 256, accuracy: 0.001, "Artwork = halbe Ordnerbreite")
+        XCTAssertGreaterThanOrEqual(frame.minY + (frame.height - frame.height * FolderIconLayout.artworkShareOfIcon) / 2, 0,
+                                    "die sichtbare Grafik ragt nicht unten aus dem Bild")
     }
 
     func testAPlainFolderGetsTheIcon() {

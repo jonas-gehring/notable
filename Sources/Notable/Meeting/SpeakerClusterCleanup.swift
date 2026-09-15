@@ -9,13 +9,26 @@ import Foundation
 /// nobody can name.
 ///
 /// The embeddings that tell the clusters apart used to be thrown away in
-/// `MeetingPipeline.process`; here they decide where a splinter belongs. Two
+/// `MeetingPipeline.process`; here they decide where a splinter belongs. The
 /// rules keep it on the safe side:
 /// - **small** means both — under 8 s *and* under 3 % of the remote speech — so
 ///   a quiet but real participant in a long call is not a splinter;
 /// - **two large clusters are never merged here.** A voice merged by mistake
 ///   cannot be separated again; only independent evidence may merge them — the
 ///   call's own display (`ScreenSpeakerAssignment`) or the user.
+///
+/// Measured on the archive (Spec 24 §9.1, 2026-09-11): splinter segments sit
+/// 0.58–1.04 from the nearest large cluster, because below about a second the
+/// embedding carries no usable signal. A distance threshold alone therefore
+/// either does nothing (0.6) or guesses between two voices (0.9). Decided
+/// 2026-09-15, so the rule is:
+/// 1. a close match (< 0.6) joins that voice — still a voice match;
+/// 2. with **exactly one** large voice there is nobody to confuse it with, so a
+///    splinter joins it up to 0.9 — past that it is not a voice at all;
+/// 3. what is left and shorter than a second becomes `unknownLabel`: not a
+///    numbered speaker the reader has to account for, and never a name;
+/// 4. numbers follow speech share, so the main voice is "Sprecher 1" even when
+///    a 0.7-s splinter spoke first.
 enum SpeakerClusterCleanup {
     struct Segment: Equatable, Sendable {
         var label: String
@@ -34,6 +47,14 @@ enum SpeakerClusterCleanup {
     /// measurement** — `MeetingReplayTests` (skipped unless asked for) replays
     /// archived meetings and prints the label statistics before and after.
     static let reassignDistance: Float = 0.6
+    /// With a single large voice: farther than this is orthogonal, not a voice
+    /// (1.0 is orthogonal; the measured splinters of 1B2D… reach 1.04).
+    static let singleVoiceDistance: Float = 0.9
+    /// Below this an unmatched splinter segment is `unknownLabel`.
+    static let noSignalSeconds: TimeInterval = 1
+    /// The label of speech nobody can attribute. `MeetingPipeline` shows it as
+    /// "Sprecher ?"; it is never renumbered, named or merged.
+    static let unknownLabel = "?"
 
     static func cleaned(_ segments: [Segment]) -> [Segment] {
         let durations = totals(segments)
@@ -42,13 +63,18 @@ enum SpeakerClusterCleanup {
         if !large.isEmpty, large.count < durations.count {
             let centroids = largeCentroids(segments, large: large)
             for index in result.indices where !large.contains(result[index].label) {
-                guard let vector = normalized(result[index].embedding),
-                      let nearest = centroids
-                        .map({ (label: $0.label, distance: 1 - dot($0.vector, vector)) })
-                        .min(by: { $0.distance < $1.distance }),
-                      nearest.distance < reassignDistance
-                else { continue }
-                result[index].label = nearest.label
+                let nearest = normalized(result[index].embedding).flatMap { vector in
+                    centroids
+                        .map { (label: $0.label, distance: 1 - dot($0.vector, vector)) }
+                        .min(by: { $0.distance < $1.distance })
+                }
+                if let nearest, nearest.distance < reassignDistance {
+                    result[index].label = nearest.label
+                } else if large.count == 1, let nearest, nearest.distance < singleVoiceDistance {
+                    result[index].label = nearest.label
+                } else if result[index].duration < noSignalSeconds {
+                    result[index].label = unknownLabel
+                }
             }
         }
         return renumbered(result)
@@ -64,12 +90,19 @@ enum SpeakerClusterCleanup {
         return Set(durations.filter { !($0.value < smallSeconds && $0.value < smallShare * total) }.keys)
     }
 
-    /// "1", "2", … by first appearance, so the labels a reader sees count up
-    /// from one again after splinters vanished.
+    /// "1", "2", … by speech share (ties by first appearance), so the labels a
+    /// reader sees count up from one again after splinters vanished, and the
+    /// main voice is "1". `unknownLabel` keeps its name.
     static func renumbered(_ segments: [Segment]) -> [Segment] {
+        let durations = totals(segments)
+        var firstStart: [String: TimeInterval] = [:]
+        for segment in segments { firstStart[segment.label] = min(firstStart[segment.label] ?? .infinity, segment.start) }
+        let order = durations.keys
+            .filter { $0 != unknownLabel }
+            .sorted { (durations[$1] ?? 0, firstStart[$0] ?? 0) < (durations[$0] ?? 0, firstStart[$1] ?? 0) }
         var mapping: [String: String] = [:]
-        for segment in segments.sorted(by: { ($0.start, $0.end) < ($1.start, $1.end) }) where mapping[segment.label] == nil {
-            mapping[segment.label] = String(mapping.count + 1)
+        for (position, label) in order.enumerated() {
+            mapping[label] = String(position + 1)
         }
         return segments.map { segment in
             var renamed = segment

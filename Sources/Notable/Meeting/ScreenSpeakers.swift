@@ -271,7 +271,10 @@ enum ScreenNaming {
         var result = segments
         var names: [String: String] = [:]
         let mic = SpeakerNameResolver.micSpeakerLabel
-        let remote = result.indices.filter { result[$0].cluster.map { $0 != mic } ?? false }
+        // "Sprecher ?" may hold several people: a cluster name or a merge would
+        // attach one person's name to all of them.
+        let unknown = SpeakerNameResolver.unknownSpeakerLabel
+        let remote = result.indices.filter { result[$0].cluster.map { $0 != mic && $0 != unknown } ?? false }
 
         let intervals = ScreenTimeline.speakingIntervals(observations, recordingStart: recordingStart)
         let ownSpeech = result.filter { $0.cluster == mic }.map { (start: $0.start, end: $0.end) }
@@ -308,6 +311,7 @@ enum ScreenNaming {
     static func unnamedLabels(in segments: [MeetingTranscriptSegment]) -> Set<String> {
         Set(segments.compactMap { segment in
             guard let cluster = segment.cluster, cluster != SpeakerNameResolver.micSpeakerLabel,
+                  cluster != SpeakerNameResolver.unknownSpeakerLabel,
                   segment.speaker == cluster else { return nil }
             return cluster
         })

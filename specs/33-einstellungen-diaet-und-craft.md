@@ -218,7 +218,8 @@ Keine Migration; kein Defaults-Key wird umbenannt oder gelöscht.
 ## 8. Handtests
 
 *Noch nicht gelaufen.* ⌘C/⌘V/⌘Z/⌘A in Chat, Notiz-Editor, Snippet-Editor — Datum und
-Ergebnis hierher.
+Ergebnis hierher. Die Handtests von 28–33 stehen gesammelt in
+`docs/handtests-1.3.0.md`.
 
 ## 9. Stand des Baus (2026-09-14)
 

@@ -114,6 +114,8 @@ actor RecordingStore {
 
         var id: String { cluster }
         var isLocalUser: Bool { cluster == SpeakerNameResolver.micSpeakerLabel }
+        /// "Sprecher ?": too short to attribute, possibly several people.
+        var isUnknown: Bool { cluster == SpeakerNameResolver.unknownSpeakerLabel }
     }
 
     /// One recording, reduced to what the statistics layer reads. A struct rather
@@ -366,7 +368,7 @@ actor RecordingStore {
     /// Names a speaker; an empty name makes them anonymous again (their minted
     /// label). One transaction; `"Ich"` stays fixed.
     func renameSpeaker(recordingID: String, cluster: String, to name: String) throws {
-        guard cluster != SpeakerNameResolver.micSpeakerLabel else { return }
+        guard cluster != SpeakerNameResolver.micSpeakerLabel, cluster != SpeakerNameResolver.unknownSpeakerLabel else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let connection = try db()
         try connection.transaction {
@@ -384,7 +386,8 @@ actor RecordingStore {
     /// Two labels, one person: `cluster`'s segments join `target` under its name.
     func mergeSpeaker(recordingID: String, cluster: String, into target: String) throws {
         let mic = SpeakerNameResolver.micSpeakerLabel
-        guard cluster != target, cluster != mic, target != mic else { return }
+        let unknown = SpeakerNameResolver.unknownSpeakerLabel
+        guard cluster != target, cluster != mic, target != mic, cluster != unknown, target != unknown else { return }
         let connection = try db()
         try connection.transaction {
             try adoptLegacyCluster(cluster, recordingID: recordingID, connection: connection)

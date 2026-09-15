@@ -21,6 +21,9 @@ enum SpeakerNameResolver {
     /// The mic track's label. Never remapped — the recording user is `"Ich"`,
     /// and validation enforces it both as a key and as a target name.
     static let micSpeakerLabel = "Ich"
+    /// Speech too short to attribute (`SpeakerClusterCleanup.unknownLabel`).
+    /// Several people may hide behind it, so it is never named or merged.
+    static let unknownSpeakerLabel = "Sprecher \(SpeakerClusterCleanup.unknownLabel)"
 
     /// The account holder's name, tokenized. A *remote* label must never be
     /// given it: the local user is `"Ich"` by construction, so the same name
@@ -115,8 +118,9 @@ enum SpeakerNameResolver {
         for (label, rawName) in mapping {
             // The mic track is never a rename target.
             if label == micSpeakerLabel { return [:] }
-            // Unknown label for this transcript — ignore, don't reject.
-            guard presentLabels.contains(label) else { continue }
+            // Unknown label for this transcript — ignore, don't reject. So is
+            // "Sprecher ?", which may be several people.
+            guard presentLabels.contains(label), label != unknownSpeakerLabel else { continue }
 
             let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }          // null / uncertain ⇒ stay anonymous
@@ -235,12 +239,13 @@ enum SpeakerNameResolver {
 
     // MARK: - Helpers
 
-    /// Distinct non-`"Ich"` speaker labels, in first-appearance order.
+    /// Distinct speaker labels a name may go to — neither `"Ich"` nor
+    /// `"Sprecher ?"` — in first-appearance order.
     static func remoteLabels(in segments: [MeetingTranscriptSegment]) -> [String] {
         var seen = Set<String>()
         var labels: [String] = []
         for segment in segments {
-            guard let speaker = segment.speaker, speaker != micSpeakerLabel else { continue }
+            guard let speaker = segment.speaker, speaker != micSpeakerLabel, speaker != unknownSpeakerLabel else { continue }
             if seen.insert(speaker).inserted { labels.append(speaker) }
         }
         return labels

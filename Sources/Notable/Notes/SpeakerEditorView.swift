@@ -70,6 +70,10 @@ struct SpeakerEditorView: View {
                 Text("fest").font(.caption).foregroundStyle(.secondary)
                 Color.clear.frame(width: 1, height: 1)
                 Color.clear.frame(width: 1, height: 1)
+            } else if speaker.isUnknown {
+                Text("zu kurz, um eine Stimme zu erkennen").font(.caption).foregroundStyle(.secondary)
+                Color.clear.frame(width: 1, height: 1)
+                Color.clear.frame(width: 1, height: 1)
             } else {
                 HStack(spacing: Theme.Spacing.xs) {
                     TextField("Name …", text: draftBinding(speaker))
@@ -90,12 +94,12 @@ struct SpeakerEditorView: View {
                 Text(speaker.source.map(Self.sourceLabel) ?? "")
                     .font(.caption).foregroundStyle(.secondary)
                 Menu("Zusammenführen") {
-                    ForEach(speakers.filter { !$0.isLocalUser && $0.cluster != speaker.cluster }) { other in
+                    ForEach(speakers.filter { !$0.isLocalUser && !$0.isUnknown && $0.cluster != speaker.cluster }) { other in
                         Button(String(localized: "mit „\(other.name)“")) { merge(speaker, into: other) }
                     }
                 }
                 .fixedSize()
-                .disabled(speakers.filter { !$0.isLocalUser }.count < 2)
+                .disabled(speakers.filter { !$0.isLocalUser && !$0.isUnknown }.count < 2)
             }
         }
     }

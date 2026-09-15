@@ -397,3 +397,43 @@ bleibt deshalb 0,6; die Frage steht in `CLAUDE.md` unter „Open decisions".
 Nebenbefund: „neu durchnummerieren nach erstem Auftreten" macht aus der Hauptstimme
 „Sprecher 2", wenn ein 0,7-s-Splitter vor ihr spricht (FB7B…). Regelkonform, liest
 sich aber falsch.
+
+### 9.2 Entschieden: die Regel statt der Schwelle (2026-09-15)
+
+Der Owner hat aus den drei Wegen von §9.1 den dritten gewählt. §4.2 gilt mit diesen
+Änderungen:
+
+- **Punkt 3:** Ein Splitter-Segment geht an die nächste große Stimme, wenn die Distanz
+  unter **0,6** liegt (weiter eine Stimmübereinstimmung). Gibt es **genau eine** große
+  Stimme, reicht **0,9** — da gibt es niemanden, mit dem sie zu verwechseln wäre, und
+  jenseits von 0,9 ist es keine Stimme mehr (1,0 ist orthogonal).
+- **Neu:** Was dann übrig und **kürzer als eine Sekunde** ist, wird **„Sprecher ?"**
+  (`SpeakerClusterCleanup.unknownLabel`) — keine Nummer, die der Leser zuordnen muss.
+  Dahinter können mehrere Menschen stehen; deshalb wird „Sprecher ?" **nie benannt
+  und nie zusammengeführt**: nicht vom Modell (`remoteLabels`, `validated`), nicht vom
+  Bildschirm (`ScreenNaming`), nicht im Sprecher-Dialog (dort „zu kurz, um eine Stimme
+  zu erkennen", kein Zusammenführen-Ziel), nicht im Store.
+- **Punkt 5:** Nummeriert wird nach **Redeanteil**, bei Gleichstand nach erstem
+  Auftreten. Die Hauptstimme ist „Sprecher 1", auch wenn ein Splitter vor ihr spricht.
+- Splitter-Segmente ab einer Sekunde, die keiner Stimme nahe sind, behalten bei zwei
+  großen Stimmen ihre Nummer — lieber ein Label zu viel als eine geratene Zuordnung.
+
+**Replay mit der neuen Regel** (`MeetingReplayTests`, jetzt mit
+`NOTABLE_REPLAY_SESSIONS` für einen Teil des Archivs — ein voller Lauf wurde vom
+System wegen Speichermangels beendet):
+
+| Meeting | vorher | nachher |
+|---|---|---|
+| 1B2D… (eine große Stimme) | 1: 414 s, 2: 6 s (9 Segmente) | 1: 417 s, ?: 3 s (6) |
+| 3862… | 1: 981 s, 2: 57 s, 3: 0,6 s | 1: 981 s, 2: 57 s, ?: 0,6 s |
+| 71D9… | 1: 1184 s, 2: 14 s, 3: 3 s (0,81) | unverändert — ab 1 s, zwei große Stimmen |
+| 50DF…, 570C… | keine Splitter | unverändert |
+| **FB7B… (Payhawk)** | 1: 1155 s, 5: 245 s, 3: 40 s, 4: 5 s, 2: 1 s | 1: 1159 s, 2: 245 s, 3: 40 s, ?: 3 s (6 Segmente) |
+| B64A… | 4: 1159 s, 3: 701 s, 1: 441 s, 2: 12 s, 5/6: je < 1 s | 1: 1159 s, 2: 701 s, 3: 441 s, 4: 12 s, ?: 1 s |
+| C901… (eine große Stimme) | 1: 97 s, 2: 0,7 s (0,81) | 1: 97 s |
+
+**Abnahme „Payhawk: höchstens drei Labels": erfüllt** — drei nummerierte Sprecher
+plus „Sprecher ?" für 3 s in sechs Segmenten, die niemand zuordnen kann. Die
+Hauptstimme heißt jetzt „Sprecher 1" (vorher 1 mit der alten Nummerierung nur, weil
+sie zufällig zuerst sprach; in B64A… war sie „4"). Der 3,3-s-Rest des alten Clusters 4
+(0,58) ging an die Hauptstimme — eine echte Stimmübereinstimmung unter 0,6.

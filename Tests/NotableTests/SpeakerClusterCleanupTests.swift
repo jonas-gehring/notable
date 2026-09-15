@@ -59,8 +59,57 @@ final class SpeakerClusterCleanupTests: XCTestCase {
         XCTAssertEqual(labels(cleaned).count, 2)
     }
 
-    func testLabelsAreRenumberedByFirstAppearance() {
+    func testLabelsAreRenumberedBySpeechShare() {
+        let cleaned = SpeakerClusterCleanup.cleaned([segment("3", 0, 50, b), segment("7", 60, 100, a)])
+        XCTAssertEqual(cleaned.map(\.label), ["2", "1"], "die Hauptstimme ist Sprecher 1, auch wenn sie später einsetzt")
+    }
+
+    func testEqualShareFallsBackToFirstAppearance() {
         let cleaned = SpeakerClusterCleanup.cleaned([segment("7", 10, 100, a), segment("3", 0, 100, b)])
         XCTAssertEqual(cleaned.map(\.label), ["2", "1"])
+    }
+
+    // MARK: - Decided 2026-09-15 (Spec 24 §9.1)
+
+    /// 0.70 from the only large voice: not a voice match, but nobody else it could be.
+    func testWithOneLargeVoiceASplinterJoinsItUpToPointNine() {
+        let cleaned = SpeakerClusterCleanup.cleaned([segment("1", 0, 1000, a), segment("2", 1000, 3, [0.3, 0.95, 0])])
+        XCTAssertEqual(labels(cleaned), ["1"])
+    }
+
+    /// The same distance with two large voices would be a guess.
+    func testWithTwoLargeVoicesAnUnmatchedSubSecondSplinterIsUnknown() {
+        let between: [Float] = [0.3, 0.3, 0.905]  // 0.70 from both
+        let cleaned = SpeakerClusterCleanup.cleaned([
+            segment("4", 0, 0.7, between),
+            segment("1", 1, 500, a),
+            segment("2", 600, 400, b),
+        ])
+        XCTAssertEqual(cleaned.map(\.label), [SpeakerClusterCleanup.unknownLabel, "1", "2"],
+                       "der Splitter nimmt keine Nummer, und die Hauptstimme bleibt Sprecher 1")
+    }
+
+    func testWithTwoLargeVoicesAnUnmatchedLongerSplinterKeepsANumber() {
+        let cleaned = SpeakerClusterCleanup.cleaned([segment("1", 0, 500, a), segment("2", 500, 400, b), segment("3", 900, 3, c)])
+        XCTAssertEqual(labels(cleaned), ["1", "2", "3"])
+    }
+
+    func testAMatchedSubSecondSplinterStillJoinsItsVoice() {
+        let cleaned = SpeakerClusterCleanup.cleaned([segment("1", 0, 500, a), segment("2", 500, 400, b), segment("3", 900, 0.5, nearB)])
+        XCTAssertEqual(cleaned[2].label, cleaned[1].label)
+    }
+
+    /// "Sprecher ?" may be several people: never offered for a name.
+    func testTheUnknownLabelIsNeverOfferedForNaming() {
+        let unknown = SpeakerNameResolver.unknownSpeakerLabel
+        XCTAssertEqual(unknown, "Sprecher ?")
+        let specs = MeetingPipeline.orderedSpecs(micSegments: [], systemSegments: [(speakerID: SpeakerClusterCleanup.unknownLabel, start: 0, end: 1)])
+        XCTAssertEqual(specs.map(\.speaker), [unknown])
+        let segments = [
+            MeetingTranscriptSegment(speaker: "Sprecher 1", start: 0, end: 5, text: "Hallo.", cluster: "Sprecher 1"),
+            MeetingTranscriptSegment(speaker: unknown, start: 5, end: 6, text: "Mm.", cluster: unknown),
+        ]
+        XCTAssertEqual(SpeakerNameResolver.remoteLabels(in: segments), ["Sprecher 1"])
+        XCTAssertEqual(ScreenNaming.unnamedLabels(in: segments), ["Sprecher 1"])
     }
 }

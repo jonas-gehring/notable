@@ -19,7 +19,13 @@ final class MeetingReplayTests: XCTestCase {
         let archive = ModelInventory.applicationRoot.appendingPathComponent("spool-archive", isDirectory: true)
         let sessions = try FileManager.default.contentsOfDirectory(at: archive, includingPropertiesForKeys: nil)
         let vad = try await VadManager(modelDirectory: ModelInventory.applicationRoot)
-        for session in sessions.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        // `NOTABLE_REPLAY_SESSIONS=B6,FB7` replays only sessions starting with one
+        // of these prefixes — a full run holds every track in memory in turn and
+        // can be stopped by the system halfway.
+        let prefixes = (ProcessInfo.processInfo.environment["NOTABLE_REPLAY_SESSIONS"] ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        for session in sessions.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        where prefixes.isEmpty || prefixes.contains(where: { session.lastPathComponent.hasPrefix($0) }) {
             let files = (try? FileManager.default.contentsOfDirectory(at: session, includingPropertiesForKeys: nil)) ?? []
             guard let track = files.first(where: { $0.lastPathComponent.hasPrefix("system.") }) else { continue }
             let samples = SpoolAudio.read(track)

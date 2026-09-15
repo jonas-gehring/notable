@@ -140,10 +140,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (or a remembered "immer") calls startAutomatically. The autoRecordMeetings
         // guard now lives inside the coordinator.
         container.detector.onMeetingStart = { candidate in
+            Self.log.notice("Call erkannt: \(candidate.sourceName, privacy: .public) (\(String(describing: candidate.tier), privacy: .public))")
             container.consent.callDetected(candidate)
         }
         container.detector.onMeetingEnd = {
+            Self.log.notice("Call beendet")
             container.consent.callEnded()
+        }
+        // An app that keeps only its output open after hanging up ends the call
+        // once our system track has been silent long enough (Spec 34 B).
+        container.detector.remoteSilentFor = { container.meeting.remoteSilentFor }
+        // "Aufnahme beenden" / "Weiter aufnehmen" on a silent recording (Spec 34 C).
+        NotificationCenterService.shared.onMeetingSilenceAction = { action in
+            container.meeting.silenceAnswered(action)
         }
         container.detector.start()
 

@@ -14,9 +14,20 @@ enum SpoolStore {
         /// start and one per device change. Absent from every meta written
         /// before it existed, and decoded leniently: see `init(from:)`.
         var diagnostics: [CaptureDiagnostics]? = nil
+        /// How the recording started ("automatic"/"manual"), which detected call
+        /// it belonged to, and why it ended (`MeetingEndReason`) — Spec 34 D.
+        /// Plain strings and decoded leniently, like `diagnostics`: recovery reads
+        /// this file, and a lifecycle field must never cost a meeting.
+        var startMode: String? = nil
+        var callSource: String? = nil
+        var endReason: String? = nil
+        /// Why the note has (no) speaker names and where its title came from —
+        /// `NoteDiagnosis` codes (Spec 35).
+        var naming: String? = nil
+        var titleSource: String? = nil
 
         fileprivate enum CodingKeys: String, CodingKey {
-            case startedAt, eventTitle, eventID, diagnostics
+            case startedAt, eventTitle, eventID, diagnostics, startMode, callSource, endReason, naming, titleSource
         }
     }
 
@@ -229,5 +240,10 @@ extension SpoolStore.Meta {
         eventTitle = try container.decodeIfPresent(String.self, forKey: .eventTitle)
         eventID = try container.decodeIfPresent(String.self, forKey: .eventID)
         diagnostics = try? container.decodeIfPresent([CaptureDiagnostics].self, forKey: .diagnostics)
+        startMode = try? container.decodeIfPresent(String.self, forKey: .startMode)
+        callSource = try? container.decodeIfPresent(String.self, forKey: .callSource)
+        endReason = try? container.decodeIfPresent(String.self, forKey: .endReason)
+        naming = try? container.decodeIfPresent(String.self, forKey: .naming)
+        titleSource = try? container.decodeIfPresent(String.self, forKey: .titleSource)
     }
 }

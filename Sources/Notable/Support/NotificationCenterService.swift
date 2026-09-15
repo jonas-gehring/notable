@@ -18,6 +18,7 @@ final class NotificationCenterService: NSObject {
         case meetingReady = "meeting.ready"
         case dictationEnhanced = "dictation.enhanced"
         case updateNudge = "update.nudge"
+        case meetingSilence = "meeting.silence"
     }
 
     /// The one action that installs from a notification, and only on the
@@ -39,6 +40,13 @@ final class NotificationCenterService: NSObject {
         case paste = "dictation.paste"
     }
 
+    /// "Kein Ton in der Aufnahme" (Spec 34 C). Its own vocabulary for the same
+    /// reason as `DictationAction`: no switch over it is a consent decision.
+    enum SilenceAction: String {
+        case stop = "meeting.silence.stop"
+        case keep = "meeting.silence.keep"
+    }
+
     /// Called at most once per consent notification, on the main actor.
     var onConsentAction: ((Action) -> Void)?
     /// "Einfügen" on an improved dictation. The text is already on the clipboard;
@@ -48,6 +56,8 @@ final class NotificationCenterService: NSObject {
     var onOpenSettings: ((String) -> Void)?
     /// "Jetzt installieren" on the update nudge.
     var onInstallUpdateNow: (() -> Void)?
+    /// "Aufnahme beenden" / "Weiter aufnehmen" on a recording gone silent.
+    var onMeetingSilenceAction: ((SilenceAction) -> Void)?
 
     private(set) var isAuthorized = false
     /// Cached so the (synchronous) permissions UI can show it without awaiting.
@@ -104,7 +114,16 @@ final class NotificationCenterService: NSObject {
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([consent, consentNoRemember, ready, enhanced, nudge])
+        let silence = UNNotificationCategory(
+            identifier: Category.meetingSilence.rawValue,
+            actions: [
+                UNNotificationAction(identifier: SilenceAction.stop.rawValue, title: String(localized: "Aufnahme beenden"), options: [.destructive]),
+                UNNotificationAction(identifier: SilenceAction.keep.rawValue, title: String(localized: "Weiter aufnehmen"), options: []),
+            ],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([consent, consentNoRemember, ready, enhanced, nudge, silence])
     }
 
     /// Asks once; afterwards just refreshes the cached status. The cached flag is
@@ -222,6 +241,18 @@ final class NotificationCenterService: NSObject {
         center.removePendingNotificationRequests(withIdentifiers: [id])
     }
 
+    /// Asks whether a silent recording should end (Spec 34 C). Without the
+    /// permission the menu's status line carries the question, and the stop two
+    /// minutes later still happens.
+    @discardableResult
+    func postMeetingSilence(id: String, minutes: Int) -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Kein Ton in der Aufnahme")
+        content.body = String(localized: "Seit \(minutes) Minuten spricht niemand. Ohne Antwort endet die Aufnahme in zwei Minuten.")
+        content.categoryIdentifier = Category.meetingSilence.rawValue
+        return post(id: id, content: content)
+    }
+
     /// Returns whether anything was actually posted.
     ///
     /// The caller needs to know: the update checker marked a version as
@@ -249,6 +280,10 @@ final class NotificationCenterService: NSObject {
         }
         if actionID == UpdateAction.installNow.rawValue {
             onInstallUpdateNow?()
+            return
+        }
+        if let action = SilenceAction(rawValue: actionID) {
+            onMeetingSilenceAction?(action)
             return
         }
         if let settingsPane, actionID == UNNotificationDefaultActionIdentifier {

@@ -51,6 +51,16 @@ final class ConsentCoordinator {
 
     /// Wire to `MeetingDetector.onMeetingStart`. Fires once per detected call.
     func callDetected(_ candidate: MeetingDetector.Candidate) {
+        // Already recording — started by hand before the detector confirmed the
+        // call. That recording belongs to this call now and ends with it
+        // (Spec 34 A); asking whether to record it would be asking about
+        // something already happening, and its refusal as `.alreadyRecording`
+        // used to leave the recording running past the call's end. Before the
+        // master switch: that switch is about starting, not about ending.
+        if meeting.adoptDetectedCall(source: candidate.sourceName) {
+            status = .recording
+            return
+        }
         // Master switch off → parity with the old guard: neither prompt nor record.
         guard autoRecordEnabled else { return }
         // The detector fires `.started` once per call; ignore any re-entrancy.

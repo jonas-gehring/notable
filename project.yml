@@ -180,6 +180,11 @@ targets:
       # Judges whether a captured track carried audio at all — the shape every
       # meeting-capture regression has taken so far.
       - path: Sources/Notable/Meeting/TrackSilence.swift
+      # When a recording ends by itself (Spec 34): the call-end rule and the
+      # silence watch are pure; the detector and the controller only feed them.
+      - path: Sources/Notable/Meeting/CallEnd.swift
+      # Why a note has no speaker names and where its title came from (Spec 35).
+      - path: Sources/Notable/Meeting/NoteDiagnosis.swift
       # Which microphone a recording opens, and the record of why (Spec 23).
       # SpoolStore.Meta carries the diagnostics, so both are needed here anyway.
       - path: Sources/Notable/Dictation/InputDevicePolicy.swift

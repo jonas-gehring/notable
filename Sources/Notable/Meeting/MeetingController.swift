@@ -79,6 +79,17 @@ final class MeetingController: ObservableObject {
     /// or started by hand *while* a call was running. Both must end with the
     /// call; a recording made with no call in sight (a voice memo) must not.
     private var startedDuringCall = false
+    /// The detected call this recording belongs to, for `meta.json` (Spec 34 D).
+    private var callSource: String?
+    /// Spec 34 C: both tracks without sound → ask, then stop.
+    private var silenceWatch = MeetingSilenceWatch()
+    private var silenceTimer: Timer?
+    /// The open "Kein Ton in der Aufnahme" notification, if any.
+    private var silenceQuestionID: String?
+    /// Uptime at the recording's start and at the last sound on the system
+    /// track — how long the far side has been silent (Spec 34 B).
+    private var recordingStartUptime: TimeInterval = 0
+    private var lastRemoteSoundUptime: TimeInterval?
 
     /// Injected from the container (`MeetingDetector.isCallActive`).
     var isCallActive: () -> Bool = { false }
@@ -180,7 +191,7 @@ final class MeetingController: ObservableObject {
     func toggle() {
         switch capture {
         case .idle: start(auto: false)
-        case .recording: stop()
+        case .recording: stop(reason: .manual)
         }
     }
 
@@ -199,7 +210,7 @@ final class MeetingController: ObservableObject {
     @discardableResult
     func startAutomatically(source: String) -> StartRefusal? {
         guard case .idle = capture else { return .alreadyRecording }
-        start(auto: true)
+        start(auto: true, source: source)
         guard capture != .idle else { return .captureFailed }
         // A warning from start() (no system audio, mic failure) outranks the
         // "recording" confirmation — never overwrite it.
@@ -215,14 +226,33 @@ final class MeetingController: ObservableObject {
     /// never ended.
     func stopAutomatically() {
         guard capture != .idle, startedAutomatically || startedDuringCall else { return }
-        stop()
+        stop(reason: .callEnded)
     }
 
-    private func start(auto: Bool) {
+    /// The detector confirmed a call while a recording was already running —
+    /// started by hand before the ~10 s the detection takes, or with no call in
+    /// sight at the time. That recording belongs to the call now and ends with
+    /// it (Spec 34 A). Returns false when nothing is recording.
+    @discardableResult
+    func adoptDetectedCall(source: String) -> Bool {
+        guard capture != .idle else { return false }
+        startedDuringCall = true
+        if callSource == nil {
+            callSource = source
+            if let spool = currentSpool {
+                SpoolStore.updateMeta(spool) { $0.callSource = source }
+            }
+        }
+        Self.log.notice("Laufende Aufnahme gehört jetzt zum Call: \(source, privacy: .public)")
+        return true
+    }
+
+    private func start(auto: Bool, source: String? = nil) {
         guard case .idle = capture else { return }
         statusMessage = nil
         startedAutomatically = auto
         startedDuringCall = auto || isCallActive()
+        callSource = source ?? (startedDuringCall ? callProcess()?.name : nil)
         // One start instant for the spool meta, the recording state and the
         // live-notes clock — three separate `Date()` calls used to drift apart.
         let startedAt = Date()
@@ -245,7 +275,11 @@ final class MeetingController: ObservableObject {
 
         // Spool to disk so a crash cannot lose the meeting. RAM fallback
         // if the spool cannot be created.
-        currentSpool = try? SpoolStore.create(meta: SpoolStore.Meta(startedAt: startedAt))
+        currentSpool = try? SpoolStore.create(meta: SpoolStore.Meta(
+            startedAt: startedAt,
+            startMode: auto ? "automatic" : "manual",
+            callSource: callSource
+        ))
 
         // Degradations are collected, not overwritten — losing echo cancellation
         // AND system audio are two separate things the user must both hear.
@@ -309,8 +343,10 @@ final class MeetingController: ObservableObject {
             statusMessage = knownSilentMessage() + (statusMessage.map { " " + $0 } ?? "")
         }
         capture = .recording(since: startedAt)
+        Self.log.notice("Aufnahme gestartet: \(auto ? "automatisch" : "manuell", privacy: .public), Call: \(self.callSource ?? "–", privacy: .public)")
         startMicWatchdog()
         startDeviceMonitor()
+        startSilenceWatch()
         // Who the call shows and who it highlights (Spec 24) — on its own
         // queue, never in the capture path.
         screenObserver = callProcess().flatMap { CallScreenObserver.start(bundleIDs: $0.bundleIDs, spool: currentSpool) }
@@ -520,6 +556,83 @@ final class MeetingController: ObservableObject {
         pendingSwitchID = nil
     }
 
+    // MARK: - Silence (Spec 34 B + C)
+
+    /// How long the far side has been silent, or nil when that cannot be told
+    /// (not recording, no system track). The detector's end rule reads it.
+    var remoteSilentFor: TimeInterval? {
+        guard capture != .idle, systemTapActive else { return nil }
+        return ProcessInfo.processInfo.systemUptime - (lastRemoteSoundUptime ?? recordingStartUptime)
+    }
+
+    /// Once a second, for every recording — with or without a detected call.
+    /// It is the one rule that also ends a phone call, a meeting in the room, or
+    /// a call in an app Notable does not know.
+    private func startSilenceWatch() {
+        stopSilenceWatch()
+        silenceWatch = MeetingSilenceWatch()
+        recordingStartUptime = ProcessInfo.processInfo.systemUptime
+        lastRemoteSoundUptime = nil
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.observeSilence() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        silenceTimer = timer
+    }
+
+    private func stopSilenceWatch() {
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        withdrawSilenceQuestion()
+    }
+
+    private func observeSilence() {
+        guard capture != .idle else { return stopSilenceWatch() }
+        let now = ProcessInfo.processInfo.systemUptime
+        let system: Float? = systemTapActive ? systemTap.level : nil
+        if let system, system >= silenceWatch.resetLevel {
+            lastRemoteSoundUptime = now
+        }
+        switch silenceWatch.observe(micLevel: micRecorder.level, systemLevel: system, at: now) {
+        case .ask:
+            let minutes = silenceWatch.silentMinutes
+            Self.log.notice("Seit \(minutes, privacy: .public) min kein Ton — frage, ob die Aufnahme enden soll")
+            let id = "meeting.silence.\(UUID().uuidString)"
+            silenceQuestionID = id
+            NotificationCenterService.shared.postMeetingSilence(id: id, minutes: minutes)
+            statusMessage = Self.silenceStatus
+        case .withdraw:
+            withdrawSilenceQuestion()
+        case .stop:
+            stop(reason: .silence)
+        case nil:
+            break
+        }
+    }
+
+    private static var silenceStatus: String {
+        String(localized: "Kein Ton seit Minuten — die Aufnahme endet bald, wenn niemand spricht.")
+    }
+
+    private func withdrawSilenceQuestion() {
+        guard let id = silenceQuestionID else { return }
+        NotificationCenterService.shared.withdraw(id: id)
+        silenceQuestionID = nil
+        if statusMessage == Self.silenceStatus { statusMessage = nil }
+    }
+
+    /// The answer to "Kein Ton in der Aufnahme".
+    func silenceAnswered(_ action: NotificationCenterService.SilenceAction) {
+        guard capture != .idle else { return }
+        switch action {
+        case .stop:
+            stop(reason: .manual)
+        case .keep:
+            silenceWatch.keepRecording(at: ProcessInfo.processInfo.systemUptime)
+            withdrawSilenceQuestion()
+        }
+    }
+
     private func reevaluateInputDevice() {
         let (context, callApp) = inputContext()
         let choice = InputDevicePolicy.choose(context)
@@ -574,7 +687,7 @@ final class MeetingController: ObservableObject {
     /// Stops a running capture and returns once its note has been written.
     func stopAndAwaitNote() async {
         guard capture != .idle else { return }
-        stop()
+        stop(reason: .quit)
         await processingTask?.value
     }
 
@@ -676,11 +789,16 @@ final class MeetingController: ObservableObject {
         Self.runMeetingHook(noteURL: outcome.url)
     }
 
-    private func stop() {
+    private func stop(reason: MeetingEndReason) {
         guard case .recording(let startedAt) = capture else { return }
 
+        Self.log.notice("Aufnahme beendet: \(reason.rawValue, privacy: .public)")
+        if let spool = currentSpool {
+            SpoolStore.updateMeta(spool) { $0.endReason = reason.rawValue }
+        }
         stopMicWatchdog()
         stopDeviceMonitor()
+        stopSilenceWatch()
         let screen = screenObserver?.stop() ?? []
         screenObserver = nil
         let diagnostics = diagnosticsLog.last
@@ -700,7 +818,16 @@ final class MeetingController: ObservableObject {
         systemTapActive = false
         startedAutomatically = false
         startedDuringCall = false
-        let event = currentEvent
+        let source = callSource
+        callSource = nil
+        // The calendar is asked at the start; an event that began more than five
+        // minutes into the recording was never found (Spec 35). Asked again for
+        // the middle of the recording, only when the start found nothing.
+        let startEvent = currentEvent
+        let stopEvent = startEvent == nil
+            ? calendar.currentEvent(at: startedAt.addingTimeInterval(Date().timeIntervalSince(startedAt) / 2))
+            : nil
+        let event = startEvent ?? stopEvent
         currentEvent = nil
         let spool = currentSpool
         currentSpool = nil
@@ -738,7 +865,9 @@ final class MeetingController: ObservableObject {
                     userNotes: userNotes,
                     spool: spool,
                     diagnostics: diagnostics,
-                    screen: screen
+                    screen: screen,
+                    callSource: source,
+                    eventFoundAtStop: stopEvent != nil
                 )
                 handle(outcome: note, spool: spool, userNotes: userNotes, recovered: false)
             } catch {
@@ -796,7 +925,8 @@ final class MeetingController: ObservableObject {
                     userNotes: recoveredNotes,
                     spool: session,
                     diagnostics: meta.diagnostics?.last,
-                    screen: SpoolStore.readScreenObservations(session)
+                    screen: SpoolStore.readScreenObservations(session),
+                    callSource: meta.callSource
                 )
                 handle(outcome: note, spool: session, userNotes: recoveredNotes, recovered: true)
             } catch {
@@ -960,7 +1090,11 @@ final class MeetingController: ObservableObject {
         /// The capture's last device decision, for the silence warning.
         diagnostics: CaptureDiagnostics? = nil,
         /// What the call window showed, if an adapter read it (Spec 24).
-        screen: [ScreenObservation] = []
+        screen: [ScreenObservation] = [],
+        /// The detected call, for the title when there is no event (Spec 35).
+        callSource: String? = nil,
+        /// `event` was found only when the recording stopped (Spec 35).
+        eventFoundAtStop: Bool = false
     ) async throws -> NoteOutcome {
         // Transcribe + diarize (detached — CoreML work must not block main).
         // Parakeet v3 is shared with dictation's cache (no second copy of the
@@ -1028,35 +1162,58 @@ final class MeetingController: ObservableObject {
         var named = segments
         var labelRecords: [RecordingStore.SpeakerLabelRecord] = []
         var participants: [String] = []
+        var namingOutcome: SpeakerNameResolver.Outcome?
+        var screenNamed = 0
+        var openLabels = 0
         if !segments.isEmpty, !micSilent {
             let owner = SpeakerNameResolver.ownerNameTokens
             let fromScreen = ScreenNaming.apply(segments, observations: screen, recordingStart: startedAt, ownerTokens: owner)
             named = fromScreen.segments
             participants = fromScreen.participants
             labelRecords += fromScreen.names.map { .init(cluster: $0.key, name: $0.value, source: .screen) }
+            screenNamed = fromScreen.names.count
 
             let open = ScreenNaming.unnamedLabels(in: named)
+            openLabels = open.count
             if !open.isEmpty, DefaultsKey.speakerNamingEnabled.value() {
-                let mapping = await SpeakerNameResolver.resolve(
+                let resolved = await SpeakerNameResolver.resolveDetailed(
                     segments: named,
                     attendees: (event?.attendeeNames ?? []) + participants,
                     providerID: providerID,
                     recordingID: recordingID
                 )
                 let taken = Set(fromScreen.names.values.map { $0.lowercased() })
-                let usable = mapping.filter { open.contains($0.key) && !taken.contains($0.value.lowercased()) }
+                let usable = resolved.mapping.filter { open.contains($0.key) && !taken.contains($0.value.lowercased()) }
                 let applied = SpeakerNameResolver.validated(usable, in: named)
                 named = SpeakerNameResolver.applyMapping(named, mapping: applied)
                 labelRecords += applied.map { .init(cluster: $0.key, name: $0.value, source: .llm) }
+                namingOutcome = resolved.outcome
+                namingOutcome?.accepted = applied.count
             }
         }
+        let namingDiagnosis = NoteDiagnosis.naming(
+            hasTranscript: !segments.isEmpty,
+            micSilent: micSilent,
+            remoteLabels: SpeakerNameResolver.remoteLabels(in: segments).count,
+            screenNamed: screenNamed,
+            openLabels: openLabels,
+            enabled: DefaultsKey.speakerNamingEnabled.value(),
+            outcome: namingOutcome
+        )
+        log.notice("Sprecherbenennung: \(namingDiagnosis, privacy: .public)")
 
         let duration = Double(max(micSamples.count, systemSamples.count))
             / Double(PCMDownsampler.targetSampleRate)
         // No calendar event ⇒ the title is a fallback ("Meeting") that the model
         // may replace with a concise generated one.
         let titleIsAuto = (event == nil)
-        var finalTitle = event?.title ?? String(localized: "Meeting")
+        // Without an event, the call the recording belonged to names it until
+        // the model supplies a title: "Microsoft Teams · 10:03" says which
+        // meeting this was, "Meeting" said nothing (Spec 35).
+        var finalTitle = event?.title
+            ?? callSource.map { "\($0) · \(startedAt.formatted(date: .omitted, time: .shortened))" }
+            ?? String(localized: "Meeting")
+        let fallbackTitle = finalTitle
 
         var note = MarkdownProjector.Note(
             title: finalTitle,
@@ -1169,6 +1326,23 @@ final class MeetingController: ObservableObject {
             },
             labels: labelRecords
         )
+
+        let titleDiagnosis = NoteDiagnosis.title(
+            eventAtStart: event != nil && !eventFoundAtStop,
+            eventAtStop: eventFoundAtStop,
+            modelTitled: titleIsAuto && finalTitle != fallbackTitle,
+            callSource: callSource != nil,
+            calendarAccess: CalendarMonitor.hasFullAccess,
+            hasTranscript: !named.isEmpty,
+            summaryFailed: summaryError != nil
+        )
+        log.notice("Titel: \(titleDiagnosis, privacy: .public)")
+        if let spool {
+            SpoolStore.updateMeta(spool) {
+                $0.naming = namingDiagnosis
+                $0.titleSource = titleDiagnosis
+            }
+        }
 
         return NoteOutcome(
             url: fileURL,

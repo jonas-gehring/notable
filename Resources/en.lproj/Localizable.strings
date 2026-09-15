@@ -888,3 +888,13 @@
 "Bisherige Wahl" = "Previous choice";
 "Call-Fenster auslesen…" = "Read call window…";
 "zu kurz, um eine Stimme zu erkennen" = "too short to recognise a voice";
+"Kein Ton in der Aufnahme" = "No sound in the recording";
+"Seit %lld Minuten spricht niemand. Ohne Antwort endet die Aufnahme in zwei Minuten." = "Nobody has spoken for %lld minutes. Without an answer, the recording ends in two minutes.";
+"Aufnahme beenden" = "Stop recording";
+"Weiter aufnehmen" = "Keep recording";
+"Kein Ton seit Minuten — die Aufnahme endet bald, wenn niemand spricht." = "No sound for minutes — the recording ends soon unless someone speaks.";
+"Dein vollständiger Name" = "Your full name";
+"Keine Kalender gefunden." = "No calendars found.";
+"%lld heute" = "%lld today";
+"Kein Kalenderzugriff — Notable kann Meetings keinem Termin zuordnen." = "No calendar access — Notable cannot match meetings to events.";
+"Fehlt dein Arbeitskalender, füge das Konto unter Systemeinstellungen → Internetaccounts hinzu." = "If your work calendar is missing, add its account in System Settings → Internet Accounts.";

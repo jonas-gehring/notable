@@ -82,6 +82,40 @@ final class CalendarMonitor: ObservableObject {
         return (lhs.attendees?.count ?? 0) > (rhs.attendees?.count ?? 0)
     }
 
+    static var hasFullAccess: Bool {
+        EKEventStore.authorizationStatus(for: .event) == .fullAccess
+    }
+
+    struct VisibleCalendar: Identifiable, Sendable {
+        var id: String
+        var title: String
+        /// The account it syncs through ("iCloud", "Exchange", "Google", …).
+        var account: String
+        var eventsToday: Int
+    }
+
+    /// Every calendar Notable can see, with today's timed events in each
+    /// (Spec 35). nil without full access.
+    ///
+    /// 13 of 18 measured meetings matched no event, and every match came from
+    /// three calendars. Whether the work calendar reaches EventKit at all is a
+    /// question only this list answers — a calendar that lives solely in Outlook
+    /// or the Teams app does not exist for Notable.
+    func visibleCalendars(on date: Date = Date()) -> [VisibleCalendar]? {
+        guard Self.hasFullAccess else { return nil }
+        let dayStart = Calendar.current.startOfDay(for: date)
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? date
+        let events = store.events(matching: store.predicateForEvents(withStart: dayStart, end: dayEnd, calendars: nil))
+        let counts = Dictionary(grouping: events.filter { !$0.isAllDay }, by: { $0.calendar.calendarIdentifier })
+            .mapValues(\.count)
+        return store.calendars(for: .event)
+            .map {
+                VisibleCalendar(id: $0.calendarIdentifier, title: $0.title,
+                                account: $0.source?.title ?? "", eventsToday: counts[$0.calendarIdentifier] ?? 0)
+            }
+            .sorted { ($0.account, $0.title) < ($1.account, $1.title) }
+    }
+
     struct UpcomingEvent: Sendable {
         var title: String
         var startDate: Date

@@ -92,6 +92,10 @@ final class MeetingDetector: ObservableObject {
 
     var onMeetingStart: ((Candidate) -> Void)?
     var onMeetingEnd: (() -> Void)?
+    /// How long the far side of the running recording has been silent; nil when
+    /// nothing is recording or there is no system track (Spec 34 B). Injected
+    /// from `MeetingController.remoteSilentFor`.
+    var remoteSilentFor: () -> TimeInterval? = { nil }
     /// Only used by the legacy fallback path, where the microphone signal is
     /// global and our own capture would otherwise look like a meeting.
     var isOwnCaptureActive: () -> Bool = { false }
@@ -154,7 +158,7 @@ final class MeetingDetector: ObservableObject {
             candidate = Self.detectInCallCandidate(snapshot: snapshot)
             startSignal = candidate != nil
             if let active = activeCandidate {
-                stillActive = Self.isStillActive(active, snapshot: snapshot)
+                stillActive = Self.isStillActive(active, snapshot: snapshot, remoteSilentFor: remoteSilentFor())
             } else {
                 stillActive = candidate != nil
             }
@@ -235,19 +239,20 @@ final class MeetingDetector: ObservableObject {
     /// Dedicated apps may keep only the output stream (muted participant still
     /// hearing the others) and that counts as running. Browsers and Slack play
     /// audio all day long for unrelated reasons, so for them only the microphone
-    /// counts.
-    private static func isStillActive(_ candidate: Candidate, snapshot: AudioProcessSnapshot) -> Bool {
+    /// counts. An app holding nothing but its output counts only while the far
+    /// side is audible on our system track (Spec 34 B, `CallEndRule`).
+    private static func isStillActive(_ candidate: Candidate, snapshot: AudioProcessSnapshot, remoteSilentFor: TimeInterval?) -> Bool {
         guard !candidate.processBundleIDs.isEmpty else {
             // Placeholder candidate (no process known) — fall back to "is any
             // known meeting app still holding the mic".
             return detectInCallCandidate(snapshot: snapshot) != nil
         }
-        switch candidate.tier {
-        case .dedicated:
-            return snapshot.isActive(anyOf: candidate.processBundleIDs)
-        case .browser, .ambient:
-            return snapshot.inputEntry(anyOf: candidate.processBundleIDs) != nil
-        }
+        return CallEndRule.isStillActive(
+            tier: candidate.tier,
+            holdsInput: snapshot.inputEntry(anyOf: candidate.processBundleIDs) != nil,
+            holdsOutput: snapshot.isActive(anyOf: candidate.processBundleIDs),
+            remoteSilentFor: remoteSilentFor
+        )
     }
 
     // MARK: - Signals (legacy fallback)

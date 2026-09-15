@@ -31,7 +31,12 @@ enum SpeakerNameResolver {
     /// spoken — "Danke, Herr Hoffmann" — to the person saying it. Observed on
     /// one-sided recordings, and the resulting label is not a near miss but a
     /// straight inversion of who said what.
-    static var ownerNameTokens: Set<String> { nameTokens(in: NSFullUserName()) }
+    ///
+    /// The account name alone is not enough: macOS often knows only the first
+    /// name, so the surname comes from Settings (`DefaultsKey.ownerName`, Spec 35).
+    static var ownerNameTokens: Set<String> {
+        nameTokens(in: NSFullUserName()).union(nameTokens(in: DefaultsKey.ownerName.value()))
+    }
 
     /// Forms of address, which say nothing about *who* someone is.
     private static let honorifics: Set<String> = [
@@ -184,11 +189,39 @@ enum SpeakerNameResolver {
         providerID: String,
         recordingID: String? = nil
     ) async -> [String: String] {
+        await resolveDetailed(segments: segments, attendees: attendees,
+                              providerID: providerID, recordingID: recordingID).mapping
+    }
+
+    /// What a naming run did (Spec 35). Every branch of `resolve` used to end in
+    /// the same `[:]` — a provider error, a model with no names and a model whose
+    /// names all failed validation looked identical, and none of it was logged.
+    struct Outcome: Equatable, Sendable {
+        enum Result: Equatable, Sendable {
+            case noLabels
+            case emptyTranscript
+            case providerFailed(String)
+            case answered
+        }
+        var result: Result
+        /// Non-empty names the model proposed for labels in this transcript.
+        var proposed = 0
+        /// Names that survived validation (the caller may filter further).
+        var accepted = 0
+    }
+
+    /// `resolve`, with the outcome kept.
+    static func resolveDetailed(
+        segments: [MeetingTranscriptSegment],
+        attendees: [String],
+        providerID: String,
+        recordingID: String? = nil
+    ) async -> (mapping: [String: String], outcome: Outcome) {
         let labels = remoteLabels(in: segments)
-        guard !labels.isEmpty else { return [:] }
+        guard !labels.isEmpty else { return ([:], Outcome(result: .noLabels)) }
 
         let transcript = transcriptText(segments)
-        guard !transcript.isEmpty else { return [:] }
+        guard !transcript.isEmpty else { return ([:], Outcome(result: .emptyTranscript)) }
 
         let user = userPrompt(labels: labels, attendees: attendees, transcript: transcript)
         do {
@@ -199,9 +232,14 @@ enum SpeakerNameResolver {
                 raw.usage, provider: providerID,
                 purpose: .speakerNaming, recordingID: recordingID
             )
-            return validated(parseMapping(raw.text), in: segments)
+            let parsed = parseMapping(raw.text)
+            let proposed = parsed.filter {
+                labels.contains($0.key) && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            let mapping = validated(parsed, in: segments)
+            return (mapping, Outcome(result: .answered, proposed: proposed.count, accepted: mapping.count))
         } catch {
-            return [:]
+            return ([:], Outcome(result: .providerFailed(error.localizedDescription)))
         }
     }
 

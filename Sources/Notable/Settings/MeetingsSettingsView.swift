@@ -18,6 +18,7 @@ struct MeetingsSettingsView: View {
     @AppStorage(DefaultsKey.lastMeetingInputDevice.key) private var lastInputDevice = DefaultsKey.lastMeetingInputDevice.fallback
     @State private var inputDevices: [AudioDeviceInfo] = []
     @AppStorage(DefaultsKey.screenSpeakerRecognition.key) private var screenSpeakers = DefaultsKey.screenSpeakerRecognition.fallback
+    @AppStorage(DefaultsKey.ownerName.key) private var ownerName = DefaultsKey.ownerName.fallback
     @State private var probeMessage: String?
 
     /// Stufe 0 of Spec 24: one text dump of the running call's window.
@@ -71,6 +72,9 @@ struct MeetingsSettingsView: View {
                 Toggle("Sprecher anhand genannter Namen benennen", isOn: $speakerNaming)
                 // Spec 24: the call shows who takes part and who is speaking.
                 Toggle("Sprecher am Bildschirm erkennen", isOn: $screenSpeakers)
+                // Spec 35: macOS often knows only the first name, and then
+                // "Herr Gehring" is not recognised as the owner's own name.
+                TextField("Dein vollständiger Name", text: $ownerName, prompt: Text(verbatim: NSFullUserName()))
             } header: {
                 Text("Sprecher")
             } footer: {
@@ -142,6 +146,7 @@ struct MeetingsSettingsView: View {
                 }
             }
 
+            CalendarVisibilitySection()
             RememberedConsentSection()
         }
         .formStyle(.grouped)
@@ -156,6 +161,39 @@ struct MeetingsSettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             meetingHookPath = url.path
         }
+    }
+}
+
+/// Which calendars Notable sees, with today's events in each (Spec 35) — the
+/// question behind every note that matched no event. A calendar that lives only
+/// in Outlook or the Teams app never reaches EventKit and never appears here.
+private struct CalendarVisibilitySection: View {
+    @State private var calendars: [CalendarMonitor.VisibleCalendar]?
+
+    var body: some View {
+        Section {
+            if let calendars {
+                if calendars.isEmpty {
+                    Text("Keine Kalender gefunden.").foregroundStyle(.secondary)
+                }
+                ForEach(calendars) { calendar in
+                    LabeledContent {
+                        Text("\(calendar.eventsToday) heute")
+                    } label: {
+                        Text(verbatim: calendar.title)
+                        Text(verbatim: calendar.account)
+                    }
+                }
+            } else {
+                Text("Kein Kalenderzugriff — Notable kann Meetings keinem Termin zuordnen.")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Kalender")
+        } footer: {
+            Text("Fehlt dein Arbeitskalender, füge das Konto unter Systemeinstellungen → Internetaccounts hinzu.")
+        }
+        .onAppear { calendars = AppContainer.shared.calendar.visibleCalendars() }
     }
 }
 

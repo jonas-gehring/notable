@@ -65,6 +65,11 @@ enum DefaultsKey {
     static let autoRecordMeetings = DefaultsEntry(key: "autoRecordMeetings", fallback: true)
     static let notifyOnMeetingReady = DefaultsEntry(key: "notifyOnMeetingReady", fallback: true)
     static let speakerNamingEnabled = DefaultsEntry(key: "speakerNamingEnabled", fallback: true)
+    /// The account holder's full name, for telling their own name apart from a
+    /// remote speaker's (Spec 35). macOS often knows only the first name —
+    /// measured here, `NSFullUserName()` is "Jonas" — so "Herr Gehring" slipped
+    /// past `SpeakerNameResolver.isOwnerName`.
+    static let ownerName = DefaultsEntry(key: "ownerName", fallback: "")
     /// Read the call window for who takes part and who is speaking (Spec 24).
     /// On by default — decided 2026-09-11: Accessibility only, which Notable
     /// already holds for pasting, read-only, only during a recording the user

@@ -1,0 +1,87 @@
+import XCTest
+
+/// Spec 35: every silent exit of the speaker naming and the title has its own
+/// code, so the next meeting says which one it took.
+final class NoteDiagnosisNamingTests: XCTestCase {
+    private func naming(
+        hasTranscript: Bool = true, micSilent: Bool = false, remoteLabels: Int = 2,
+        screenNamed: Int = 0, openLabels: Int = 2, enabled: Bool = true,
+        outcome: SpeakerNameResolver.Outcome? = nil
+    ) -> String {
+        NoteDiagnosis.naming(hasTranscript: hasTranscript, micSilent: micSilent, remoteLabels: remoteLabels,
+                             screenNamed: screenNamed, openLabels: openLabels, enabled: enabled, outcome: outcome)
+    }
+
+    func testTheOrderOfTheExitsIsTheOrderOfTheCode() {
+        XCTAssertEqual(naming(hasTranscript: false), "keinTranskript")
+        XCTAssertEqual(naming(remoteLabels: 0), "keineGegenseite")
+        XCTAssertEqual(naming(micSilent: true), "mikrofonStumm")
+        XCTAssertEqual(naming(enabled: false), "ausgeschaltet")
+        XCTAssertEqual(naming(), "nichtVersucht")
+    }
+
+    func testTheProviderErrorIsKeptAndShortened() {
+        let long = String(repeating: "x", count: 500)
+        let code = naming(outcome: .init(result: .providerFailed(long)))
+        XCTAssertTrue(code.hasPrefix("anbieterFehler: "))
+        XCTAssertLessThanOrEqual(code.count, "anbieterFehler: ".count + 120)
+    }
+
+    func testNoNamesAndRejectedNamesAreDifferentFindings() {
+        XCTAssertEqual(naming(outcome: .init(result: .answered, proposed: 0, accepted: 0)), "modellOhneNamen (2 offen)")
+        XCTAssertEqual(naming(outcome: .init(result: .answered, proposed: 2, accepted: 0)), "verworfen: 2 vorgeschlagen, 0 übernommen")
+        XCTAssertEqual(naming(screenNamed: 1, openLabels: 1, outcome: .init(result: .answered, proposed: 1, accepted: 1)),
+                       "benannt: 2 von 2")
+    }
+
+    func testTheScreenNamingEverythingNeedsNoModel() {
+        XCTAssertEqual(naming(screenNamed: 2, openLabels: 0), "benannt: 2 von 2 (Bildschirm)")
+    }
+}
+
+final class NoteDiagnosisTitleTests: XCTestCase {
+    private func title(
+        eventAtStart: Bool = false, eventAtStop: Bool = false, modelTitled: Bool = false,
+        callSource: Bool = false, calendarAccess: Bool = true, hasTranscript: Bool = true, summaryFailed: Bool = false
+    ) -> String {
+        NoteDiagnosis.title(eventAtStart: eventAtStart, eventAtStop: eventAtStop, modelTitled: modelTitled,
+                            callSource: callSource, calendarAccess: calendarAccess,
+                            hasTranscript: hasTranscript, summaryFailed: summaryFailed)
+    }
+
+    func testWhereTheTitleCameFrom() {
+        XCTAssertEqual(title(eventAtStart: true), "kalender")
+        XCTAssertEqual(title(eventAtStop: true), "kalenderBeimStopp")
+        XCTAssertEqual(title(modelTitled: true), "modell")
+    }
+
+    /// "Meeting" on its own was the symptom; these are its causes.
+    func testTheFallbackNamesBothMissingSources() {
+        XCTAssertEqual(title(calendarAccess: false, hasTranscript: false), "fallback: keinKalenderzugriff, keinTranskript")
+        XCTAssertEqual(title(callSource: true, summaryFailed: true), "callQuelle: keinPassenderTermin, zusammenfassungFehlgeschlagen")
+        XCTAssertEqual(title(), "fallback: keinPassenderTermin, modellOhneTitel")
+    }
+}
+
+/// Spec 35: the account's first name is not enough to recognise the owner.
+final class OwnerNameTests: XCTestCase {
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: DefaultsKey.ownerName.key)
+        super.tearDown()
+    }
+
+    func testTheSurnameFromSettingsMakesHerrGehringTheOwner() {
+        UserDefaults.standard.set("Jonas Gehring", forKey: DefaultsKey.ownerName.key)
+        let tokens = SpeakerNameResolver.ownerNameTokens
+        XCTAssertTrue(SpeakerNameResolver.isOwnerName("Herr Gehring", ownerTokens: tokens))
+        XCTAssertFalse(SpeakerNameResolver.isOwnerName("Maria Wendler", ownerTokens: tokens))
+    }
+
+    func testMetaCarriesTheDiagnosis() throws {
+        let meta = SpoolStore.Meta(startedAt: Date(timeIntervalSinceReferenceDate: 0),
+                                   naming: "mikrofonStumm", titleSource: "kalender")
+        let decoded = try JSONDecoder().decode(SpoolStore.Meta.self, from: JSONEncoder().encode(meta))
+        XCTAssertEqual(decoded.naming, "mikrofonStumm")
+        XCTAssertEqual(decoded.titleSource, "kalender")
+    }
+}

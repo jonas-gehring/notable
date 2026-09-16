@@ -898,3 +898,4 @@
 "%lld heute" = "%lld today";
 "Kein Kalenderzugriff — Notable kann Meetings keinem Termin zuordnen." = "No calendar access — Notable cannot match meetings to events.";
 "Fehlt dein Arbeitskalender, füge das Konto unter Systemeinstellungen → Internetaccounts hinzu." = "If your work calendar is missing, add its account in System Settings → Internet Accounts.";
+"aus dem Kalender" = "from the calendar";

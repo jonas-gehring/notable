@@ -185,6 +185,8 @@ targets:
       - path: Sources/Notable/Meeting/CallEnd.swift
       # Why a note has no speaker names and where its title came from (Spec 35).
       - path: Sources/Notable/Meeting/NoteDiagnosis.swift
+      # The one-to-one rule: one remote voice, one invited guest (Spec 35).
+      - path: Sources/Notable/Meeting/AttendeeNaming.swift
       # Which microphone a recording opens, and the record of why (Spec 23).
       # SpoolStore.Meta carries the diagnostics, so both are needed here anyway.
       - path: Sources/Notable/Dictation/InputDevicePolicy.swift

@@ -18,6 +18,7 @@ enum NoteDiagnosis {
         micSilent: Bool,
         remoteLabels: Int,
         screenNamed: Int,
+        calendarNamed: Int = 0,
         openLabels: Int,
         enabled: Bool,
         outcome: SpeakerNameResolver.Outcome?
@@ -25,7 +26,8 @@ enum NoteDiagnosis {
         guard hasTranscript else { return "keinTranskript" }
         guard remoteLabels > 0 else { return "keineGegenseite" }
         if micSilent { return "mikrofonStumm" }
-        if openLabels == 0 { return "benannt: \(screenNamed) von \(remoteLabels) (Bildschirm)" }
+        let withoutModel = screenNamed + calendarNamed
+        if openLabels == 0 { return "benannt: \(withoutModel) von \(remoteLabels) (ohne Modell)" }
         guard enabled else { return "ausgeschaltet" }
         guard let outcome else { return "nichtVersucht" }
         switch outcome.result {
@@ -38,7 +40,7 @@ enum NoteDiagnosis {
         case .answered:
             if outcome.proposed == 0 { return "modellOhneNamen (\(openLabels) offen)" }
             if outcome.accepted == 0 { return "verworfen: \(outcome.proposed) vorgeschlagen, 0 übernommen" }
-            return "benannt: \(outcome.accepted + screenNamed) von \(remoteLabels)"
+            return "benannt: \(outcome.accepted + withoutModel) von \(remoteLabels)"
         }
     }
 

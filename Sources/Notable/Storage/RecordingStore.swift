@@ -101,6 +101,8 @@ actor RecordingStore {
         enum Source: String, Sendable {
             case llm
             case screen
+            /// The one invited guest of a one-to-one meeting (Spec 35).
+            case calendar
             case user
         }
 

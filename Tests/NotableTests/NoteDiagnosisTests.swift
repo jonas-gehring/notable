@@ -5,11 +5,19 @@ import XCTest
 final class NoteDiagnosisNamingTests: XCTestCase {
     private func naming(
         hasTranscript: Bool = true, micSilent: Bool = false, remoteLabels: Int = 2,
-        screenNamed: Int = 0, openLabels: Int = 2, enabled: Bool = true,
+        screenNamed: Int = 0, calendarNamed: Int = 0, openLabels: Int = 2, enabled: Bool = true,
         outcome: SpeakerNameResolver.Outcome? = nil
     ) -> String {
         NoteDiagnosis.naming(hasTranscript: hasTranscript, micSilent: micSilent, remoteLabels: remoteLabels,
-                             screenNamed: screenNamed, openLabels: openLabels, enabled: enabled, outcome: outcome)
+                             screenNamed: screenNamed, calendarNamed: calendarNamed, openLabels: openLabels,
+                             enabled: enabled, outcome: outcome)
+    }
+
+    /// The one-to-one rule names without the model (Spec 35).
+    func testTheCalendarCountsAsNamedWithoutTheModel() {
+        XCTAssertEqual(naming(remoteLabels: 1, calendarNamed: 1, openLabels: 0), "benannt: 1 von 1 (ohne Modell)")
+        XCTAssertEqual(naming(remoteLabels: 2, calendarNamed: 1, openLabels: 1,
+                              outcome: .init(result: .answered, proposed: 1, accepted: 1)), "benannt: 2 von 2")
     }
 
     func testTheOrderOfTheExitsIsTheOrderOfTheCode() {
@@ -35,7 +43,7 @@ final class NoteDiagnosisNamingTests: XCTestCase {
     }
 
     func testTheScreenNamingEverythingNeedsNoModel() {
-        XCTAssertEqual(naming(screenNamed: 2, openLabels: 0), "benannt: 2 von 2 (Bildschirm)")
+        XCTAssertEqual(naming(screenNamed: 2, openLabels: 0), "benannt: 2 von 2 (ohne Modell)")
     }
 }
 

@@ -59,9 +59,31 @@ vorgeschlagener und übernommener Namen); `resolve` bleibt als Hülle.
    Aufnahme noch einmal gefragt (Termin, der mehr als 5 min nach Aufnahmebeginn
    anfing).
 
+### 3.3 Nachtrag 2026-09-16 — der 1:1-Fall, gemessen und entschieden
+
+Das erste Meeting mit 1.3.0 (15.09., „Forschungszulage Review", 12 min) lief technisch
+sauber: Mikrofon 697 s, Systemspur 152 s, Zusammenfassung da, und die Benennung **wurde
+ausgeführt** (`llm_usage`: `speaker_naming`, 12:13:16). Trotzdem kein Name. Grund, aus
+den Daten rekonstruiert: Der Kalender lieferte als einzigen Gast `jana.schultze` — den
+linken Teil einer Adresse, den `CalendarMonitor` durchlässt, weil kein `@` darin steht.
+Im Transkript fällt „Schulze" zweimal, gesprochen vom **Nutzer** in der dritten Person,
+also kein Beleg dafür, wer spricht, und in anderer Schreibweise. Das Modell hat sich
+korrekt zurückgehalten.
+
+Entschieden am 2026-09-16: **genau eine große fremde Stimme + genau ein eingeladener
+Gast ⇒ diese Stimme trägt dessen Namen** (`OneToOneNaming`, pur). Wie bei Notion und
+Krisp. Die einzige Stelle, an der ein Name vergeben wird, ohne gesprochen worden zu
+sein — deshalb eng gefasst: nur große Cluster (Splitter und „Sprecher ?" zählen nicht),
+nur Labels, die der Bildschirm offenließ, nie der eigene Name, und `validated` prüft
+weiterhin Kollisionen. Zwei Stimmen oder zwei Gäste: nichts passiert.
+`AttendeeName.readable` macht aus `jana.schultze` „Jana Schultze"; was nicht klar wie
+`vorname.nachname` aussieht, bleibt unverändert. Herkunft in `speaker_labels`:
+`calendar`, im Sprecher-Dialog „aus dem Kalender", vom Nutzer jederzeit überschreibbar.
+
 ## 4. Nicht Teil dieser Spec
 
-- Namen ohne wörtliche Nennung vergeben — entscheidet die Messung.
+- Namen aus dem Gespräch ohne wörtliche Nennung vergeben — entscheidet die Messung.
+  (Der 1:1-Fall oben ist die Ausnahme: dort belegt der Kalender, nicht der Text.)
 - Adapter für Teams/Zoom/Meet — hängen weiter an Spec 24 Stufe 0 im echten Call.
 
 ## 5. Abnahme

@@ -160,6 +160,7 @@ struct SpeakerEditorView: View {
     private static func sourceLabel(_ source: RecordingStore.SpeakerLabel.Source) -> String {
         switch source {
         case .screen: String(localized: "vom Bildschirm")
+        case .calendar: String(localized: "aus dem Kalender")
         case .llm: String(localized: "aus dem Gespräch")
         case .user: String(localized: "von dir")
         }

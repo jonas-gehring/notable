@@ -1164,6 +1164,7 @@ final class MeetingController: ObservableObject {
         var participants: [String] = []
         var namingOutcome: SpeakerNameResolver.Outcome?
         var screenNamed = 0
+        var calendarNamed = 0
         var openLabels = 0
         if !segments.isEmpty, !micSilent {
             let owner = SpeakerNameResolver.ownerNameTokens
@@ -1172,6 +1173,30 @@ final class MeetingController: ObservableObject {
             participants = fromScreen.participants
             labelRecords += fromScreen.names.map { .init(cluster: $0.key, name: $0.value, source: .screen) }
             screenNamed = fromScreen.names.count
+
+            // One remote voice, one invited guest: that voice is that person
+            // (Spec 35). Before the model, because the calendar attests it and
+            // the transcript often does not — and only onto a label the screen
+            // left open.
+            let remoteSeconds = named.reduce(into: [String: TimeInterval]()) { totals, segment in
+                guard let cluster = segment.cluster, cluster != SpeakerNameResolver.micSpeakerLabel,
+                      cluster != SpeakerNameResolver.unknownSpeakerLabel else { return }
+                totals[cluster, default: 0] += max(0, segment.end - segment.start)
+            }
+            if let oneToOne = OneToOneNaming.name(
+                attendees: event?.attendeeNames ?? [],
+                openLabels: ScreenNaming.unnamedLabels(in: named),
+                largeClusters: SpeakerClusterCleanup.largeLabels(remoteSeconds).sorted(),
+                ownerTokens: owner
+            ) {
+                // Not verbatim-checked: the point of this rule is that the name
+                // was never spoken. Everything else `validated` refuses — the
+                // owner's own name, a collision — still applies.
+                let mapping = SpeakerNameResolver.validated([oneToOne.label: oneToOne.name], in: named, requireVerbatim: false)
+                named = SpeakerNameResolver.applyMapping(named, mapping: mapping, requireVerbatim: false)
+                labelRecords += mapping.map { .init(cluster: $0.key, name: $0.value, source: .calendar) }
+                calendarNamed = mapping.count
+            }
 
             let open = ScreenNaming.unnamedLabels(in: named)
             openLabels = open.count
@@ -1196,6 +1221,7 @@ final class MeetingController: ObservableObject {
             micSilent: micSilent,
             remoteLabels: SpeakerNameResolver.remoteLabels(in: segments).count,
             screenNamed: screenNamed,
+            calendarNamed: calendarNamed,
             openLabels: openLabels,
             enabled: DefaultsKey.speakerNamingEnabled.value(),
             outcome: namingOutcome

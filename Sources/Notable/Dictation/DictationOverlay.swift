@@ -1,6 +1,24 @@
 import AppKit
 import SwiftUI
 
+/// Reduce Motion for the HUD, read live and in exactly one place.
+///
+/// A closure, and `nonisolated(unsafe)`, for one reason: a test cannot toggle a
+/// system setting, and "with Reduce Motion nothing animates" is a rule worth a
+/// test rather than a screenshot (Spec 37 §3.1). It is written only from a
+/// test and read only on the main actor.
+///
+/// Live, not a `static let`: that was the Spec 30 bug — the value was taken at
+/// launch, so changing the setting did nothing until a restart.
+enum HUDMotion {
+    /// Set only by tests; `nil` means "ask the system".
+    nonisolated(unsafe) static var override: Bool?
+
+    static var isReduced: Bool {
+        override ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+}
+
 /// Transient dictation HUD: a borderless, non-activating panel near the
 /// bottom of the screen. It must never steal focus — becoming key would
 /// break the paste-into-focused-field mechanic.
@@ -18,6 +36,10 @@ final class DictationOverlayController {
         /// A spoken command running on the selection (Spec 32 Stufe 2).
         case commanding
         case loadingModel
+        /// What arrived (Spec 37 §3.2). Shown **after** the paste and after the
+        /// save: the word count is a display, never a step in the dictation.
+        /// A milestone replaces the number and stands a little longer.
+        case done(words: Int, milestone: String?)
         case error(String)
         /// Something worth saying that is not a failure — the model swap, for
         /// instance. Same transient behaviour, different icon, because dressing
@@ -47,6 +69,15 @@ final class DictationOverlayController {
         @Published var alignment: Alignment = .center
         /// The second line of a failure: what to do (Spec 30 §3.6).
         @Published var hint: String?
+        /// Bumped every time the capsule comes back from nothing, so the view
+        /// can grow it out of the middle. A *state* change inside a visible
+        /// capsule must not re-grow it — that would be a switch again, not an
+        /// object (Spec 37 §3.2).
+        @Published var appearance = 0
+        /// True while an abort is leaving: the capsule shrinks to the height of
+        /// the line instead of fading, which is the only way the HUD can say
+        /// afterwards that the words are gone rather than in the field.
+        @Published var departing = false
         /// Where the capsule sits in the panel (top-left origin), for the mouse
         /// tracking that lets only the capsule take a click (Spec 30 §3.9). Not
         /// published: it changes with every layout, and nothing draws it.
@@ -76,11 +107,7 @@ final class DictationOverlayController {
         set { model.cancel = newValue }
     }
 
-    /// Read live: a `static let` kept the value from launch, so changing the
-    /// system setting did nothing until a restart.
-    private static var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    }
+    private static var reduceMotion: Bool { HUDMotion.isReduced }
     /// The style the current panel was built for. A change swaps the hosted view,
     /// so switching the setting takes effect on the next dictation without a
     /// restart.
@@ -124,6 +151,8 @@ final class DictationOverlayController {
         let panel = ensurePanel(style: style)
         position(panel, style: style)
         let alreadyShown = panel.isVisible && panel.alphaValue > 0.99
+        model.departing = false
+        if !alreadyShown { model.appearance &+= 1 }
         panel.orderFrontRegardless() // never makeKey
         updateMouseTracking(style: style, state: state)
         // Appears like an object, not like a switch (Spec 30 §3.2). A state
@@ -134,9 +163,25 @@ final class DictationOverlayController {
         }
         panel.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = Theme.Motion.appearSeconds
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 1
+        }
+    }
+
+    /// The success moment (Spec 37 §3.2).
+    ///
+    /// Called after `Paster.insert` **and** after the save — the 700 ms are
+    /// display time, not waiting time, and nothing in the dictation path waits
+    /// for them. With the HUD set to "Aus" this shows nothing, like every other
+    /// non-failure state.
+    func flashDone(_ moment: DictationPipeline.SuccessMoment) {
+        show(.done(words: moment.words, milestone: moment.milestone))
+        let seconds = moment.milestone == nil ? Theme.Motion.doneSeconds : Theme.Motion.milestoneSeconds
+        flashHideTask = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            hide()
         }
     }
 
@@ -236,7 +281,17 @@ final class DictationOverlayController {
         }
     }
 
-    func hide() {
+    /// How the capsule leaves (Spec 37 §3.2).
+    ///
+    /// An abort has to look different from a success, because by the time the
+    /// HUD is gone the difference — text in the field or no text at all — is
+    /// no longer visible anywhere else.
+    enum Departure {
+        case fade
+        case shrink
+    }
+
+    func hide(_ departure: Departure = .fade) {
         delayedShowTask?.cancel()
         visibilityGeneration += 1
         model.level = 0
@@ -245,19 +300,22 @@ final class DictationOverlayController {
         stopMouseTracking()
         guard let panel, panel.isVisible else { return }
         guard !Self.reduceMotion else {
+            model.departing = false
             panel.orderOut(nil)
             return
         }
+        model.departing = departure == .shrink
         let generation = visibilityGeneration
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
+            context.duration = Theme.Motion.disappearSeconds
             panel.animator().alphaValue = 0
         }
         // Ordered out after the fade, unless something was shown meanwhile.
         Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(170))
+            try? await Task.sleep(for: .milliseconds(Int(Theme.Motion.disappearSeconds * 1000) + 10))
             guard let self, self.visibilityGeneration == generation else { return }
             self.panel?.orderOut(nil)
+            self.model.departing = false
         }
     }
 
@@ -368,8 +426,6 @@ final class DictationOverlayController {
 private struct DictationOverlayView: View {
     @ObservedObject var model: DictationOverlayController.Model
 
-    private static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-
     var body: some View {
         pill
             .padding(.trailing, model.alignment == .trailing ? NotchGeometry.rightEdgePadding : 0)
@@ -380,6 +436,14 @@ private struct DictationOverlayView: View {
     }
 
     private static let space = "overlay"
+
+    /// Grown out of the middle. Starts true, because the first `appearance`
+    /// bump arrives before this view is ever on screen.
+    @State private var grown = true
+    /// The slow 1,0 ↔ 1,02 of a hands-free recording listening to silence.
+    @State private var breathing = false
+
+    private var reduceMotion: Bool { HUDMotion.isReduced }
 
     private var pill: some View {
         HStack(spacing: 9) {
@@ -413,6 +477,10 @@ private struct DictationOverlayView: View {
                 .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
         }
         .shadow(color: .black.opacity(0.30), radius: 10, y: 3)
+        // The level, made *visible* rather than merely drawn (Spec 37 §3.2):
+        // the waveform says what was heard, this says how loudly. Capped at
+        // 0,25 — a HUD that glows brightly is a HUD nobody wants twice.
+        .shadow(color: Theme.accent.opacity(glow), radius: 14)
         .background {
             GeometryReader { proxy in
                 let frame = proxy.frame(in: .named(Self.space))
@@ -421,8 +489,51 @@ private struct DictationOverlayView: View {
                     .onChange(of: frame) { _, new in model.capsuleFrame = new }
             }
         }
-        .animation(Self.reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.85),
-                   value: model.locked)
+        .scaleEffect(x: scale.width, y: scale.height, anchor: .center)
+        .animation(reduceMotion ? nil : Theme.Motion.state, value: model.locked)
+        .animation(reduceMotion ? nil : Theme.Motion.disappear, value: model.departing)
+        .animation(reduceMotion ? nil : Theme.Motion.state, value: model.state.kindID)
+        .onChange(of: model.appearance) { _, _ in grow() }
+        .onChange(of: breathes) { _, on in breathe(on) }
+    }
+
+    /// One scale for three things that never happen at once: growing in,
+    /// breathing, and shrinking away on an abort.
+    private var scale: CGSize {
+        if model.departing { return CGSize(width: 1, height: 0.2) }
+        let value: CGFloat = grown ? (breathing ? 1.02 : 1) : 0.8
+        return CGSize(width: value, height: value)
+    }
+
+    /// 0 → 0,25, following the same gain curve as the waveform so the two say
+    /// the same thing about the same sound.
+    private var glow: Double {
+        guard case .recording = model.state, !reduceMotion else { return 0 }
+        return min(1, pow(Double(max(0, model.level)) * 8, 0.7)) * 0.25
+    }
+
+    /// Only a *fixed* recording in silence breathes — a held key needs no sign
+    /// of life, the hand on it is one.
+    private var breathes: Bool {
+        guard case .recording = model.state else { return false }
+        return model.locked && model.level < 0.02
+    }
+
+    private func grow() {
+        guard !reduceMotion else {
+            grown = true
+            return
+        }
+        grown = false
+        withAnimation(Theme.Motion.state) { grown = true }
+    }
+
+    private func breathe(_ on: Bool) {
+        guard on, !reduceMotion else {
+            withAnimation(nil) { breathing = false }
+            return
+        }
+        withAnimation(Theme.Motion.breathe) { breathing = true }
     }
 
     @ViewBuilder
@@ -446,23 +557,44 @@ private struct DictationOverlayView: View {
                     .foregroundStyle(.secondary)
             }
         case .transcribing:
-            ProgressView()
-                .controlSize(.small)
+            // The waveform fell to a line on release and pulses while the words
+            // are being made. The spinner is gone: a second, rounder thing
+            // spinning next to a waveform was two objects for one wait.
+            waitingLine()
             Text("Transkribiere…").font(.callout.weight(.medium))
         case .enhancing:
-            Image(systemName: "wand.and.stars")
+            // Orange, because this is the one state in which the text is not on
+            // this Mac any more. The colour says it before the sentence does.
+            waitingLine(tint: .orange)
+            Image(systemName: "wand.and.stars").foregroundStyle(.orange)
             // Names the fact, not the vendor: which provider gets the text is a
             // setting, and a wrong vendor name here would be worse than none.
             Text("Verbessere… (Text verlässt das Gerät)").font(.callout.weight(.medium))
         case .loadingModel:
+            // Not a pulsing line: a download is a wait with a cause, and the
+            // cause is worth its own icon.
             Image(systemName: "arrow.down.circle.fill")
             Text("Modell lädt — Diktat folgt…").font(.callout.weight(.medium))
         case .formatting:
+            waitingLine()
             Image(systemName: "text.badge.checkmark")
             Text("Formatiere…").font(.callout.weight(.medium))
         case .commanding:
+            waitingLine()
             Image(systemName: "wand.and.rays")
             Text("Führe Befehl aus…").font(.callout.weight(.medium))
+        case .done(let words, let milestone):
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Theme.success)
+                .symbolEffect(.bounce, options: .nonRepeating, value: model.appearance)
+            if let milestone {
+                Text(milestone).font(.callout.weight(.medium)).lineLimit(1)
+            } else {
+                Text("\(UsageMetrics.integer(words)) Wörter")
+                    .font(.callout.weight(.medium))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
         case .error(let message):
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
@@ -471,6 +603,12 @@ private struct DictationOverlayView: View {
             Image(systemName: "checkmark.circle.fill")
             messageStack(message)
         }
+    }
+
+    /// The fallen waveform: eighteen capsules at their floor height, pulsing
+    /// for as long as something is still running.
+    private func waitingLine(tint: Color = .primary) -> some View {
+        WaveformView(level: 0, tint: tint, flat: true, pulsing: true)
     }
 
     /// What happened, and — when there is something to do — what to do.
@@ -491,6 +629,8 @@ private struct DictationOverlayView: View {
         case .formatting: String(localized: "Formatiere")
         case .commanding: String(localized: "Führe Befehl aus")
         case .loadingModel: String(localized: "Modell lädt")
+        case .done(let words, let milestone):
+            milestone ?? String(localized: "\(UsageMetrics.integer(words)) Wörter eingefügt")
         case .error(let message), .notice(let message):
             [message, model.hint].compactMap { $0 }.joined(separator: " ")
         }
@@ -510,25 +650,47 @@ struct WaveformView: View {
     var barCount = 18
     var maxHeight: CGFloat = 18
     var tint: Color = .primary
+    /// Collapsed to a line (Spec 37 §3.2). The eighteen capsules fall to their
+    /// floor height in one movement when the key is released, instead of the
+    /// waveform being swapped for a spinner.
+    var flat = false
+    /// The line breathes while the words are still being made — the same
+    /// signal as the spinner it replaced, in the shape that was already there.
+    var pulsing = false
 
     @State private var history: [CGFloat] = []
+    @State private var pulse = false
 
-    private static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    private var reduceMotion: Bool { HUDMotion.isReduced }
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(0 ..< barCount, id: \.self) { index in
-                let value = index < history.count ? history[index] : 0
+                let value = flat ? 0 : (index < history.count ? history[index] : 0)
                 Capsule()
                     .fill(tint.opacity(0.30 + 0.70 * value))
                     .frame(width: 2.5, height: max(2.5, value * maxHeight))
             }
         }
         .frame(height: maxHeight)
-        .animation(Self.reduceMotion ? nil : .easeOut(duration: 0.04), value: history)
-        .onAppear { if history.isEmpty { history = Array(repeating: 0, count: barCount) } }
+        .opacity(pulse ? 0.45 : 1)
+        .animation(reduceMotion ? nil : Theme.Motion.level, value: history)
+        .animation(reduceMotion ? nil : Theme.Motion.state, value: flat)
+        .onAppear {
+            if history.isEmpty { history = Array(repeating: 0, count: barCount) }
+            startPulse(pulsing)
+        }
         .onChange(of: level) { _, new in push(new) }
+        .onChange(of: pulsing) { _, on in startPulse(on) }
         .accessibilityHidden(true)
+    }
+
+    private func startPulse(_ on: Bool) {
+        guard on, !reduceMotion else {
+            withAnimation(nil) { pulse = false }
+            return
+        }
+        withAnimation(Theme.Motion.breathe) { pulse = true }
     }
 
     private func push(_ raw: Float) {
@@ -628,6 +790,10 @@ struct NotchOverlayView: View {
         case .formatting: return String(localized: "Formatiere…")
         case .commanding: return String(localized: "Führe Befehl aus…")
         case .loadingModel: return String(localized: "Modell lädt…")
+        case .done(let words, let milestone):
+            // The notch has no room for a symbol *and* a sentence, so the words
+            // carry the moment here.
+            return milestone ?? String(localized: "✓ \(UsageMetrics.integer(words)) Wörter")
         case .error(let message): return message
         case .notice(let message): return message
         }
@@ -665,7 +831,26 @@ extension DictationOverlayController.OverlayState {
     var isCancellable: Bool {
         switch self {
         case .recording, .transcribing, .enhancing, .formatting, .commanding, .loadingModel: true
-        case .error, .notice: false
+        case .done, .error, .notice: false
+        }
+    }
+
+    /// One value per *kind* of state, for `.animation(_:value:)`.
+    ///
+    /// Deliberately without the payload: a growing partial transcript or a
+    /// changing word count must not restart the capsule's shape change, which
+    /// is what an `Equatable` on the whole state would do.
+    var kindID: String {
+        switch self {
+        case .recording: "recording"
+        case .transcribing: "transcribing"
+        case .enhancing: "enhancing"
+        case .formatting: "formatting"
+        case .commanding: "commanding"
+        case .loadingModel: "loadingModel"
+        case .done: "done"
+        case .error: "error"
+        case .notice: "notice"
         }
     }
 }

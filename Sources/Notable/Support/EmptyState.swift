@@ -10,6 +10,9 @@ struct EmptyState: View {
     let title: LocalizedStringKey
     var systemImage: String?
 
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     init(_ title: LocalizedStringKey, systemImage: String? = nil) {
         self.title = title
         self.systemImage = systemImage
@@ -24,6 +27,11 @@ struct EmptyState: View {
             }
         }
         .foregroundStyle(.secondary)
+        // Fades in rather than appearing mid-layout: a list that has just
+        // finished loading and a list that is empty look the same for one
+        // frame, and the jump is what made the difference invisible.
+        .opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(reduceMotion ? nil : Theme.Motion.appear) { shown = true } }
     }
 }
 
@@ -37,6 +45,8 @@ struct DownloadProgressRow: View {
     let fraction: Double?
     var caption: LocalizedStringKey?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// The one wording, also for the menu, which cannot draw a bar.
     static func percent(_ fraction: Double) -> String {
         String(localized: "Lädt: \(Int((fraction * 100).rounded())) %")
@@ -45,7 +55,10 @@ struct DownloadProgressRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             if let fraction {
+                // A download reports in jumps (one per chunk); the bar moves
+                // between them instead of teleporting.
                 ProgressView(value: fraction)
+                    .animation(reduceMotion ? nil : Theme.Motion.gentle, value: fraction)
                 Text(Self.percent(fraction))
                     .font(.caption)
                     .foregroundStyle(.secondary)

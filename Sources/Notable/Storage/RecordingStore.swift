@@ -98,11 +98,17 @@ actor RecordingStore {
 
     /// One speaker of a meeting, as the correction dialog lists it.
     struct SpeakerLabel: Sendable, Equatable, Identifiable {
-        enum Source: String, Sendable {
+        /// `CaseIterable` on purpose: the `CHECK` in `speaker_labels` lists these
+        /// by hand, and when `calendar` was added here and not there, the first
+        /// meeting that used it would have rolled back (migration 7). A test
+        /// writes every case.
+        enum Source: String, Sendable, CaseIterable {
             case llm
             case screen
             /// The one invited guest of a one-to-one meeting (Spec 35).
             case calendar
+            /// Recognised by voice from an earlier, confirmed naming (Spec 36).
+            case voice
             case user
         }
 
@@ -369,11 +375,26 @@ actor RecordingStore {
 
     /// Names a speaker; an empty name makes them anonymous again (their minted
     /// label). One transaction; `"Ich"` stays fixed.
-    func renameSpeaker(recordingID: String, cluster: String, to name: String) throws {
+    ///
+    /// - Parameter learnsVoice: whether the correction also moves the voice
+    ///   profile (Spec 36 §3.3) — the user's correction *is* the training data.
+    ///   Defaults to the switch, and is passed explicitly by tests so they never
+    ///   depend on it.
+    func renameSpeaker(
+        recordingID: String,
+        cluster: String,
+        to name: String,
+        learnsVoice: Bool = DefaultsKey.voiceProfilesEnabled.value()
+    ) throws {
         guard cluster != SpeakerNameResolver.micSpeakerLabel, cluster != SpeakerNameResolver.unknownSpeakerLabel else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let connection = try db()
         try connection.transaction {
+            let previous = try connection.queryOne(
+                "SELECT name FROM speaker_labels WHERE recording_id = ?1 AND cluster = ?2",
+                bind: { $0.bind(1, recordingID); $0.bind(2, cluster) },
+                row: { $0.string(0) }
+            ) ?? nil
             try adoptLegacyCluster(cluster, recordingID: recordingID, connection: connection)
             try connection.run("UPDATE segments SET speaker = ?3 WHERE recording_id = ?1 AND cluster = ?2") { s in
                 s.bind(1, recordingID)
@@ -382,6 +403,10 @@ actor RecordingStore {
             }
             try recordSpeakerLabels([SpeakerLabelRecord(cluster: cluster, name: trimmed.isEmpty ? nil : trimmed, source: .user)],
                                     recordingID: recordingID)
+            if learnsVoice, previous != trimmed {
+                try relearnVoice(recordingID: recordingID, cluster: cluster,
+                                 name: trimmed.isEmpty ? nil : trimmed, connection: connection)
+            }
         }
     }
 
@@ -421,6 +446,169 @@ actor RecordingStore {
         try connection.run("UPDATE segments SET cluster = speaker WHERE recording_id = ?1 AND cluster IS NULL AND speaker = ?2") { s in
             s.bind(1, recordingID)
             s.bind(2, label)
+        }
+    }
+
+    // MARK: - Voice profiles (Spec 36, Stufe 3)
+
+    /// Every remembered voice, most recently confirmed first.
+    ///
+    /// Biometric data of other people, so: only written while the switch is on,
+    /// never leaves this database, listed and removable in Settings. Nothing
+    /// here can be turned back into audio — but that is a reason to keep it
+    /// carefully, not a reason to be casual about it.
+    func voiceProfiles() throws -> [VoiceProfiles.Profile] {
+        try db().query(
+            "SELECT id, name, embedding, meetings, created_at, updated_at FROM voice_profiles ORDER BY updated_at DESC",
+            row: { s in
+                VoiceProfiles.Profile(
+                    id: s.text(0),
+                    name: s.text(1),
+                    sum: VoiceProfiles.decode(s.data(2)),
+                    meetings: s.int(3) ?? 1,
+                    createdAt: s.date(4) ?? Date(timeIntervalSince1970: 0),
+                    updatedAt: s.date(5) ?? Date(timeIntervalSince1970: 0)
+                )
+            }
+        )
+    }
+
+    /// "Vergessen". The notes stay exactly as they are: a name that was applied
+    /// is a fact about that meeting, and forgetting the voice is not a reason to
+    /// rewrite it. Only the meetings' own contributions to *this* profile are
+    /// released, so nothing keeps pointing at a profile that is gone.
+    func forgetVoiceProfile(id: String) throws {
+        let connection = try db()
+        try connection.transaction {
+            try connection.run("DELETE FROM voice_profiles WHERE id = ?1") { $0.bind(1, id) }
+            try connection.run("UPDATE meeting_voices SET learned_for = NULL WHERE learned_for = ?1") { $0.bind(1, id) }
+        }
+    }
+
+    /// Keeps a meeting's cluster centroids, and lets the confirmed ones into the
+    /// profiles (§3.3).
+    ///
+    /// - Parameters:
+    ///   - centroids: cluster → centroid, large remote clusters only.
+    ///   - confirmed: cluster → name for the assignments that are *evidence* —
+    ///     the user, the screen with a trusted self-check, the calendar's
+    ///     one-to-one. Never the model, and never a voice match: a source that
+    ///     confirms itself would drift a profile onto whoever it first hit.
+    func rememberVoices(
+        _ centroids: [String: [Float]],
+        seconds: [String: TimeInterval] = [:],
+        confirmed: [String: String] = [:],
+        recordingID: String,
+        at now: Date = Date()
+    ) throws {
+        guard !centroids.isEmpty else { return }
+        let connection = try db()
+        try connection.transaction {
+            for (cluster, vector) in centroids.sorted(by: { $0.key < $1.key }) {
+                guard let unit = SpeakerClusterCleanup.normalized(vector) else { continue }
+                var learnedFor: String?
+                if let name = confirmed[cluster] {
+                    let existing = try profile(named: name, connection: connection)
+                    if let updated = VoiceProfiles.adding(unit, to: existing, name: name, at: now) {
+                        try upsert(updated, connection: connection)
+                        learnedFor = updated.id
+                    }
+                }
+                try connection.run("""
+                INSERT INTO meeting_voices (recording_id, cluster, embedding, dimension, seconds, learned_for)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                ON CONFLICT(recording_id, cluster) DO UPDATE SET
+                    embedding = excluded.embedding, dimension = excluded.dimension,
+                    seconds = excluded.seconds, learned_for = excluded.learned_for
+                """) { s in
+                    s.bind(1, recordingID)
+                    s.bind(2, cluster)
+                    s.bind(3, VoiceProfiles.encode(unit))
+                    s.bind(4, unit.count)
+                    s.bind(5, seconds[cluster] ?? 0)
+                    s.bind(6, learnedFor)
+                }
+            }
+        }
+    }
+
+    /// The correction that holds: this cluster leaves the profile it was learned
+    /// for and joins the one the user named.
+    ///
+    /// It subtracts **only what was actually added** — `learned_for` says which
+    /// profile that was, and it is NULL for a name that came from the model or
+    /// from a voice match. Retracting a contribution that was never made would
+    /// bend a profile away from the person it belongs to, which is the one thing
+    /// a correction must not do.
+    private func relearnVoice(
+        recordingID: String, cluster: String, name: String?, connection: SQLiteConnection, at now: Date = Date()
+    ) throws {
+        let row = try connection.queryOne(
+            "SELECT embedding, learned_for FROM meeting_voices WHERE recording_id = ?1 AND cluster = ?2",
+            bind: { $0.bind(1, recordingID); $0.bind(2, cluster) },
+            row: { (vector: VoiceProfiles.decode($0.data(0)), learnedFor: $0.string(1)) }
+        )
+        guard let row, !row.vector.isEmpty else { return }
+
+        if let learnedFor = row.learnedFor, learnedFor != name.map(VoiceProfiles.identifier) {
+            if let wrong = try profile(id: learnedFor, connection: connection) {
+                if let reduced = VoiceProfiles.removing(row.vector, from: wrong, at: now) {
+                    try upsert(reduced, connection: connection)
+                } else {
+                    try connection.run("DELETE FROM voice_profiles WHERE id = ?1") { $0.bind(1, learnedFor) }
+                }
+            }
+        }
+
+        var learnedFor: String?
+        if let name, !name.isEmpty {
+            let existing = try profile(named: name, connection: connection)
+            if let updated = VoiceProfiles.adding(row.vector, to: existing, name: name, at: now) {
+                try upsert(updated, connection: connection)
+                learnedFor = updated.id
+            }
+        }
+        try connection.run("UPDATE meeting_voices SET learned_for = ?3 WHERE recording_id = ?1 AND cluster = ?2") { s in
+            s.bind(1, recordingID)
+            s.bind(2, cluster)
+            s.bind(3, learnedFor)
+        }
+    }
+
+    private func profile(named name: String, connection: SQLiteConnection) throws -> VoiceProfiles.Profile? {
+        try profile(id: VoiceProfiles.identifier(for: name), connection: connection)
+    }
+
+    private func profile(id: String, connection: SQLiteConnection) throws -> VoiceProfiles.Profile? {
+        try connection.queryOne(
+            "SELECT id, name, embedding, meetings, created_at, updated_at FROM voice_profiles WHERE id = ?1",
+            bind: { $0.bind(1, id) },
+            row: { s in
+                VoiceProfiles.Profile(
+                    id: s.text(0), name: s.text(1), sum: VoiceProfiles.decode(s.data(2)),
+                    meetings: s.int(3) ?? 1,
+                    createdAt: s.date(4) ?? Date(timeIntervalSince1970: 0),
+                    updatedAt: s.date(5) ?? Date(timeIntervalSince1970: 0)
+                )
+            }
+        )
+    }
+
+    private func upsert(_ profile: VoiceProfiles.Profile, connection: SQLiteConnection) throws {
+        try connection.run("""
+        INSERT INTO voice_profiles (id, name, embedding, dimension, meetings, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name, embedding = excluded.embedding, dimension = excluded.dimension,
+            meetings = excluded.meetings, updated_at = excluded.updated_at
+        """) { s in
+            s.bind(1, profile.id)
+            s.bind(2, profile.name)
+            s.bind(3, VoiceProfiles.encode(profile.sum))
+            s.bind(4, profile.sum.count)
+            s.bind(5, profile.meetings)
+            s.bind(6, profile.createdAt)
+            s.bind(7, profile.updatedAt)
         }
     }
 

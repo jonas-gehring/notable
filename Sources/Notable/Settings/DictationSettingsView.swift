@@ -2,8 +2,10 @@ import SwiftUI
 
 // MARK: - Diktat
 
-/// The page in the order of Spec 33 §3.2: key, recognition, text, dictionary and
-/// building blocks, display and sound, and the repair tools folded away.
+/// *Wie diktiere ich?* (Spec 38 §3.2), in the order Taste · Erkennung · Text ·
+/// KI · Wörterbuch & Bausteine · Anzeige & Ton · Erweitert. The first three fit
+/// above the fold of a 620-pt window, which is the acceptance test: the first
+/// screenful answers the question people actually come here with.
 struct DictationSettingsView: View {
     @EnvironmentObject private var dictation: DictationController
     @AppStorage(HotkeySpec.storageKey) private var hotkeyRaw = HotkeySpec.rightOption.rawValue
@@ -14,22 +16,40 @@ struct DictationSettingsView: View {
     @AppStorage(ASREngineID.storageKey) private var engineRaw = ASREngineID.parakeetV3.rawValue
     @AppStorage(WhisperModelSize.storageKey) private var whisperSizeRaw = WhisperModelSize.base.rawValue
     @AppStorage(OverlayStyle.storageKey) private var overlayStyleRaw = OverlayStyle.bottom.rawValue
-    @AppStorage(DefaultsKey.bootstrapModel.key) private var bootstrapModel = DefaultsKey.bootstrapModel.fallback
     @AppStorage(MediaInterrupter.Key.pausePlayback) private var pauseMedia = false
     @AppStorage(MediaInterrupter.Key.muteOutput) private var muteOutput = false
+    /// Spec 37 built the moment and its key, and left it without a switch —
+    /// this is the section it belongs on.
+    @AppStorage(DefaultsKey.showWordCountAfterDictation.key)
+    private var showWordCount = DefaultsKey.showWordCountAfterDictation.fallback
     @State private var dictionary: [String: String] = PersonalDictionary.load()
     @State private var suggestions: [String: String] = PersonalDictionary.learnedSuggestions()
     @State private var newWrong = ""
     @State private var newRight = ""
 
-    /// Hands-free on silence as a switch (Spec 33 §3.1 rule 3); the number sits
-    /// under "Erweitert" for whoever wants another one.
+    /// Hands-free on silence as a switch (Spec 33 §3.1 rule 3). The number
+    /// behind it is fixed at 45 s since Spec 38 — a stepper for it was a
+    /// control over something the code can decide — but a value set by an
+    /// earlier build is still read and still wins.
     private var endsOnSilence: Binding<Bool> {
         Binding(
             get: { dictationIdleTimeout > 0 },
             set: { on in
                 let standard = DefaultsKey.dictationIdleTimeout.fallback
-                dictationIdleTimeout = on ? (standard > 0 ? standard : 30) : 0
+                dictationIdleTimeout = on ? (standard > 0 ? standard : 45) : 0
+            }
+        )
+    }
+
+    /// Two toggles, one question (§3.1 rule 2). The pure half of the mapping —
+    /// which position means which key pair, and what an impossible pair reads
+    /// as — is `DictationAudioMode`, tested without a window.
+    private var audioMode: Binding<DictationAudioMode> {
+        Binding(
+            get: { DictationAudioMode(pausePlayback: pauseMedia, muteOutput: muteOutput) },
+            set: { mode in
+                pauseMedia = mode.pausePlayback
+                muteOutput = mode.muteOutput
             }
         )
     }
@@ -52,7 +72,7 @@ struct DictationSettingsView: View {
             } header: {
                 Text("Taste")
             } footer: {
-                Text("Halten = Push-to-talk, kurzer Tap = freihändig.")
+                Text("Halten = Push-to-talk, kurzer Tap = freihändig; nach 45 s Stille ist Schluss.")
             }
 
             Section {
@@ -86,9 +106,7 @@ struct DictationSettingsView: View {
 
             TextPreparationSection()
 
-            LocalPolishSection()
-
-            EnhancementSettingsSection(onHotkeyChange: { dictation.hotkeyChanged() })
+            AISection(onHotkeyChange: { dictation.hotkeyChanged() })
 
             Section {
                 if dictionary.isEmpty {
@@ -173,26 +191,28 @@ struct DictationSettingsView: View {
                         Text(style.label).tag(style.rawValue)
                     }
                 }
+                Toggle("Wortzahl nach dem Diktat anzeigen", isOn: $showWordCount)
                 Toggle("Töne bei Aufnahme-Start und -Ende", isOn: $dictationSounds)
-                Toggle("Wiedergabe während des Diktats pausieren", isOn: $pauseMedia)
-                Toggle("Systemton während des Diktats stummschalten", isOn: $muteOutput)
+                Picker("Während des Diktats", selection: audioMode) {
+                    ForEach(DictationAudioMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
             } header: {
                 Text("Anzeige & Ton")
+            } footer: {
+                Text("Pausieren und Stummschalten greifen außerhalb von Notable — deshalb tut in der Vorgabe keines von beiden etwas.")
             }
 
-            // Repair tools and a measurement, one level down (Spec 33 §3.1).
+            // Repair tools, a consent and a measurement, one level down
+            // (Spec 33 §3.1) — the one folded group on this page.
             Section {
                 DisclosureGroup("Erweitert") {
                     Picker("Einfügemethode", selection: $pasteMethodRaw) {
                         Text("Zwischenablage (⌘V, Standard)").tag("pasteboard")
                         Text("Tastatureingabe simulieren").tag("typing")
                     }
-                    Toggle("Beim ersten Start ein kleines Modell vorschalten", isOn: $bootstrapModel)
-                    if dictationIdleTimeout > 0 {
-                        Stepper(value: $dictationIdleTimeout, in: 15...120, step: 15) {
-                            Text("Freihändig nach \(Int(dictationIdleTimeout)) s Stille beenden")
-                        }
-                    }
+                    TargetTextRows()
                     if let latency = dictation.lastLatencyMillis {
                         LabeledContent(
                             String(localized: "Letzte Latenz (Loslassen → Einfügen)"),

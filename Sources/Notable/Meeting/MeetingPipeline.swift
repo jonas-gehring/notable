@@ -150,6 +150,36 @@ enum MeetingPipeline {
         transcriber: any TranscriptionEngine,
         expectedSpeakers: Int? = nil
     ) async throws -> [MeetingTranscriptSegment] {
+        try await processDetailed(
+            micSamples: micSamples, systemSamples: systemSamples,
+            transcriber: transcriber, expectedSpeakers: expectedSpeakers
+        ).segments
+    }
+
+    /// What one meeting's audio became — and what its voices sounded like.
+    ///
+    /// The centroids used to die with the diarization (Spec 24 §1.2 noted the
+    /// embeddings being thrown away; Stufe 1 rescued them only for the length
+    /// of the cleanup). Spec 36 needs them one step further out: a profile is
+    /// the centroid of a large cluster, and it has to survive the pipeline to
+    /// be stored. `process` stays as the shell for every caller that only wants
+    /// the transcript — the same arrangement as `resolve`/`resolveDetailed`.
+    struct Outcome: Sendable {
+        var segments: [MeetingTranscriptSegment]
+        /// Displayed cluster label ("Sprecher 1") → centroid. `"Sprecher ?"` is
+        /// not in here: it may be several people, so its mean is nobody.
+        var voices: [String: [Float]] = [:]
+        /// Speech seconds per cluster, so a caller can tell a large cluster
+        /// from a splinter without walking the transcript again.
+        var seconds: [String: TimeInterval] = [:]
+    }
+
+    static func processDetailed(
+        micSamples: [Float],
+        systemSamples: [Float],
+        transcriber: any TranscriptionEngine,
+        expectedSpeakers: Int? = nil
+    ) async throws -> Outcome {
         let sampleRate = PCMDownsampler.targetSampleRate
 
         // One VAD manager for both tracks — it was being loaded twice.
@@ -169,11 +199,20 @@ enum MeetingPipeline {
         // into a single speaker, while the compacted signal separates them
         // cleanly. So VAD first, diarize speech only, then map back.
         var systemSegments: [(String, TimeInterval, TimeInterval)] = []
+        var voices: [String: [Float]] = [:]
+        var seconds: [String: TimeInterval] = [:]
         if !systemSamples.isEmpty, let vad {
             let diarized = try await diarizeSystemTrack(systemSamples, vad: vad, expectedSpeakers: expectedSpeakers)
             systemSegments = diarized.cleaned.flatMap { segment in
                 mapToOriginal(start: segment.start, end: segment.end, regions: diarized.regions)
                     .map { (segment.label, $0.start, $0.end) }
+            }
+            // Under the label the note shows, not the diarizer's bare number.
+            for (label, vector) in SpeakerClusterCleanup.centroids(of: diarized.cleaned) {
+                voices["Sprecher \(label)"] = vector
+            }
+            for (label, total) in SpeakerClusterCleanup.totals(diarized.cleaned) {
+                seconds["Sprecher \(label)"] = total
             }
         }
 
@@ -202,7 +241,7 @@ enum MeetingPipeline {
                 cluster: spec.speaker
             ))
         }
-        return transcript
+        return Outcome(segments: transcript, voices: voices, seconds: seconds)
     }
 
     /// The system track, VAD-compacted, diarized, and cleaned of splinters

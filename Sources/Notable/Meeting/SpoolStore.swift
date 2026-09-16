@@ -25,9 +25,13 @@ enum SpoolStore {
         /// `NoteDiagnosis` codes (Spec 35).
         var naming: String? = nil
         var titleSource: String? = nil
+        /// What the call window contributed, or why it did not (Spec 36 §3.1) —
+        /// `NoteDiagnosis.screen`. Lenient like every field above it.
+        var screen: String? = nil
 
         fileprivate enum CodingKeys: String, CodingKey {
-            case startedAt, eventTitle, eventID, diagnostics, startMode, callSource, endReason, naming, titleSource
+            case startedAt, eventTitle, eventID, diagnostics, startMode, callSource, endReason
+            case naming, titleSource, screen
         }
     }
 
@@ -215,6 +219,29 @@ enum SpoolStore {
     /// reprocessed automatically.
     static var archiveURL: URL { baseURL.deletingLastPathComponent().appendingPathComponent("spool-archive", isDirectory: true) }
 
+    /// Every archived session with its meta — how the speaker dialog finds the
+    /// audio belonging to a note (Spec 36 §3.2). Sessions whose meta cannot be
+    /// read are skipped: without `startedAt` nothing can be matched to them.
+    static func archived(base: URL = SpoolStore.archiveURL) -> [(session: Session, meta: Meta)] {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: base, includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return [] }
+        return entries.compactMap { directory in
+            let session = Session(directory: directory)
+            guard let data = try? Data(contentsOf: session.metaURL),
+                  let meta = try? JSONDecoder().decode(Meta.self, from: data)
+            else { return nil }
+            return (session, meta)
+        }
+    }
+
+    /// The note this session produced, as recorded by ``markNoteWritten``.
+    static func noteWrittenPath(_ session: Session) -> String? {
+        guard let data = try? Data(contentsOf: session.doneURL), let path = String(data: data, encoding: .utf8),
+              !path.isEmpty else { return nil }
+        return path
+    }
+
     static func archive(_ session: Session) {
         try? FileManager.default.createDirectory(at: archiveURL, withIntermediateDirectories: true)
         let destination = archiveURL.appendingPathComponent(session.directory.lastPathComponent)
@@ -245,5 +272,6 @@ extension SpoolStore.Meta {
         endReason = try? container.decodeIfPresent(String.self, forKey: .endReason)
         naming = try? container.decodeIfPresent(String.self, forKey: .naming)
         titleSource = try? container.decodeIfPresent(String.self, forKey: .titleSource)
+        screen = try? container.decodeIfPresent(String.self, forKey: .screen)
     }
 }

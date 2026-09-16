@@ -1,0 +1,35 @@
+# Spec 36 §3.4 — Grundwahrheit für die Schwelle der Stimmprofile.
+#
+# Die Frage ist nicht, ob Embeddings Stimmen trennen — das tut die Diarisierung
+# schon —, sondern ob dieselbe Stimme ÜBER Meetings hinweg näher bei sich bleibt
+# als bei anderen: anderes Headset, anderer Codec, Teams heute und Zoom morgen.
+# Dafür braucht der Test von Hand vergebene Namen.
+#
+# So wird die Tabelle gefüllt:
+#
+#   1. NOTABLE_REPLAY=1 xcodebuild … -only-testing:NotableTests/MeetingReplayTests
+#      druckt je archiviertem Meeting die Label-Statistik, z. B.
+#      "REPLAY FB7B1C…  nachher: 1: 1159 s (118), 2: 245 s (26), ?: 3 s (6)".
+#   2. Im Sprecher-Dialog (Notizen → Sprecher) die Hörprobe ▶ benutzen und
+#      notieren, wer "1", wer "2" ist. Dafür ist sie da.
+#   3. Hier eine Zeile je großem Cluster eintragen:
+#
+#        Meeting-Präfix,Cluster,Name
+#
+#      Das Meeting-Präfix sind die ersten Zeichen des Archiv-Ordners (so viele,
+#      dass es eindeutig ist), der Cluster ist das blanke Label aus der Statistik
+#      ("1", "2" — nicht "Sprecher 1"), der Name ist frei wählbar und muss nur
+#      über Meetings hinweg gleich geschrieben sein.
+#
+# Etwa 15 Cluster mit den 3–4 Kollegen, die am häufigsten vorkommen, reichen.
+# "Ich" und "?" gehören NICHT hierher: die Mikrofonspur ist per Konstruktion der
+# Nutzer, und hinter "?" können mehrere Menschen stehen.
+#
+# Beispiel (auskommentiert, damit der Test ohne echte Zeilen übersprungen wird):
+#
+#   FB7B1C,1,Anna Weber
+#   FB7B1C,2,Ben Kraus
+#   B64A2D,1,Anna Weber
+#
+# Gebaut wird Stufe 3 nur, wenn die Verteilungen sich bei einer Schwelle mit
+# höchstens 5 % falschen Treffern trennen — der Test druckt sie aus.

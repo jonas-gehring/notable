@@ -47,6 +47,14 @@ final class NotificationCenterService: NSObject {
         case keep = "meeting.silence.keep"
     }
 
+    /// "Sprecher benennen…" on a note that found no names (Spec 36 §3.2). The
+    /// dialog exists, and it was reachable only by finding the note in the list
+    /// and pressing a toolbar button — at a moment when the meeting is over and
+    /// nobody is looking for it.
+    enum SpeakerAction: String {
+        case name = "meeting.speakers"
+    }
+
     /// Called at most once per consent notification, on the main actor.
     var onConsentAction: ((Action) -> Void)?
     /// "Einfügen" on an improved dictation. The text is already on the clipboard;
@@ -58,6 +66,11 @@ final class NotificationCenterService: NSObject {
     var onInstallUpdateNow: (() -> Void)?
     /// "Aufnahme beenden" / "Weiter aufnehmen" on a recording gone silent.
     var onMeetingSilenceAction: ((SilenceAction) -> Void)?
+    /// A click on the weekly review, which leads to the window the numbers came
+    /// from (Spec 37 §3.4).
+    var onOpenStats: (() -> Void)?
+    /// "Sprecher benennen…" on a finished note, with that recording's id.
+    var onNameSpeakers: ((String) -> Void)?
 
     private(set) var isAuthorized = false
     /// Cached so the (synchronous) permissions UI can show it without awaiting.
@@ -100,6 +113,15 @@ final class NotificationCenterService: NSObject {
             intentIdentifiers: [],
             options: []
         )
+        // Same notification, one button more — offered only when the note has
+        // unnamed speakers, so the button is never there without something to do.
+        let readyWithSpeakers = UNNotificationCategory(
+            identifier: Category.meetingReady.rawValue + ".speakers",
+            actions: [UNNotificationAction(identifier: SpeakerAction.name.rawValue,
+                                           title: String(localized: "Sprecher benennen…"), options: [])],
+            intentIdentifiers: [],
+            options: []
+        )
         // No `.foreground`, like everything else here: pulling Notable forward
         // would move focus away from the field the text is meant for.
         let enhanced = UNNotificationCategory(
@@ -123,7 +145,7 @@ final class NotificationCenterService: NSObject {
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([consent, consentNoRemember, ready, enhanced, nudge, silence])
+        center.setNotificationCategories([consent, consentNoRemember, ready, readyWithSpeakers, enhanced, nudge, silence])
     }
 
     /// Asks once; afterwards just refreshes the cached status. The cached flag is
@@ -168,12 +190,20 @@ final class NotificationCenterService: NSObject {
         post(id: id, content: content)
     }
 
-    func postMeetingReady(id: String, title: String, body: String, noteURL: URL?) {
+    /// - Parameter speakersFor: the recording whose speakers are still
+    ///   unnamed — its id travels in the payload so the button can open the
+    ///   dialog for exactly this meeting.
+    func postMeetingReady(id: String, title: String, body: String, noteURL: URL?, speakersFor recordingID: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.categoryIdentifier = Category.meetingReady.rawValue
-        if let noteURL { content.userInfo = ["notePath": noteURL.path] }
+        content.categoryIdentifier = recordingID == nil
+            ? Category.meetingReady.rawValue
+            : Category.meetingReady.rawValue + ".speakers"
+        var info: [String: String] = [:]
+        if let noteURL { info["notePath"] = noteURL.path }
+        if let recordingID { info["recordingID"] = recordingID }
+        content.userInfo = info
         post(id: id, content: content)
     }
 
@@ -234,6 +264,21 @@ final class NotificationCenterService: NSObject {
         return post(id: "update.nudge.\(version)", content: content)
     }
 
+    /// Once a week, on a Monday: what the past week actually came to
+    /// (Spec 37 §3.4). No category and no action — a click opens the statistics
+    /// window, where the same numbers stand with their charts.
+    ///
+    /// Returns whether it was posted, like every other one here: the caller
+    /// records "said this week" only when something was actually said.
+    @discardableResult
+    func postWeeklyRecap(_ recap: WeeklyRecap) -> Bool {
+        let content = UNMutableNotificationContent()
+        content.title = recap.title
+        content.body = recap.body
+        content.userInfo = ["openWindow": "stats"]
+        return post(id: "weekly.recap", content: content)
+    }
+
     func withdraw(id: String) {
         if pendingConsentID == id { pendingConsentID = nil }
         let center = UNUserNotificationCenter.current()
@@ -269,9 +314,26 @@ final class NotificationCenterService: NSObject {
 
     // MARK: - Handling
 
-    fileprivate func handle(actionID: String, requestID: String, notePath: String?, settingsPane: String?) {
+    fileprivate func handle(
+        actionID: String,
+        requestID: String,
+        notePath: String?,
+        settingsPane: String?,
+        openWindow: String?,
+        recordingID: String? = nil
+    ) {
+        // Before the note path: this is a button, and the note behind it opens
+        // by clicking the notification itself.
+        if let recordingID, actionID == SpeakerAction.name.rawValue {
+            onNameSpeakers?(recordingID)
+            return
+        }
         if let notePath, actionID == UNNotificationDefaultActionIdentifier {
             NSWorkspace.shared.open(URL(fileURLWithPath: notePath))
+            return
+        }
+        if openWindow == "stats", actionID == UNNotificationDefaultActionIdentifier {
+            onOpenStats?()
             return
         }
         if actionID == DictationAction.paste.rawValue {
@@ -331,9 +393,12 @@ extension NotificationCenterService: UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         let notePath = userInfo["notePath"] as? String
         let settingsPane = userInfo["settingsPane"] as? String
+        let openWindow = userInfo["openWindow"] as? String
+        let recordingID = userInfo["recordingID"] as? String
         await MainActor.run {
             NotificationCenterService.shared.handle(
-                actionID: actionID, requestID: requestID, notePath: notePath, settingsPane: settingsPane
+                actionID: actionID, requestID: requestID, notePath: notePath,
+                settingsPane: settingsPane, openWindow: openWindow, recordingID: recordingID
             )
         }
     }

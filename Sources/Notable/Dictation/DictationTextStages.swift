@@ -181,11 +181,51 @@ enum DictationTextStages {
                 polisher: text.polisher,
                 polishMs: text.polishMs
             )
+            // Keeps the lifetime counts milestones are measured against in step
+            // with what was just written (Spec 37 §3.5) — in memory, because the
+            // moment has to be decided *at* the moment and not a database
+            // round-trip later.
+            UsageMoments.shared.dictationSaved(
+                words: UsageMetrics.wordCount(text.toPaste),
+                seconds: job.duration,
+                at: job.startedAt
+            )
             return true
         } catch {
             log.error("Diktat nicht gespeichert: \(error.localizedDescription, privacy: .public)")
             return false
         }
+    }
+
+    /// What the HUD says once the text is in the field and the row is written
+    /// (Spec 37 §3.2).
+    ///
+    /// **After the paste and after the save, never before or between them.**
+    /// The measured stretch ends at `Paster.insert`; nothing here runs on it,
+    /// and the 700 ms it asks for are display time.
+    ///
+    /// Nothing is shown when something else is already speaking: a notice from
+    /// a stage that fell back, a save that failed, or a recording that has
+    /// started since. One message at a time — a ✓ over a warning would cancel
+    /// the warning out.
+    static func successMoment(
+        _ text: Text,
+        job: DictationJob,
+        pasted: Bool,
+        saved: Bool,
+        isCapturing: Bool
+    ) -> DictationPipeline.SuccessMoment? {
+        guard pasted, saved, !isCapturing, text.notice == nil, job.notice == nil else { return nil }
+        // Asked before the milestone is taken: with the moment switched off, a
+        // milestone must stay unconsumed rather than be silently used up.
+        let showWordCount = DefaultsKey.showWordCountAfterDictation.value()
+        guard showWordCount else { return nil }
+        return DictationPipeline.afterPaste(
+            words: UsageMetrics.wordCount(text.toPaste),
+            pasted: pasted,
+            showWordCount: showWordCount,
+            milestone: UsageMoments.shared.takeMilestone()
+        )
     }
 
     static func milliseconds(from start: ContinuousClock.Instant, to end: ContinuousClock.Instant) -> Int {

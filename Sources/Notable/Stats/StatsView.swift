@@ -39,6 +39,15 @@ final class StatsModel: ObservableObject {
     @Published private(set) var textStages: [(polisher: String, count: Int)] = []
     @Published private(set) var polishLatency: UsageMetrics.LatencyStats?
     @Published private(set) var streak = 0
+    // Spec 37 — personal bests, the streak's own history, the year as a grid,
+    // and the one sentence that compares speaking with typing. All of it out of
+    // the same rows, computed here rather than fetched again.
+    @Published private(set) var records: [UsageMetrics.Record] = []
+    @Published private(set) var longestStreak = 0
+    @Published private(set) var yearGrid: [[UsageMetrics.DayCell]] = []
+    @Published private(set) var speedFactor: Double?
+    @Published private(set) var milestoneProgress: Milestones.Progress?
+    @Published private(set) var reachedMilestones: [Milestone] = []
 
     private var rows: [UsageRow] = []
     private var llmRows: [LLMUsageRow] = []
@@ -96,10 +105,25 @@ final class StatsModel: ObservableObject {
         wordsPerMinute = UsageMetrics.wordsPerMinute(rows)
         textStages = UsageMetrics.polisherShares(rows)
         polishLatency = UsageMetrics.polishLatency(rows)
-        streak = UsageMetrics.streak(
-            UsageMetrics.buckets(rows, by: .day, calendar: calendar, typingWPM: typingWPM),
-            today: now,
-            calendar: calendar)
+        let days = UsageMetrics.buckets(rows, by: .day, calendar: calendar, typingWPM: typingWPM)
+        streak = UsageMetrics.streak(days, today: now, calendar: calendar)
+        longestStreak = UsageMetrics.longestStreak(days, calendar: calendar).days
+        // "Neu" means: broken inside the period on screen. The same interval the
+        // headline numbers use, so the band can never contradict them.
+        records = UsageMetrics.records(
+            rows, calendar: calendar, typingWPM: typingWPM,
+            newSince: calendar.dateInterval(of: component, for: now))
+        yearGrid = granularity == .year
+            ? UsageMetrics.yearGrid(days, calendar: calendar, endingAt: now)
+            : []
+        speedFactor = UsageMetrics.speedFactor(wordsPerMinute: wordsPerMinute, typingWPM: typingWPM)
+
+        // Counted here rather than read from `UsageMoments`: this view has every
+        // row in memory anyway, and a window that opens before the launch scan
+        // has finished would otherwise show a milestone bar built on zeros.
+        let counts = MilestoneCounts(totals: allTotals, streak: streak)
+        milestoneProgress = Milestones.next(counts)
+        reachedMilestones = Milestones.reached(counts)
     }
 
     /// The calendar the detail cards label their axes with — the same one the
@@ -122,18 +146,39 @@ struct StatsView: View {
     @AppStorage(DefaultsKey.typingWPM.key) private var typingWPM = DefaultsKey.typingWPM.fallback
     @State private var granularity: Granularity = .week
     @State private var showDetails = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The hero number counts up from zero when the window opens, and morphs
+    /// when the period changes. With Reduce Motion it simply stands there.
+    @State private var shownSaved: TimeInterval = 0
+    /// 0 → 1: how much of the sparkline has been drawn.
+    @State private var drawn: CGFloat = 0
+    /// The tiles arrive one after the other, 40 ms apart.
+    @State private var tilesIn = false
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            // `Spacing.xl` between the groups, `.m` inside them — the token was
+            // defined in Spec 33 and used nowhere until here.
+            VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                 header
                 if model.isEmpty {
                     emptyState
                 } else {
-                    hero
-                    tiles
-                    wordsChart
-                    meetingsChart
+                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                        hero
+                        tiles
+                    }
+                    recordsGroup
+                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                        // A year of days says more than five bars, three of
+                        // which are empty (Spec 37 §3.3).
+                        if granularity == .year {
+                            YearGridCard(grid: model.yearGrid, calendar: model.displayCalendar)
+                        } else {
+                            wordsChart
+                        }
+                        meetingsChart
+                    }
                     details
                 }
                 typingSpeedControl
@@ -154,11 +199,45 @@ struct StatsView: View {
 
     private func reload() async {
         await model.load()
-        recompute()
+        model.recompute(granularity: granularity, typingWPM: typingWPM, span: granularity.chartSpan)
+        settle(redrawing: true)
     }
 
     private func recompute() {
         model.recompute(granularity: granularity, typingWPM: typingWPM, span: granularity.chartSpan)
+        settle(redrawing: false)
+    }
+
+    /// Lets the numbers arrive. `redrawing` is the first sight of the window —
+    /// the line draws itself from the left and the tiles come in; a period
+    /// change afterwards only moves the numbers, because redrawing everything
+    /// on every click of the picker would be a fidget, not an animation.
+    private func settle(redrawing: Bool) {
+        guard !reduceMotion else {
+            shownSaved = model.periodTotals.savedSeconds
+            drawn = 1
+            tilesIn = true
+            return
+        }
+        if redrawing { drawn = 0 }
+        withAnimation(Theme.Motion.gentle) {
+            shownSaved = model.periodTotals.savedSeconds
+            drawn = 1
+            tilesIn = true
+        }
+    }
+
+    /// Above "Details" on purpose: the details answer questions, these two
+    /// answer none — they are the reason to open the window at all.
+    private var recordsGroup: some View {
+        HStack(alignment: .top, spacing: Theme.Spacing.m) {
+            RecordsCard(
+                records: model.records,
+                progress: model.milestoneProgress,
+                reached: model.reachedMilestones)
+            StreakCard(current: model.streak, longest: model.longestStreak)
+                .frame(width: 190)
+        }
     }
 
     // MARK: Header — title plus the one filter row, scoping everything below it
@@ -221,20 +300,29 @@ struct StatsView: View {
                         .foregroundStyle(Theme.textSubtle)
                     // Proportional figures on purpose: tabular digits look loose at
                     // display size (they are for columns that must align).
-                    Text(Self.duration(model.periodTotals.savedSeconds))
+                    Text(Self.duration(shownSaved))
                         .font(Theme.Typography.hero)
                         .foregroundStyle(Theme.textEmphasis)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
+                        .contentTransition(.numericText())
                     DeltaChip(
                         delta: UsageMetrics.delta(
                             current: model.periodTotals.savedSeconds,
                             previous: model.previousTotals.savedSeconds),
                         baseline: granularity.baselineLabel)
+                    speedLine
                 }
                 Spacer(minLength: 0)
                 savedSparkline
                     .frame(width: 200, height: 62)
+                    // Draws itself from the left. Swift Charts has no trim, so
+                    // the mask is the line's own progress.
+                    .mask(alignment: .leading) {
+                        GeometryReader { proxy in
+                            Rectangle().frame(width: proxy.size.width * drawn)
+                        }
+                    }
             }
             Divider().overlay(Theme.border)
             HStack(spacing: 6) {
@@ -266,6 +354,22 @@ struct StatsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1))
+    }
+
+    /// Both halves of this already existed: the measured speaking rate and the
+    /// typing speed the user set. Change the stepper at the bottom of the
+    /// window and this number moves — which is the only way to see what the
+    /// assumption behind every "gespart" actually does.
+    @ViewBuilder
+    private var speedLine: some View {
+        if let factor = model.speedFactor {
+            Text("\(UsageMetrics.factor(factor))× schneller als Tippen")
+                .font(.callout)
+                .foregroundStyle(Theme.textSubtle)
+                .contentTransition(.numericText())
+                .help("Gesprochene Wörter je Minute Aufnahme gegen \(Int(typingWPM)) WPM Tippen.")
+                .animation(reduceMotion ? nil : Theme.Motion.gentle, value: factor)
+        }
     }
 
     private var sinceSuffix: String {
@@ -309,8 +413,18 @@ struct StatsView: View {
 
     // MARK: Stat tiles — period value, delta, lifetime as the caption
 
+    /// One tile, arriving `index` steps after the first.
+    private func staggered(_ index: Int, @ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .opacity(tilesIn ? 1 : 0)
+            .animation(
+                reduceMotion ? nil : Theme.Motion.appear(delay: Double(index) * Theme.Motion.stagger),
+                value: tilesIn)
+    }
+
     private var tiles: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: Theme.Spacing.m)], spacing: Theme.Spacing.m) {
+            staggered(0) {
             StatTile(
                 icon: "text.word.spacing",
                 caption: String(localized: "Wörter diktiert"),
@@ -320,6 +434,8 @@ struct StatsView: View {
                     previous: Double(model.previousTotals.dictationWords)),
                 baseline: granularity.baselineLabel,
                 footnote: String(localized: "insgesamt \(Self.integer(model.allTotals.dictationWords))"))
+            }
+            staggered(1) {
             StatTile(
                 icon: "waveform",
                 caption: String(localized: "Diktate"),
@@ -331,6 +447,8 @@ struct StatsView: View {
                 footnote: model.allTotals.dictationCount > 0
                     ? String(localized: "⌀ \(Self.duration(model.allTotals.dictationSeconds / Double(model.allTotals.dictationCount)))")
                     : String(localized: "insgesamt 0"))
+            }
+            staggered(2) {
             StatTile(
                 icon: "person.2.wave.2",
                 caption: String(localized: "Meetings"),
@@ -340,9 +458,11 @@ struct StatsView: View {
                     previous: Double(model.previousTotals.meetingCount)),
                 baseline: granularity.baselineLabel,
                 footnote: String(localized: "\(Self.duration(model.periodTotals.meetingSeconds)) aufgezeichnet"))
+            }
             // Only once something has actually been summarized: a tile reading
             // "0 Tokens" says nothing, and old databases have no rows at all.
             if !model.allLLM.isEmpty {
+                staggered(3) {
                 StatTile(
                     icon: "sparkles",
                     caption: String(localized: "KI-Tokens"),
@@ -352,6 +472,7 @@ struct StatsView: View {
                         previous: Double(model.previousLLM.tokens)),
                     baseline: granularity.baselineLabel,
                     footnote: llmFootnote)
+                }
             }
         }
     }
@@ -546,6 +667,8 @@ private struct DeltaChip: View {
     let delta: Double?
     var baseline: String?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         if let delta, delta != 0 {
             let up = delta > 0
@@ -555,6 +678,8 @@ private struct DeltaChip: View {
                     .font(.caption2.weight(.bold))
                 Text(percent(delta))
                     .monospacedDigit()
+                    .contentTransition(.numericText(countsDown: delta < 0))
+                    .animation(reduceMotion ? nil : Theme.Motion.gentle, value: delta)
                 if let baseline {
                     Text(baseline)
                         .foregroundStyle(Theme.textSubtle)
@@ -598,6 +723,7 @@ private struct BucketChart: View {
     let value: (UsageBucket) -> Int
 
     @State private var hovered: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hoveredBucket: UsageBucket? {
         hovered.flatMap { id in buckets.first { $0.id == id } }
@@ -702,7 +828,9 @@ private struct BucketChart: View {
                     }
             }
         }
-        .animation(.easeOut(duration: 0.12), value: hovered)
+        .animation(reduceMotion ? nil : Theme.Motion.appear, value: hovered)
+        // Tag → Woche → Monat morphs the bars instead of swapping the picture.
+        .animation(reduceMotion ? nil : Theme.Motion.gentle, value: buckets)
     }
 
     /// Nearest bucket to the cursor's x — a bar's hit area is its whole slot, not the

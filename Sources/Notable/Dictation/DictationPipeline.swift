@@ -137,6 +137,41 @@ enum DictationPipeline {
         return .paste
     }
 
+    // MARK: - After the paste (Spec 37 §3.2)
+
+    /// What the HUD says once the text is in the field.
+    ///
+    /// Carries no duration on purpose: how long it stands is a display decision
+    /// and lives with the panel that shows it.
+    struct SuccessMoment: Equatable, Sendable {
+        let words: Int
+        /// The milestone sentence, when one fell with this dictation. It
+        /// replaces the word count rather than joining it — two things to read
+        /// in 700 ms is one too many.
+        var milestone: String?
+    }
+
+    /// Whether there is a success moment, and what it says.
+    ///
+    /// Three ways to have nothing to show, and each of them matters:
+    ///
+    /// - **Not pasted.** The text went to the clipboard and the capsule is
+    ///   already saying why. A ✓ over that would contradict it.
+    /// - **Switched off.** Whoever wants only the sound gets only the sound —
+    ///   including for milestones, because "off" that still speaks up at 10 000
+    ///   words is not off.
+    /// - **No words.** An empty dictation never gets this far, but a zero here
+    ///   would read as a failure dressed as a success.
+    static func afterPaste(
+        words: Int,
+        pasted: Bool,
+        showWordCount: Bool,
+        milestone: String? = nil
+    ) -> SuccessMoment? {
+        guard pasted, showWordCount, words > 0 else { return nil }
+        return SuccessMoment(words: words, milestone: milestone)
+    }
+
     // MARK: - Esc
 
     enum EscapeTarget: Equatable, Sendable {

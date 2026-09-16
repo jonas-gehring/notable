@@ -39,6 +39,8 @@ struct RecentDictationRow: View {
     @State private var copied = false
     @State private var correcting = false
     @State private var draft = ""
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var text: String { (item.snippet ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -87,14 +89,24 @@ struct RecentDictationRow: View {
                 // Notable itself. Copying is the honest action from a window;
                 // pasting belongs to the menu, where the target app is still
                 // frontmost.
-                Button(copied ? "Kopiert" : "Kopieren") {
+                Button {
                     guard !text.isEmpty else { return }
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                     copied = true
+                    // And back by itself: a button stuck on "Kopiert" stops
+                    // saying anything about the *next* click (Spec 37 §3.7).
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        copied = false
+                    }
+                } label: {
+                    Label(copied ? "Kopiert" : "Kopieren", systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .buttonStyle(.link)
                 .disabled(text.isEmpty)
+                .animation(reduceMotion ? nil : Theme.Motion.state, value: copied)
 
                 Button("Korrigieren…") {
                     draft = text
@@ -104,7 +116,12 @@ struct RecentDictationRow: View {
                 .disabled(text.isEmpty)
             }
         }
-        .padding(.vertical, Theme.Spacing.xs)
+        .padding(Theme.Spacing.xs)
+        // `Theme.hover` was defined in Spec 33 and used nowhere; the lists are
+        // what it was defined for.
+        .background(RoundedRectangle(cornerRadius: Theme.radiusSmall).fill(hovering ? Theme.hover : .clear))
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : Theme.Motion.appear, value: hovering)
         .sheet(isPresented: $correcting) { correctionSheet }
     }
 

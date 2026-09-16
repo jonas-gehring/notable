@@ -24,14 +24,28 @@ struct RetentionPolicy: Sendable, Equatable {
     /// Chat histories. Off by default.
     var chatMaxAgeDays: Int?
 
+    /// Since Spec 38 only `audioMaxAgeDays` is still a question on screen; the
+    /// other two audio numbers are derived from it (`failedAgeFactor`) or fixed
+    /// (`defaultBudgetGigabytes`), because "how many gigabytes of raw audio may
+    /// pile up" and "how much longer does a failed recording get" are answers
+    /// the code has (§3.1 rule 1).
     static let `default` = RetentionPolicy(
         audioMaxAgeDays: 30,
-        audioBudgetBytes: 20 * 1024 * 1024 * 1024,
-        failedMaxAgeDays: 90,
+        audioBudgetBytes: Int64(defaultBudgetGigabytes) * 1024 * 1024 * 1024,
+        failedMaxAgeDays: 30 * failedAgeFactor,
         dictationTextMaxAgeDays: nil,
         meetingTextMaxAgeDays: nil,
         chatMaxAgeDays: nil
     )
+
+    /// `spool-failed/` exists to be salvaged by hand, so it gets twice the
+    /// grace period of the ordinary archive — derived from the one age the user
+    /// sets rather than asked for separately. Someone who halves the audio
+    /// window means it for the failures too.
+    static let failedAgeFactor = 2
+
+    /// 20 GB, the value the picker defaulted to and nobody moved.
+    static let defaultBudgetGigabytes = 20
 
     /// Everything off — the plan is guaranteed empty.
     static let off = RetentionPolicy(
@@ -61,10 +75,13 @@ struct RetentionPolicy: Sendable, Equatable {
     }
 
     static func fromDefaults(_ store: UserDefaults = .standard) -> RetentionPolicy {
+        let audio = days(store, Key.audioAge, fallback: RetentionPolicy.default.audioMaxAgeDays)
         var policy = RetentionPolicy(
-            audioMaxAgeDays: days(store, Key.audioAge, fallback: RetentionPolicy.default.audioMaxAgeDays),
+            audioMaxAgeDays: audio,
             audioBudgetBytes: RetentionPolicy.default.audioBudgetBytes,
-            failedMaxAgeDays: days(store, Key.failedAge, fallback: RetentionPolicy.default.failedMaxAgeDays),
+            // Derived from the one age still on screen (Spec 38), unless the key
+            // itself was set — under "Erweitert", or by a build before this one.
+            failedMaxAgeDays: days(store, Key.failedAge, fallback: audio.map { $0 * failedAgeFactor }),
             dictationTextMaxAgeDays: days(store, Key.dictationAge, fallback: nil),
             meetingTextMaxAgeDays: days(store, Key.meetingAge, fallback: nil),
             chatMaxAgeDays: days(store, Key.chatAge, fallback: nil)

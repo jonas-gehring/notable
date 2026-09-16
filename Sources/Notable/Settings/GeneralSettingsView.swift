@@ -4,6 +4,11 @@ import SwiftUI
 
 // MARK: - Allgemein
 
+/// *Wie ist Notable eingerichtet?* (Spec 38 §3.2)
+///
+/// The page absorbed "Menüleiste", which was a symbol and a stepper, and grew a
+/// "Mitteilungen" section so that everything Notable says unasked is decided in
+/// one place instead of one switch per feature page.
 struct GeneralSettingsView: View {
     @Environment(\.openWindow) private var openWindow
     @EnvironmentObject private var notesFolder: NotesFolderManager
@@ -15,6 +20,9 @@ struct GeneralSettingsView: View {
     @AppStorage(UpdateInstaller.automaticInstallKey) private var automaticInstall = true
     @State private var showRelaunchHint = false
     @AppStorage(DefaultsKey.notesFolderIcon.key) private var folderIcon = DefaultsKey.notesFolderIcon.fallback
+    @AppStorage(DefaultsKey.showUsageInMenu.key) private var showUsageInMenu = DefaultsKey.showUsageInMenu.fallback
+    @AppStorage(DefaultsKey.notifyOnMeetingReady.key) private var notifyOnReady = DefaultsKey.notifyOnMeetingReady.fallback
+    @AppStorage(DefaultsKey.weeklyRecap.key) private var weeklyRecap = DefaultsKey.weeklyRecap.fallback
     @State private var relocationPlan: NotesFolderManager.RelocationPlan?
     @State private var relocationError: String?
     @State private var relocating = false
@@ -36,13 +44,6 @@ struct GeneralSettingsView: View {
                         Button("Jetzt neu starten") { relaunch() }
                     }
                 }
-            } footer: {
-                Text("„Systemsprache“ folgt der Sprachreihenfolge in den Systemeinstellungen; kennt Notable die Sprache nicht, zeigt es English.")
-            }
-
-            notesFolderSection
-
-            Section {
                 Toggle("Bei Anmeldung starten", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {
@@ -62,18 +63,15 @@ struct GeneralSettingsView: View {
                         .font(.callout)
                         .foregroundStyle(.red)
                 }
-            }
-
-            Section {
-                Button("Einführung zeigen") {
-                    openWindow(id: "onboarding")
-                    NSApp.activate(ignoringOtherApps: true)
-                }
             } footer: {
-                Text("Öffnet die Willkommens-Tour mit Hotkey-Erklärung und Berechtigungen.")
+                Text("„Systemsprache“ folgt der Sprachreihenfolge in den Systemeinstellungen; kennt Notable die Sprache nicht, zeigt es English.")
             }
 
+            menuBarSection
+            notificationsSection
+            notesFolderSection
             updatesSection
+            advancedSection
         }
         .formStyle(.grouped)
         .onAppear {
@@ -98,6 +96,41 @@ struct GeneralSettingsView: View {
     }
 
     private func relaunch() { AppRelauncher.relaunch() }
+
+    // MARK: - Menüleiste
+
+    /// What was a page of its own. The typing-speed stepper that stood here is
+    /// gone from the settings entirely — it lives in the statistics window,
+    /// where the number it changes is on screen while you change it.
+    private var menuBarSection: some View {
+        Section {
+            MenuBarIconPicker()
+            Toggle("Heute-Zeile im Menü", isOn: $showUsageInMenu)
+        } header: {
+            Text("Menüleiste")
+        } footer: {
+            Text("Die Heute-Zeile nennt Wörter, Meetings und gesparte Zeit und führt in die Statistik.")
+        }
+    }
+
+    // MARK: - Mitteilungen
+
+    /// One place for everything Notable says without being asked. The first
+    /// switch came from the meetings page, where it sat among nine others.
+    private var notificationsSection: some View {
+        Section {
+            Toggle("Benachrichtigen, wenn die Notiz fertig ist", isOn: $notifyOnReady)
+            // Spec 37 §3.4: eine Mitteilung pro Woche, montags.
+            Toggle("Wochenrückblick", isOn: $weeklyRecap)
+            Text("Montags: was die vergangene Woche gebracht hat. Unter 100 Wörtern kommt keiner.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("Mitteilungen")
+        } footer: {
+            Text("Ohne Mitteilungsrecht bleibt es still — der Status steht dann unter Daten › Berechtigungen.")
+        }
+    }
 
     // MARK: - Notizen-Ordner (Spec 27)
 
@@ -128,8 +161,6 @@ struct GeneralSettingsView: View {
             if let error = notesFolder.lastError, notesFolder.sync != .iCloudDriveOff {
                 Text(error).font(.callout).foregroundStyle(.red)
             }
-            Toggle("Symbol am Notizen-Ordner", isOn: $folderIcon)
-                .onChange(of: folderIcon) { _, _ in notesFolder.applyIcon() }
             if notesFolder.canMoveToICloudDrive {
                 HStack {
                     Button("In iCloud Drive verschieben…") { relocationPlan = notesFolder.relocationPlan() }
@@ -143,7 +174,7 @@ struct GeneralSettingsView: View {
         } header: {
             Text("Notizen-Ordner")
         } footer: {
-            Text("Das Symbol kommt nur auf Ordner ohne eigenes Symbol.")
+            Text("Jede Meeting-Notiz landet hier als Markdown-Datei.")
         }
         // The plan first, like the cleanup: what moves, and where to.
         .confirmationDialog("Notizen in iCloud Drive verschieben?", isPresented: relocationBinding, presenting: relocationPlan) { plan in
@@ -177,6 +208,13 @@ struct GeneralSettingsView: View {
         }
     }
 
+    // MARK: - Updates
+
+    /// **One** switch since Spec 38. There were two, and the first one governed
+    /// the second: without "suchen" there is nothing to install, so "installieren"
+    /// implies it. Searching happens either way and the menu says so when it
+    /// finds something; `updateAutomaticChecks` is still read
+    /// (`UpdateChecker.automaticChecks`), it simply has no checkbox any more.
     @ViewBuilder
     private var updatesSection: some View {
         Section {
@@ -240,24 +278,12 @@ struct GeneralSettingsView: View {
                     }
                 }
             }
-            Toggle("Automatisch nach Updates suchen", isOn: automaticChecks)
             Toggle("Updates automatisch installieren", isOn: $automaticInstall)
-                .disabled(!updateChecker.automaticChecks)
         } header: {
             Text("Updates")
         } footer: {
             Text("Installiert wird im nächsten ruhigen Moment — nie während einer Aufnahme, eines Diktats oder offener Notizen.")
         }
-    }
-
-    /// `UpdateChecker.automaticChecks` reads and writes UserDefaults directly, so
-    /// the binding goes through the object rather than a second `@AppStorage` that
-    /// could drift out of sync with it.
-    private var automaticChecks: Binding<Bool> {
-        Binding(
-            get: { updateChecker.automaticChecks },
-            set: { updateChecker.automaticChecks = $0 }
-        )
     }
 
     @ViewBuilder
@@ -285,10 +311,34 @@ struct GeneralSettingsView: View {
         }
     }
 
-    private func statusRow(_ text: String) -> some View {
+    private func statusRow(_ text: LocalizedStringKey) -> some View {
         HStack {
             ProgressView().controlSize(.small)
             Text(text).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Erweitert
+
+    /// The one folded group on this page (Spec 33 rule 1): a cosmetic mark on a
+    /// folder, the tour, and the restart that TCC grants need.
+    private var advancedSection: some View {
+        Section {
+            DisclosureGroup("Erweitert") {
+                Toggle("Symbol am Notizen-Ordner", isOn: $folderIcon)
+                    .onChange(of: folderIcon) { _, _ in notesFolder.applyIcon() }
+                Text("Kommt nur auf Ordner ohne eigenes Symbol.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Einführung zeigen") {
+                    openWindow(id: "onboarding")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+                Button("Notable neu starten") { relaunch() }
+                Text("Eingabeüberwachung und Bedienungshilfen werden erst nach einem Neustart grün.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

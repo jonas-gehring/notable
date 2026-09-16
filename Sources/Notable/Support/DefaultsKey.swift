@@ -54,7 +54,17 @@ enum DefaultsKey {
     static let dictationSounds = DefaultsEntry(key: "dictationSounds", fallback: true)
     /// 45 s since Spec 29, with hysteresis (`IdleDetector`). Off, a forgotten
     /// hands-free lock stayed open until the ten-minute cap.
+    ///
+    /// **No interface since Spec 38** — the number was a stepper under
+    /// "Erweitert" answering a question the code can answer (§3.1 rule 1). Only
+    /// the *switch* is left ("Freihändig bei Stille beenden", 45 ⇄ 0), and a
+    /// value someone set by hand is still read and still used.
     static let dictationIdleTimeout = DefaultsEntry(key: "dictationIdleTimeout", fallback: 45.0)
+    /// **No interface since Spec 38** (§3.2, Diktat › Erweitert): whether a
+    /// stand-in model carries dictation on a cold cache is not a preference —
+    /// the alternative is no dictation at all until a gigabyte has come down.
+    /// Spec 33's deviation 3 is redeemed here. Still read by
+    /// `DictationEngines`, so a stored `false` keeps working.
     static let bootstrapModel = DefaultsEntry(key: "bootstrapModel", fallback: true)
     /// Which app a dictation was pasted into. Stays in the local database and
     /// never goes into a request.
@@ -75,9 +85,19 @@ enum DefaultsKey {
     /// already holds for pasting, read-only, only during a recording the user
     /// agreed to.
     static let screenSpeakerRecognition = DefaultsEntry(key: "screenSpeakerRecognition", fallback: true)
+    /// Remember how named speakers sound, to recognise them in the next meeting
+    /// (Spec 36 Stufe 3). **Off by default, decided 2026-09-16**: an embedding
+    /// is a biometric feature of another person, sitting on this Mac — a new
+    /// class of data deserves a deliberate switching-on, even when nothing can
+    /// be reconstructed from it and it never leaves the device.
+    static let voiceProfilesEnabled = DefaultsEntry(key: "voiceProfilesEnabled", fallback: false)
     static let meetingEchoCancellation = DefaultsEntry(key: "meetingEchoCancellation", fallback: false)
     static let meetingUseDictationEngine = DefaultsEntry(key: "meetingUseDictationEngine", fallback: false)
     static let openNotesOnMeetingStart = DefaultsEntry(key: "openNotesOnMeetingStart", fallback: true)
+    /// **No interface since Spec 38** (§3.2, Meetings › Notizen im Call): the
+    /// notes window floats — that is what it is for. A switch turning off the
+    /// one property that makes the window useful next to a call is not a
+    /// choice worth offering. Still read by `LiveNotesView`.
     static let meetingNotesFloating = DefaultsEntry(key: "meetingNotesFloating", fallback: true)
     static let meetingHookPath = DefaultsEntry(key: "meetingHookPath", fallback: "")
     /// A microphone pinned in Settings, by UID — for meetings and dictation
@@ -103,6 +123,30 @@ enum DefaultsKey {
     static let summarizationProvider = DefaultsEntry(
         key: "summarizationProvider", fallback: SummarizationProviderID.anthropicAPI.rawValue
     )
+
+    // MARK: Momente (Spec 37)
+
+    /// "✓ · 42 Wörter" after the paste. On, because the sound alone says that
+    /// something happened but not how much — and this is the one place Notable
+    /// says a dictation worked.
+    ///
+    /// **No interface yet:** it belongs on Diktat › Anzeige & Ton, which Spec 36
+    /// is being built into. A stored `false` is honoured all the same, and the
+    /// moment then never appears.
+    static let showWordCountAfterDictation = DefaultsEntry(key: "showWordCountAfterDictation", fallback: true)
+    /// One notification a week (Allgemein › Mitteilungen). On, because a review
+    /// nobody asked for is exactly the moment worth having — and it is one
+    /// notification, switchable in one click.
+    static let weeklyRecap = DefaultsEntry(key: "weeklyRecap", fallback: true)
+    /// The last recap's timestamp, as `timeIntervalSince1970`; 0 means never.
+    static let weeklyRecapLastPosted = DefaultsEntry(key: "weeklyRecapLastPosted", fallback: 0.0)
+    /// The milestone ids already marked (`Milestone.id`).
+    ///
+    /// **A missing key is the backfill signal**, which is why the fallback is
+    /// empty and nothing else may write it: the first launch after the update
+    /// marks every threshold the existing 234 dictations already passed, without
+    /// celebrating one of them. With the key present, the app has counted before.
+    static let milestonesReached = DefaultsEntry<[String]>(key: "milestonesReached", fallback: [])
 
     // MARK: Onboarding
 

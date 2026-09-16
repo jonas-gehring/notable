@@ -93,7 +93,10 @@ struct UsageTotals: Sendable {
 
 /// One calendar period's aggregate. `id` is the local period start (day/week/month/year),
 /// making it directly usable as a chart x-value and `Identifiable` key.
-struct UsageBucket: Sendable, Identifiable {
+///
+/// `Equatable` since Spec 37: a chart that morphs instead of swapping its picture
+/// needs `.animation(_:value:)`, and that takes an `Equatable` value.
+struct UsageBucket: Sendable, Identifiable, Equatable {
     /// Local start of the period this bucket covers (e.g. 00:00 local on the day).
     let id: Date
     let dictationWords: Int
@@ -534,6 +537,187 @@ enum UsageMetrics {
             cursor = previous
         }
         return days
+    }
+
+    /// The longest run of consecutive active days there has ever been, and the
+    /// day it ended on.
+    ///
+    /// The sibling of ``streak(_:today:calendar:)``, which only knows the run
+    /// that is still going. This one looks at every run, so a broken streak is
+    /// not simply forgotten — that is the whole point of the record: "Bester:
+    /// 23 Tage" survives the day the current one goes back to 1.
+    static func longestStreak(_ buckets: [UsageBucket], calendar: Calendar) -> (days: Int, endedAt: Date?) {
+        let active = buckets
+            .filter { $0.dictationCount > 0 || $0.meetingCount > 0 }
+            .map(\.id)
+            .sorted()
+        guard !active.isEmpty else { return (0, nil) }
+
+        var best = 1
+        var bestEnd = active[0]
+        var run = 1
+        for (previous, day) in zip(active, active.dropFirst()) {
+            let next = calendar.date(byAdding: .day, value: 1, to: previous)
+            run = next == day ? run + 1 : 1
+            if run > best {
+                best = run
+                bestEnd = day
+            }
+        }
+        return (best, bestEnd)
+    }
+
+    // MARK: - Records (Spec 37 §3.3)
+
+    /// One personal best. **Never an estimate**: every value comes out of
+    /// `recordings`, and a record whose measurement is missing (`latency_ms` on
+    /// six weeks of rows) simply does not appear rather than being guessed from
+    /// what is there.
+    struct Record: Sendable, Equatable, Identifiable {
+        enum Kind: String, Sendable, CaseIterable {
+            case longestDictation
+            case bestDay
+            case bestWeek
+            case longestStreak
+            case fastestDictation
+        }
+
+        let kind: Kind
+        /// Words, words, seconds saved, days, or milliseconds — per `kind`.
+        let value: Int
+        /// When it happened. The streak carries the day it ended on.
+        let at: Date?
+        /// Broken inside the period the window is currently showing.
+        var isNew: Bool = false
+
+        var id: String { kind.rawValue }
+    }
+
+    /// A dictation needs this many words before its latency says anything about
+    /// the engine rather than about the length of the clip.
+    static let fastestRecordMinimumWords = 10
+
+    /// The five records, in display order. A record with nothing behind it is
+    /// left out, so a fresh install shows an empty card instead of five zeros.
+    ///
+    /// `newSince` is the period the window is showing; a record whose date falls
+    /// inside it is marked `isNew`.
+    static func records(
+        _ rows: [UsageRow],
+        calendar: Calendar,
+        typingWPM: Double,
+        newSince: DateInterval? = nil
+    ) -> [Record] {
+        let dictations = rows.filter { $0.kind == .dictation }
+        var found: [Record] = []
+
+        if let longest = dictations
+            .filter({ ($0.wordCount ?? 0) > 0 })
+            .max(by: { ($0.wordCount ?? 0) < ($1.wordCount ?? 0) }) {
+            found.append(Record(kind: .longestDictation, value: longest.wordCount ?? 0, at: longest.startedAt))
+        }
+
+        let days = buckets(rows, by: .day, calendar: calendar, typingWPM: typingWPM)
+        if let best = days.filter({ $0.dictationWords > 0 }).max(by: { $0.dictationWords < $1.dictationWords }) {
+            found.append(Record(kind: .bestDay, value: best.dictationWords, at: best.id))
+        }
+
+        let weeks = buckets(rows, by: .week, calendar: calendar, typingWPM: typingWPM)
+        if let best = weeks.filter({ $0.savedSeconds >= 60 }).max(by: { $0.savedSeconds < $1.savedSeconds }) {
+            found.append(Record(kind: .bestWeek, value: Int(best.savedSeconds.rounded()), at: best.id))
+        }
+
+        let streak = longestStreak(days, calendar: calendar)
+        if streak.days > 1 {
+            found.append(Record(kind: .longestStreak, value: streak.days, at: streak.endedAt))
+        }
+
+        // The same rule as the latency card, for the same reason: a single cold
+        // model load is a measurement of the load, not of the dictation. Under
+        // ten measured dictations the row is absent rather than wrong.
+        let measured = dictations.filter {
+            $0.latencyMs != nil && ($0.wordCount ?? 0) >= fastestRecordMinimumWords
+        }
+        if measured.count >= minimumLatencySamples,
+           let fastest = measured.min(by: { ($0.latencyMs ?? .max) < ($1.latencyMs ?? .max) }) {
+            found.append(Record(kind: .fastestDictation, value: fastest.latencyMs ?? 0, at: fastest.startedAt))
+        }
+
+        guard let newSince else { return found }
+        return found.map { record in
+            var marked = record
+            marked.isNew = record.at.map(newSince.contains) ?? false
+            return marked
+        }
+    }
+
+    // MARK: - The year as a grid (Spec 37 §3.3)
+
+    /// One day in the year grid.
+    struct DayCell: Sendable, Equatable, Identifiable {
+        /// Local start of the day.
+        let date: Date
+        let words: Int
+        let count: Int
+        /// A day that has not happened yet — drawn as nothing, not as a quiet day.
+        let inFuture: Bool
+
+        var id: Date { date }
+    }
+
+    /// 7 rows (row 0 = the calendar's first weekday) × `weeks` columns, ending
+    /// with the week that contains `endingAt`. Always fully populated, like the
+    /// heatmap: a grid with holes in it cannot be read as a calendar.
+    static func yearGrid(
+        _ buckets: [UsageBucket],
+        calendar: Calendar,
+        endingAt: Date,
+        weeks: Int = 53
+    ) -> [[DayCell]] {
+        guard weeks > 0,
+              let thisWeek = calendar.dateInterval(of: .weekOfYear, for: endingAt)?.start,
+              let first = calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: thisWeek)
+        else { return [] }
+
+        let byDay = Dictionary(buckets.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let today = calendar.dateInterval(of: .day, for: endingAt)?.start ?? endingAt
+
+        return (0 ..< 7).map { row in
+            (0 ..< weeks).compactMap { column -> DayCell? in
+                guard let day = calendar.date(byAdding: .day, value: column * 7 + row, to: first) else { return nil }
+                let bucket = byDay[day]
+                return DayCell(
+                    date: day,
+                    words: bucket?.dictationWords ?? 0,
+                    count: (bucket?.dictationCount ?? 0) + (bucket?.meetingCount ?? 0),
+                    inFuture: day > today
+                )
+            }
+        }
+    }
+
+    // MARK: - Speaking against typing (Spec 37 §3.3)
+
+    /// How many times faster dictating is than typing would have been, from two
+    /// numbers that both already exist: the measured speaking rate and the
+    /// typing speed the user set. `nil` when either side is missing — "1×" would
+    /// be a claim, and a missing measurement is not one.
+    static func speedFactor(wordsPerMinute spoken: Double, typingWPM: Double) -> Double? {
+        guard spoken > 0, typingWPM > 0 else { return nil }
+        return spoken / typingWPM
+    }
+
+    /// How long `words` would have taken to type. The other half of every
+    /// "gespart" figure, said on its own for the onboarding sentence.
+    static func typingSeconds(words: Int, typingWPM: Double) -> TimeInterval {
+        guard typingWPM > 0, words > 0 else { return 0 }
+        return (Double(words) / typingWPM) * 60
+    }
+
+    /// `3,4` in a German locale — one decimal, because the second one is noise
+    /// at this size.
+    static func factor(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(1)))
     }
 
     /// Local start of the calendar period containing `date`, or `nil` if the calendar

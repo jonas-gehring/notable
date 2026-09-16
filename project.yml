@@ -102,6 +102,13 @@ targets:
       - path: Sources/Notable/Dictation/AppCategory.swift
       - path: Sources/Notable/Dictation/WordDiff.swift
       - path: Sources/Notable/Stats/UsageMetrics.swift
+      # Spec 37: the thresholds worth a moment and the Monday review. Both pure
+      # — counted out of `recordings`, so neither needs a counter of its own.
+      - path: Sources/Notable/Stats/Milestones.swift
+      - path: Sources/Notable/Stats/WeeklyRecap.swift
+      # The design tokens. In the bundle since Spec 37, because the HUD's
+      # animations come from `Theme.Motion` and the panel is tested here.
+      - path: Sources/Notable/Support/Theme.swift
       # Block-level cleanup of GitHub release bodies before the inline Markdown
       # parser sees them. Pure, and the input is written by someone else.
       - path: Sources/Notable/Update/ReleaseNotes.swift
@@ -187,6 +194,15 @@ targets:
       - path: Sources/Notable/Meeting/NoteDiagnosis.swift
       # The one-to-one rule: one remote voice, one invited guest (Spec 35).
       - path: Sources/Notable/Meeting/AttendeeNaming.swift
+      # Spec 36: recognising a voice across meetings, the call window's title as
+      # a title source, when the window measures itself, and which five seconds
+      # of a speaker are worth playing. All four pure — the three rules that may
+      # never guess (the distance, the retraction, the title) are exactly the
+      # ones that are cheap to test and expensive to get wrong.
+      - path: Sources/Notable/Meeting/VoiceProfiles.swift
+      - path: Sources/Notable/Meeting/CallWindowTitle.swift
+      - path: Sources/Notable/Meeting/ScreenProbeRules.swift
+      - path: Sources/Notable/Meeting/SpeakerSample.swift
       # Which microphone a recording opens, and the record of why (Spec 23).
       # SpoolStore.Meta carries the diagnostics, so both are needed here anyway.
       - path: Sources/Notable/Dictation/InputDevicePolicy.swift
@@ -197,6 +213,12 @@ targets:
       # (Spec 25). Both pure; the installer asks the first.
       - path: Sources/Notable/Update/UpdateWindow.swift
       - path: Sources/Notable/Update/UpdateMarkers.swift
+      # Spec 38: the pickers that stand for two UserDefaults keys each, and the
+      # four pages plus the aliases of the three that were absorbed. Both pure —
+      # deliberately not nested inside the SwiftUI views they serve, so testing a
+      # key pair or a route does not drag four settings pages into this bundle.
+      - path: Sources/Notable/Settings/SettingsBindings.swift
+      - path: Sources/Notable/Settings/SettingsRoute.swift
     dependencies:
       - package: FluidAudio
       - package: WhisperKit

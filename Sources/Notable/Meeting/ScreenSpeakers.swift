@@ -21,6 +21,10 @@ struct ScreenObservation: Codable, Equatable, Sendable {
     var roster: [String]
     /// Stufe 3; empty when the adapter cannot tell.
     var activeSpeakers: [String]
+    /// The call window's own title (Spec 36 §3.1) — the meeting's name as the
+    /// organiser set it, for notes that found no calendar event. Optional, so
+    /// a `screen.jsonl` written before this existed still decodes.
+    var windowTitle: String? = nil
 }
 
 enum ScreenTimeline {

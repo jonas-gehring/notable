@@ -125,6 +125,21 @@ enum SpeakerClusterCleanup {
         }
     }
 
+    /// One centroid per label, `unknownLabel` excluded — it may hold several
+    /// people, so its mean is nobody's voice.
+    ///
+    /// The same arithmetic the splinter cleanup runs on, made available to
+    /// `VoiceProfiles` (Spec 36 §3.3): a voice profile is the centroid of a
+    /// large cluster, and "the same calculation" has to mean the same code.
+    static func centroids(of segments: [Segment]) -> [String: [Float]] {
+        var result: [String: [Float]] = [:]
+        for label in Set(segments.map(\.label)) where label != unknownLabel {
+            guard let vector = centroid(of: segments.filter { $0.label == label }) else { continue }
+            result[label] = vector
+        }
+        return result
+    }
+
     // MARK: - Vectors
 
     private static func largeCentroids(_ segments: [Segment], large: Set<String>) -> [(label: String, vector: [Float])] {
@@ -134,7 +149,7 @@ enum SpeakerClusterCleanup {
     }
 
     /// Mean of the L2-normalised segment embeddings, weighted by quality.
-    private static func centroid(of segments: [Segment]) -> [Float]? {
+    static func centroid(of segments: [Segment]) -> [Float]? {
         var sum: [Float]?
         for segment in segments {
             guard let vector = normalized(segment.embedding) else { continue }
@@ -146,7 +161,7 @@ enum SpeakerClusterCleanup {
         return sum.flatMap(normalized)
     }
 
-    private static func normalized(_ vector: [Float]) -> [Float]? {
+    static func normalized(_ vector: [Float]) -> [Float]? {
         guard !vector.isEmpty else { return nil }
         let norm = vector.reduce(0) { $0 + $1 * $1 }.squareRoot()
         guard norm > 0, norm.isFinite else { return nil }
@@ -154,7 +169,7 @@ enum SpeakerClusterCleanup {
     }
 
     /// Of two unit vectors; a dimension mismatch counts as opposite.
-    private static func dot(_ a: [Float], _ b: [Float]) -> Float {
+    static func dot(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count else { return -1 }
         var sum: Float = 0
         for i in a.indices { sum += a[i] * b[i] }

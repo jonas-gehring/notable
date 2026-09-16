@@ -19,22 +19,42 @@ struct NoteListView: View {
     @State private var chatNote: RecordingStore.Recording?
     @State private var speakerNote: RecordingStore.Recording?
     @AppStorage(DefaultsKey.summarizationProvider.key) private var providerID = DefaultsKey.summarizationProvider.fallback
+    @State private var query = ""
+    @State private var hoveredID: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var searchFocused: Bool
+    @Environment(\.openWindow) private var openWindow
+    /// Observed rather than injected: the "notes" scene hands this view only its
+    /// `NoteManager`, and the folder error has to re-render this toolbar when it
+    /// appears.
+    @ObservedObject private var notesFolder = AppContainer.shared.notesFolder
 
     var body: some View {
-        Group {
-            if noteManager.notes.isEmpty {
-                ContentUnavailableView(
-                    "Keine Notizen",
-                    systemImage: "doc.text",
-                    description: Text("Aufgezeichnete Meetings erscheinen hier.")
-                )
-            } else {
-                List(noteManager.notes) { note in
-                    row(for: note)
-                }
-                .listStyle(.inset)
+        VStack(spacing: 0) {
+            // The folder error stands where the folder is needed (Spec 38 §3.3).
+            // It used to live inside a menu submenu — closed at exactly the
+            // moment a note could not be written.
+            if let error = notesFolder.lastError {
+                Text(error)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.s)
             }
+            list
         }
+        .toolbar { toolbarItems }
+        // ⌘F focuses the field. SwiftUI's own search-focus binding is macOS 15
+        // and the deployment target is 14.4, so this is a zero-size button in
+        // the key-equivalent chain instead.
+        .background(
+            Button("") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: [.command])
+                .opacity(0)
+                .accessibilityHidden(true)
+        )
         .windowMinimum(WindowSize.notes)
         .windowFrameAutosave(WindowSize.notes)
         .task { await noteManager.reload() }
@@ -63,6 +83,85 @@ struct NoteListView: View {
         }
     }
 
+    // MARK: - Liste und Toolbar
+
+    @ViewBuilder
+    private var list: some View {
+        if noteManager.notes.isEmpty {
+            ContentUnavailableView(
+                "Keine Notizen",
+                systemImage: "doc.text",
+                description: Text("Aufgezeichnete Meetings erscheinen hier.")
+            )
+        } else if filtered.isEmpty {
+            ContentUnavailableView(
+                "Keine Treffer",
+                systemImage: "magnifyingglass",
+                description: Text("Kein Titel und kein Ordner passt zur Eingabe.")
+            )
+        } else {
+            List(filtered) { note in
+                row(for: note)
+            }
+            .listStyle(.inset)
+        }
+    }
+
+    /// A local filter over what is on screen — title, subtitle, folder. The
+    /// full-text search across every transcript is its own window (the second
+    /// toolbar button), because it reads SQLite's FTS index rather than this
+    /// list; the two are different questions and the toolbar says so.
+    private var filtered: [RecordingStore.Recording] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return noteManager.notes }
+        return noteManager.notes.filter { note in
+            [note.title, note.subtitle, note.folder]
+                .compactMap { $0?.lowercased() }
+                .contains { $0.contains(needle) }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .automatic) {
+            TextField("Notizen filtern", text: $query)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 160)
+                .focused($searchFocused)
+        }
+        ToolbarItem(placement: .automatic) {
+            Button {
+                openWindow(id: "search")
+                NSApp.activate(ignoringOtherApps: true)
+            } label: {
+                Image(systemName: "text.magnifyingglass")
+            }
+            .help("Volltext über alle Transkripte durchsuchen")
+            .accessibilityLabel("Volltext durchsuchen")
+        }
+        ToolbarItem(placement: .automatic) {
+            Button {
+                openFolder()
+            } label: {
+                Image(systemName: "folder")
+            }
+            .help("Notizen-Ordner öffnen")
+            .accessibilityLabel("Notizen-Ordner öffnen")
+        }
+    }
+
+    /// Creates the folder if it is missing. `ensureExists` throws and records
+    /// (Spec 27) rather than being `try?`-ed, and what it records is the red
+    /// line above the list.
+    private func openFolder() {
+        do {
+            try notesFolder.ensureExists()
+            NSWorkspace.shared.open(notesFolder.folderURL)
+        } catch {
+            errorMessage = notesFolder.lastError ?? error.localizedDescription
+        }
+    }
+
     // MARK: - Row
 
     @ViewBuilder
@@ -73,7 +172,18 @@ struct NoteListView: View {
                 notesEditor(for: note)
             }
         }
-        .padding(.vertical, Theme.Spacing.xs)
+        .padding(Theme.Spacing.xs)
+        .background(RoundedRectangle(cornerRadius: Theme.radiusSmall)
+            .fill(hoveredID == note.id ? Theme.hover : .clear))
+        .onHover { inside in
+            if inside {
+                hoveredID = note.id
+            } else if hoveredID == note.id {
+                hoveredID = nil
+            }
+        }
+        .animation(reduceMotion ? nil : Theme.Motion.appear, value: hoveredID)
+        .transition(.opacity)
     }
 
     @ViewBuilder

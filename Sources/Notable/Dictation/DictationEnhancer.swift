@@ -230,7 +230,30 @@ struct DictationEnhancer: Sendable {
     /// Claude CLI rather than to whatever the meeting provider happens to be.
     /// Pinned by `DictationEnhancerTests`.
     static var dictationProvider: any SummarizationProvider {
-        provider(named: UserDefaults.standard.string(forKey: EnhancementSettings.providerKey))
+        provider(named: resolvedProviderID().rawValue)
+    }
+
+    /// Which CLI the dictation path uses, since Spec 38 **derived instead of
+    /// chosen**.
+    ///
+    /// The "Dienst" picker was a second control for a question already answered
+    /// one page away (§3.1 rule 2): both it and the summarization picker asked
+    /// "which CLI". So the answer is taken from the summarization provider when
+    /// that is a CLI, and falls back to Claude when it is the metered API —
+    /// which is precisely the rule this type already applied to an
+    /// unrecognised value.
+    ///
+    /// `dictationEnhanceProvider` is still read and still wins (§3.5, third
+    /// class): whoever set the service keeps it, they just have no picker for
+    /// it any more. What cannot happen at any step is the metered API, so the
+    /// scope decision is unchanged — `DictationEnhancerTests` pins that.
+    static func resolvedProviderID(
+        enhance: String? = UserDefaults.standard.string(forKey: EnhancementSettings.providerKey),
+        summarization: String? = UserDefaults.standard.string(forKey: DefaultsKey.summarizationProvider.key)
+    ) -> SummarizationProviderID {
+        if let enhance, let id = SummarizationProviderID(rawValue: enhance), id.isCLI { return id }
+        if let summarization, let id = SummarizationProviderID(rawValue: summarization), id.isCLI { return id }
+        return .claudeCodeCLI
     }
 
     static func provider(named raw: String?) -> any SummarizationProvider {
@@ -321,6 +344,12 @@ enum EnhancementSettings {
     static let profileKey = "dictationEnhanceProfile"
     static let deadlineKey = "dictationEnhanceDeadline"
 
+    /// The time budget, fixed since Spec 38 (§3.2): "how many seconds may an
+    /// enhancement take" is a question the code can answer (§3.1 rule 1), and
+    /// the slider that asked it was one of five controls in the KI section.
+    /// Fifteen seconds is what the unset key always meant.
+    static let fixedDeadlineSeconds = 15.0
+
     /// Off until switched on. Nothing about this feature exists until then —
     /// the second hotkey is not even installed.
     static func isEnabled(_ store: UserDefaults = .standard) -> Bool {
@@ -348,8 +377,10 @@ enum EnhancementSettings {
         return EnhancementProfile.suggested(for: category, store: store)
     }
 
+    /// `fixedDeadlineSeconds` unless the key was set before Spec 38 removed its
+    /// slider — the key is still read so nobody's setting disappears (§3.5).
     static func deadline(_ store: UserDefaults = .standard) -> Duration {
-        let seconds = store.object(forKey: deadlineKey) as? Double ?? 15
+        let seconds = store.object(forKey: deadlineKey) as? Double ?? fixedDeadlineSeconds
         return .seconds(max(3, min(60, seconds)))
     }
 }

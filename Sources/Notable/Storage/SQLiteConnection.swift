@@ -103,6 +103,15 @@ final class SQLiteConnection: @unchecked Sendable {
             sqlite3_bind_int(raw, index, value ? 1 : 0)
         }
 
+        /// Bytes, copied like every other bound value (`SQLITE_TRANSIENT`) — a
+        /// voice profile's vector is the only thing stored as a BLOB, and it
+        /// arrives in a temporary `Data`.
+        func bind(_ index: Int32, _ value: Data) {
+            value.withUnsafeBytes { buffer in
+                _ = sqlite3_bind_blob(raw, index, buffer.baseAddress, Int32(buffer.count), sqliteTransient)
+            }
+        }
+
         func bind(_ index: Int32, _ value: Date) {
             sqlite3_bind_double(raw, index, value.timeIntervalSince1970)
         }
@@ -132,6 +141,12 @@ final class SQLiteConnection: @unchecked Sendable {
         }
 
         func bool(_ index: Int32) -> Bool { sqlite3_column_int(raw, index) != 0 }
+
+        func data(_ index: Int32) -> Data {
+            let count = Int(sqlite3_column_bytes(raw, index))
+            guard count > 0, let bytes = sqlite3_column_blob(raw, index) else { return Data() }
+            return Data(bytes: bytes, count: count)
+        }
 
         func isNull(_ index: Int32) -> Bool {
             sqlite3_column_type(raw, index) == SQLITE_NULL
@@ -285,6 +300,8 @@ final class SQLiteConnection: @unchecked Sendable {
         SQLiteConnection.migration4_attendees,
         SQLiteConnection.migration5_speakers,
         SQLiteConnection.migration6_textStage,
+        SQLiteConnection.migration7_speakerSources,
+        SQLiteConnection.migration8_voiceProfiles,
     ]
 
     /// Every table in its **current** shape, plus the ADD COLUMNs that lift a
@@ -492,6 +509,86 @@ final class SQLiteConnection: @unchecked Sendable {
     private static func migration6_textStage(_ db: SQLiteConnection) throws {
         try db.addColumn("polisher", type: "TEXT", to: "recordings")
         try db.addColumn("polish_ms", type: "INTEGER", to: "recordings")
+    }
+
+    /// The `CHECK` on `speaker_labels.source` had fallen behind its enum.
+    ///
+    /// Spec 35 added `SpeakerLabel.Source.calendar` and `OneToOneNaming` writes
+    /// it — into the transaction of `insertMeeting`. The constraint still read
+    /// `('llm', 'screen', 'user')`, so the first meeting that actually found a
+    /// name would have failed with `SQLITE_CONSTRAINT` and rolled back **the
+    /// whole insert**: recording, segments, summary. It never fired only because
+    /// no meeting since the rule has been a one-to-one with a named guest.
+    ///
+    /// SQLite cannot alter a `CHECK`, so the table is rebuilt. `voice` is
+    /// allowed in the same pass although nothing writes it yet (Spec 36 Stufe 3)
+    /// — a constraint that has to be widened again is how this bug happened.
+    /// Nothing references the table, so there are no triggers or views to
+    /// recreate; `SpeakerLabel.Source` is `CaseIterable` and a test writes every
+    /// case, which is the part that keeps the two in step.
+    private static func migration7_speakerSources(_ db: SQLiteConnection) throws {
+        try db.execute("""
+        CREATE TABLE speaker_labels_v7 (
+            recording_id TEXT NOT NULL,
+            cluster TEXT NOT NULL,
+            name TEXT,
+            source TEXT NOT NULL CHECK (source IN ('llm', 'screen', 'calendar', 'voice', 'user')),
+            PRIMARY KEY (recording_id, cluster)
+        )
+        """)
+        try db.execute("""
+        INSERT INTO speaker_labels_v7 (recording_id, cluster, name, source)
+        SELECT recording_id, cluster, name, source FROM speaker_labels
+        """)
+        try db.execute("DROP TABLE speaker_labels")
+        try db.execute("ALTER TABLE speaker_labels_v7 RENAME TO speaker_labels")
+    }
+
+    /// Spec 36, Stufe 3: how a named speaker sounds, so the next meeting
+    /// recognises them.
+    ///
+    /// Two tables, and the second one is what makes the first one correctable:
+    ///
+    /// - `voice_profiles` — one row per person. `embedding` is the **sum** of
+    ///   the per-meeting unit centroids, not their mean (see `VoiceProfiles`):
+    ///   with the sum and `meetings`, taking one meeting back out is an exact
+    ///   subtraction, and §3.3 requires exactly that — a correction in the
+    ///   speaker dialog retracts the profile that was wrong.
+    /// - `meeting_voices` — the centroid of each large cluster of one meeting.
+    ///   Without it a correction made days later would have nothing to retract
+    ///   *with*: the embeddings live only for the length of a diarization.
+    ///   `learned_for` names the profile this cluster was actually added to, so
+    ///   a retraction subtracts only what was really added — a `voice` match
+    ///   never feeds itself back, and correcting one must not subtract a
+    ///   contribution that was never made.
+    ///
+    /// Both are written only while `voiceProfilesEnabled` is on (off by
+    /// default), both stay on this Mac, and both are removable in Settings.
+    /// Existing rows are untouched; a database that never turns the switch on
+    /// gains two empty tables.
+    private static func migration8_voiceProfiles(_ db: SQLiteConnection) throws {
+        try db.execute("""
+        CREATE TABLE IF NOT EXISTS voice_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            dimension INTEGER NOT NULL,
+            meetings INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )
+        """)
+        try db.execute("""
+        CREATE TABLE IF NOT EXISTS meeting_voices (
+            recording_id TEXT NOT NULL,
+            cluster TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            dimension INTEGER NOT NULL,
+            seconds REAL NOT NULL DEFAULT 0,
+            learned_for TEXT,
+            PRIMARY KEY (recording_id, cluster)
+        )
+        """)
     }
 
     /// Idempotent `ADD COLUMN`: only "duplicate column name" is ignored.

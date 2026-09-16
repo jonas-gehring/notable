@@ -169,6 +169,42 @@ final class DictationPipelineTests: XCTestCase {
         )
     }
 
+    // MARK: - After the paste (Spec 37)
+
+    func testPastedDictationGetsItsWordCount() {
+        XCTAssertEqual(
+            DictationPipeline.afterPaste(words: 42, pasted: true, showWordCount: true),
+            DictationPipeline.SuccessMoment(words: 42, milestone: nil)
+        )
+    }
+
+    /// The text is on the clipboard and the capsule is already saying why. A ✓
+    /// on top of that would contradict the sentence under it.
+    func testTextThatDidNotReachTheFieldGetsNoCheckmark() {
+        XCTAssertNil(DictationPipeline.afterPaste(words: 42, pasted: false, showWordCount: true))
+    }
+
+    /// Off is off — including for a milestone. A switch that still speaks up at
+    /// 10 000 words is not a switch.
+    func testSwitchedOffMeansNothingIsShownAtAll() {
+        XCTAssertNil(DictationPipeline.afterPaste(words: 42, pasted: true, showWordCount: false))
+        XCTAssertNil(DictationPipeline.afterPaste(
+            words: 42, pasted: true, showWordCount: false, milestone: "10.000 Wörter diktiert"))
+    }
+
+    func testZeroWordsIsNoSuccess() {
+        XCTAssertNil(DictationPipeline.afterPaste(words: 0, pasted: true, showWordCount: true))
+    }
+
+    /// The milestone replaces the number rather than joining it: two things to
+    /// read in 700 ms is one too many.
+    func testAMilestoneReplacesTheWordCount() {
+        let moment = DictationPipeline.afterPaste(
+            words: 128, pasted: true, showWordCount: true, milestone: "10.000 Wörter diktiert")
+        XCTAssertEqual(moment?.milestone, "10.000 Wörter diktiert")
+        XCTAssertEqual(moment?.words, 128)
+    }
+
     // MARK: - Esc
 
     func testEscDuringRecordingDiscardsTheRecording() {

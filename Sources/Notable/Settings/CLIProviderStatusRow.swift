@@ -1,29 +1,21 @@
 import SwiftUI
 
-/// Availability, a real test call, and the argument override for one CLI
-/// provider.
+/// Availability and a real test call for one CLI provider.
 ///
 /// Extracted from the dictation section because the *summary* pane needed the
 /// same thing and did not have it: `SummarizationProviderID.allCases` has four
 /// entries, and that pane only ever showed a status for two of them — pick
 /// Gemini or Codex as the meeting provider and the pane went blank, with no
-/// path, no availability and no way to try a call. The argument override
-/// (`cliArguments.<id>`) had no interface at all, although the invocations for
-/// those two are documented rather than verified and the whole point of the
-/// setting is fixing one that turns out to be wrong.
+/// path, no availability and no way to try a call.
+///
+/// Since Spec 38 the argument override is ``CLIArgumentsRow``, one level down
+/// in Meetings › Erweitert: this row's own `DisclosureGroup("Erweitert")` was a
+/// second folded group on a page that is allowed exactly one.
 struct CLIProviderStatusRow: View {
     let provider: SummarizationProviderID
 
     @State private var status: String = String(localized: "wird geprüft…")
     @State private var testResult: String?
-    @State private var argumentsInput = ""
-    @State private var argumentsSaved = false
-
-    /// The tool behind this provider, when it is one of the described CLIs.
-    /// `.claudeCodeCLI` has its own locator and no argument override.
-    private var tool: AgentCLITool? {
-        AgentCLITool.all.first { $0.id == provider.rawValue }
-    }
 
     var body: some View {
         Group {
@@ -36,37 +28,8 @@ struct CLIProviderStatusRow: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
-            // The argument override is a repair tool, not a setting (Spec 33 §3.1).
-            if let tool {
-                DisclosureGroup("Erweitert") {
-                LabeledContent("Aufruf") {
-                    HStack {
-                        TextField(
-                            "Argumente",
-                            text: $argumentsInput,
-                            prompt: Text(tool.defaultArguments.joined(separator: " "))
-                        )
-                        .font(.system(.callout, design: .monospaced))
-                        Button("Sichern") { saveArguments(for: tool) }
-                            .buttonStyle(.link)
-                    }
-                }
-                if argumentsSaved {
-                    Text("Gesichert — beim nächsten Aufruf aktiv.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("Leer lassen für den Standardaufruf. Anführungszeichen gruppieren, wie in der Shell.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
         }
-        .task(id: provider.rawValue) {
-            argumentsInput = tool.map { UserDefaults.standard.string(forKey: $0.argumentsKey) ?? "" } ?? ""
-            argumentsSaved = false
-            check()
-        }
+        .task(id: provider.rawValue) { check() }
     }
 
     private func check() {
@@ -99,8 +62,50 @@ struct CLIProviderStatusRow: View {
             }
         }
     }
+}
 
-    private func saveArguments(for tool: AgentCLITool) {
+/// The per-tool argument override (`cliArguments.<id>`), a repair tool rather
+/// than a setting: the invocations for Gemini and Codex are documented, not
+/// verified, and these tools reshape their command line between releases. It
+/// lives under Meetings › Erweitert, next to the provider it belongs to.
+struct CLIArgumentsRow: View {
+    let provider: SummarizationProviderID
+
+    @State private var argumentsInput = ""
+    @State private var argumentsSaved = false
+
+    /// The tool behind this provider, when it is one of the described CLIs.
+    /// `.claudeCodeCLI` has its own locator and no argument override.
+    private var tool: AgentCLITool? {
+        AgentCLITool.all.first { $0.id == provider.rawValue }
+    }
+
+    var body: some View {
+        if let tool {
+            LabeledContent("Aufruf") {
+                HStack {
+                    TextField(
+                        "Argumente",
+                        text: $argumentsInput,
+                        prompt: Text(tool.defaultArguments.joined(separator: " "))
+                    )
+                    .font(.system(.callout, design: .monospaced))
+                    Button("Sichern") { save(for: tool) }
+                        .buttonStyle(.link)
+                }
+            }
+            if argumentsSaved {
+                Text("Gesichert — beim nächsten Aufruf aktiv.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text("Leer lassen für den Standardaufruf. Anführungszeichen gruppieren, wie in der Shell.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func save(for tool: AgentCLITool) {
         let trimmed = argumentsInput.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             UserDefaults.standard.removeObject(forKey: tool.argumentsKey)
@@ -108,6 +113,5 @@ struct CLIProviderStatusRow: View {
             UserDefaults.standard.set(trimmed, forKey: tool.argumentsKey)
         }
         argumentsSaved = true
-        check()
     }
 }

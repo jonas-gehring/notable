@@ -7,14 +7,29 @@ import SwiftUI
 /// source `user`, which no later run overwrites — and the note is projected
 /// again. The summary is not redone on its own: with the API provider that
 /// costs money, so it is offered.
+///
+/// Since Spec 36 the dialog has an ear: ▶ plays the loudest five seconds of
+/// that speaker out of the archived audio (`SpeakerSample`). Without it only
+/// someone who remembers the meeting can correct anything — which is the reason
+/// the field measurement found 23 unnamed labels and no corrections. Where the
+/// archive is gone (retention, or a meeting older than the archive) the button
+/// is disabled and says so, rather than doing nothing.
 struct SpeakerEditorView: View {
     let recording: RecordingStore.Recording
+    /// Set when the dialog is its own window (`SpeakerEditorWindow`, opened from
+    /// the notification): SwiftUI's `dismiss` closes a sheet, and this one has
+    /// none. As a sheet in the note list it stays nil and `dismiss` applies.
+    var onClose: (() -> Void)?
+
     @EnvironmentObject private var noteManager: NoteManager
     @Environment(\.dismiss) private var dismiss
     @AppStorage(DefaultsKey.summarizationProvider.key) private var providerID = DefaultsKey.summarizationProvider.fallback
 
     @State private var speakers: [RecordingStore.SpeakerLabel] = []
     @State private var drafts: [String: String] = [:]
+    /// Cluster → its turns, for the audio sample.
+    @State private var times: [String: [(start: TimeInterval, end: TimeInterval)]] = [:]
+    @StateObject private var sample = SpeakerSamplePlayer()
     @State private var summaryStale = false
     @State private var busy = false
     @State private var errorMessage: String?
@@ -43,28 +58,32 @@ struct SpeakerEditorView: View {
                 }
                 .font(.callout)
             }
-            if let errorMessage {
-                Text(errorMessage).font(.callout).foregroundStyle(.red)
+            if let message = errorMessage ?? sample.failure {
+                Text(message).font(.callout).foregroundStyle(.red)
             }
             HStack {
                 if busy { ProgressView().controlSize(.small) }
                 Spacer()
-                Button("Fertig") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Fertig") { close() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(18)
         .frame(minWidth: 600, minHeight: 280)
         .disabled(busy)
         .task { await load() }
+        .onDisappear { sample.stop() }
     }
 
     @ViewBuilder
     private func row(_ speaker: RecordingStore.SpeakerLabel) -> some View {
         GridRow {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(speaker.name).fontWeight(.medium)
-                Text("\(speaker.segmentCount) Beiträge · \(Self.duration(speaker.seconds))")
-                    .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: Theme.Spacing.xs) {
+                playButton(speaker)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(speaker.name).fontWeight(.medium)
+                    Text("\(speaker.segmentCount) Beiträge · \(Self.duration(speaker.seconds))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if speaker.isLocalUser {
                 Text("fest").font(.caption).foregroundStyle(.secondary)
@@ -104,6 +123,33 @@ struct SpeakerEditorView: View {
         }
     }
 
+    // MARK: - Hörprobe
+
+    @ViewBuilder
+    private func playButton(_ speaker: RecordingStore.SpeakerLabel) -> some View {
+        Button {
+            if sample.playing == speaker.cluster {
+                sample.stop()
+            } else {
+                sample.play(cluster: speaker.cluster, segments: times[speaker.cluster] ?? [])
+            }
+        } label: {
+            Image(systemName: sample.playing == speaker.cluster ? "stop.circle" : "play.circle")
+                .imageScale(.large)
+        }
+        .buttonStyle(.borderless)
+        .disabled(sample.archive == nil || (times[speaker.cluster] ?? []).isEmpty)
+        .help(sampleHint)
+        .accessibilityLabel("Fünf Sekunden anhören")
+    }
+
+    /// Typed as a `LocalizedStringKey` on purpose: a ternary of two string
+    /// literals lands on the verbatim `String` overload of `.help`, and then the
+    /// German shows through in every language.
+    private var sampleHint: LocalizedStringKey {
+        sample.archive == nil ? "Audio nicht mehr vorhanden" : "Fünf Sekunden anhören"
+    }
+
     // MARK: - Actions
 
     private var suggestions: [String] {
@@ -118,6 +164,17 @@ struct SpeakerEditorView: View {
     private func load() async {
         speakers = await noteManager.speakers(of: recording)
         drafts = Dictionary(uniqueKeysWithValues: speakers.map { ($0.cluster, $0.source == nil ? "" : $0.name) })
+        // The shared store, not the note manager's: the segments' times are what
+        // the sample needs, and `NoteManager` deliberately exposes notes rather
+        // than rows. The labels above come from the same database.
+        let segments = (try? await RecordingStore.shared.segments(for: recording.id)) ?? []
+        times = segments.reduce(into: [:]) { result, segment in
+            // The same key `speakerLabels` groups by: the minted cluster, or the
+            // shown name for a meeting from before the column existed.
+            guard let label = segment.cluster ?? segment.speaker else { return }
+            result[label, default: []].append((start: segment.start, end: segment.end ?? segment.start))
+        }
+        await sample.prepare(for: recording)
     }
 
     private func rename(_ speaker: RecordingStore.SpeakerLabel) {
@@ -127,6 +184,11 @@ struct SpeakerEditorView: View {
 
     private func merge(_ speaker: RecordingStore.SpeakerLabel, into other: RecordingStore.SpeakerLabel) {
         perform { try await noteManager.mergeSpeaker(recording, cluster: speaker.cluster, into: other.cluster) }
+    }
+
+    private func close() {
+        sample.stop()
+        if let onClose { onClose() } else { dismiss() }
     }
 
     private func perform(_ work: @escaping () async throws -> Void) {
@@ -162,6 +224,7 @@ struct SpeakerEditorView: View {
         case .screen: String(localized: "vom Bildschirm")
         case .calendar: String(localized: "aus dem Kalender")
         case .llm: String(localized: "aus dem Gespräch")
+        case .voice: String(localized: "an der Stimme erkannt")
         case .user: String(localized: "von dir")
         }
     }

@@ -162,6 +162,76 @@ final class DictationOverlayTests: XCTestCase {
         }
         XCTAssertFalse(State.error("x").isCancellable)
         XCTAssertFalse(State.notice("x").isCancellable)
+        // The success moment is already over — there is nothing left to abort,
+        // and an × on it would offer to take back a paste that has happened.
+        XCTAssertFalse(State.done(words: 42, milestone: nil).isCancellable)
+    }
+
+    // MARK: - The success moment (Spec 37 §3.2)
+
+    /// With Reduce Motion the capsule must simply **be there**, and gone again
+    /// without a fade — the same rule Spec 30 wrote for the recording states,
+    /// now for the two that arrive after it.
+    ///
+    /// The system setting cannot be toggled from a test, so the HUD reads
+    /// Reduce Motion through one closure (`HUDMotion`) and this is what that
+    /// seam is for.
+    func testDoneAndNoticeArriveWithoutAnimationUnderReduceMotion() throws {
+        HUDMotion.override = true
+        defer { HUDMotion.override = nil }
+
+        let overlay = controller(style: .bottom)
+        overlay.flashDone(DictationPipeline.SuccessMoment(words: 42, milestone: nil))
+        let panel = try XCTUnwrap(overlay.panel)
+        XCTAssertEqual(panel.alphaValue, 1, accuracy: 0.0001, "kein Einblenden bei Reduce Motion")
+        XCTAssertTrue(panel.isVisible)
+        // The invariant, in the one state that did not exist when it was written.
+        XCTAssertFalse(panel.canBecomeKey)
+        XCTAssertFalse(panel.isKeyWindow)
+
+        overlay.show(.notice("Parakeet v3 aktiv"))
+        XCTAssertEqual(panel.alphaValue, 1, accuracy: 0.0001)
+        XCTAssertFalse(panel.canBecomeKey)
+
+        overlay.hide()
+        XCTAssertFalse(panel.isVisible, "und ohne Ausblenden wieder weg")
+    }
+
+    /// The moment reaches the panel like every other state — and takes no focus
+    /// with it, which is the whole reason the paste works.
+    func testTheSuccessMomentNeverTakesTheKeyWindow() throws {
+        let before = NSApp?.keyWindow
+        let overlay = controller(style: .bottom)
+        overlay.flashDone(DictationPipeline.SuccessMoment(words: 128, milestone: "10.000 Wörter diktiert"))
+        let panel = try XCTUnwrap(overlay.panel)
+        XCTAssertFalse(panel.canBecomeKey)
+        XCTAssertTrue(NSApp?.keyWindow === before)
+        XCTAssertTrue(panel.ignoresMouseEvents, "nichts zum Anklicken, also kein Klickfänger")
+        overlay.hide()
+    }
+
+    /// "Aus — nur Ton" keeps the moment quiet too: it is not a failure, and the
+    /// setting means what it says.
+    func testTheSuccessMomentRespectsTheOffStyle() {
+        let overlay = controller(style: .off)
+        overlay.flashDone(DictationPipeline.SuccessMoment(words: 42, milestone: nil))
+        XCTAssertFalse(overlay.panel?.isVisible ?? false)
+    }
+
+    /// An abort leaves differently from a success (§3.2). Both end with the
+    /// panel gone; what this pins is that the shrink is actually asked for and
+    /// cleared afterwards, rather than sticking to the next dictation.
+    func testAbortShrinksAndResetsAfterwards() throws {
+        let overlay = controller(style: .bottom)
+        overlay.show(.recording)
+        overlay.hide(.shrink)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        let panel = try XCTUnwrap(overlay.panel)
+        XCTAssertFalse(panel.isVisible)
+
+        overlay.show(.recording)
+        XCTAssertTrue(panel.isVisible, "die nächste Aufnahme startet in voller Größe")
+        overlay.hide()
     }
 
     /// A dictation that is done before the delay never shows its spinner.

@@ -53,42 +53,23 @@ struct MenuBarIcon: Identifiable, Hashable {
     }
 }
 
-/// A compact grid of SF-Symbol options for the menu-bar icon. Drop into a
-/// Settings tab / section.
-struct IconPickerView: View {
+/// The idle symbol, as a popup (Spec 38 §3.2).
+///
+/// It was a twelve-cell `LazyVGrid` with a selection ring — a whole page's worth
+/// of surface for a choice made once, on a page that existed for nothing else.
+/// A `Picker` in a `Form` row shows the chosen motif *and* its name, the way
+/// every other choice on these four pages does, and the menu bar itself is the
+/// preview.
+struct MenuBarIconPicker: View {
     @AppStorage(MenuBarIcon.storageKey) private var selectedSymbol = MenuBarIcon.defaultSymbol
 
-    private let columns = [GridItem(.adaptive(minimum: 60), spacing: Theme.Spacing.m)]
-
     var body: some View {
-        LazyVGrid(columns: columns, spacing: Theme.Spacing.m) {
+        Picker("Symbol", selection: $selectedSymbol) {
             ForEach(MenuBarIcon.offered(current: selectedSymbol)) { icon in
-                Button {
-                    selectedSymbol = icon.symbol
-                } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: icon.symbol)
-                            .font(.title2)
-                            .frame(height: 24)
-                        Text(icon.label)
-                            .font(.caption2)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.radiusControl)
-                            .fill(selectedSymbol == icon.symbol ? Color.accentColor.opacity(0.18) : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.radiusControl)
-                            .strokeBorder(selectedSymbol == icon.symbol ? Color.accentColor : Color.secondary.opacity(0.25))
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: Theme.radiusControl))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(icon.label)
-                .accessibilityAddTraits(selectedSymbol == icon.symbol ? [.isSelected] : [])
+                // The label is already localized; `Label` renders a plain
+                // `String` verbatim, which is what we want here.
+                Label(icon.label, systemImage: icon.symbol)
+                    .tag(icon.symbol)
             }
         }
     }

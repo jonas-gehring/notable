@@ -42,6 +42,10 @@ Die Nummerierung ist die Reihenfolge, in der die Features entstanden sind.
 | [35](35-sprecher-und-titel-messen.md) | **Sprechernamen und Titel: erst messen** — jeder stille Ausgang bekommt einen Code in `meta.json`, „Dein Name" gegen die eigene-Name-Lücke, Kalenderliste, Call-Quelle statt „Meeting" | S | keine Regel gelockert — Namen kommen erst nach der Messung | gebaut (2026-09-15); Messung im nächsten Meeting offen |
 | [34](34-aufnahme-endet-mit-dem-call.md) | **Die Aufnahme endet mit dem Call** — manueller Start übernimmt den erkannten Call, nur-Ausgabe zählt nur bei hörbarer Gegenseite, Stille fragt und stoppt, `meta.json` sagt warum | S–M | beendet einen stillen, echten Call zu früh | gebaut (2026-09-15); Handtests im Call offen |
 | [33](33-einstellungen-diaet-und-craft.md) | **Einstellungen-Diät und Craft** — Messinstrumente hinter ⌥, ein Satz je Footer, Tokens, Fenster-Autosave, Über/Hilfe, Onboarding ohne Mikrofon blockiert | M | 62 sichtbare Stellen, optisches Risiko | gebaut (2026-09-14), vervollständigt bis auf App-Icon und Screenshots (§9); Handtests offen |
+| [36](36-sprecher-wiedererkennen.md) | **Sprecher wiedererkennen** — `CHECK`-Fehler in `speaker_labels` (rollt das erste benannte 1:1-Meeting zurück), Bildschirm-Messung von selbst, Adapter mit Fixtures, Hörprobe im Sprecher-Dialog, Stimmprofile aus bestätigten Namen | ½ h + S + S–M + M | Stimmprofil = biometrisches Merkmal eines Kollegen, lokal; Stufe 3 nur nach Messung (§3.4) | 📋 Entwurf (2026-09-16); §3.0 sofort |
+| [37](37-das-gefuehl.md) | **Das Gefühl** — ein benutztes Bewegungssystem, HUD als eine Form (Aufwachsen, Atem, Fall auf die Linie, ✓ mit Wortzahl), Statistik zählt hoch mit Rekorden, Serie, Jahresraster, Wochenrückblick, Meilensteine | M–L | Diktatpfad darf 0 ms langsamer werden; „zu viel" | 📋 Entwurf (2026-09-16) |
+| [38](38-weniger.md) | **Weniger** — vier Seiten statt sieben (Allgemein, Diktat, Meetings, Daten), 27 → 14 Toggles, 18 → 9 Picker, Menü 27 → 8 Slots ohne Untermenü, Onboarding 8 → 5 | M | kein Key wird umbenannt, kein Pfad ändert sein Verhalten — nur Oberfläche | 📋 Entwurf (2026-09-16); vor 37 bauen |
+| [39](39-genauigkeit.md) | **Genauigkeit** — Korpus und WER-Harness (es gibt heute keine Messung), Pre-Roll und Nachlauf, Konfidenz sichtbar statt verworfen, Vokabular ins lokale Modell, Meetings auf das beste Modell, Kölner Phonetik | S+S+S–M+S+S (+M an Spec 32) | die erste Stelle, an der Diktat-Audio behalten wird — Schalter, 50 Clips, aus in der Vorgabe | 📋 Entwurf (2026-09-16); Stufe 0 vor allem anderen |
 
 **Aufwand:** S ≈ 1 Tag, M ≈ 2–4 Tage, L ≈ 1 Woche.
 
@@ -82,6 +86,25 @@ empfohlene Baureihenfolge: 29 zuerst (das „buggy" sitzt dort, und die Testnaht
 Messung (Stufe 0), 33 zuletzt. 28 ist unabhängig und klein. Local-First bleibt in
 allen sechs unberührt; 32 ist der Grund, warum das trotz Textintelligenz geht.
 Offene Entscheidungen stehen in 29 §7, 30 §7, 31 §7, 32 §7 und 33 §7.
+
+**Zu 36–38:** Drei Anforderungen vom 2026-09-16 — bessere Sprechererkennung, ein
+Gefühl „wie Wispr Flow", und weniger Optionen. Die Inventur davor ergab: die
+Sprechererkennung ist fertig gebaut und wartet seit dem 11.09. auf eine Messung, die
+einen Knopf mitten im Call verlangt (36 lässt sie von selbst passieren) — und sie trägt
+einen `CHECK`-Fehler, der das erste erfolgreich benannte 1:1-Meeting verlieren würde
+(36 §3.0, sofort). Die App hat fünf Animationsstellen in 25 000 Zeilen und einen
+Bewegungs-Token, den niemand benutzt (37). Spec 33 hat Einstellungen verschoben, nicht
+entfernt: 27 Toggles, 18 Picker, 27 Menü-Slots (38). Reihenfolge: 36 §3.0 heute,
+dann 38 vor 37 (weniger Flächen zu bewegen), 36 Stufe 3 nur nach der Messung in §3.4.
+
+**Zu 39:** Die Frage „wie wird die Erkennung genauer?" ließ sich am 2026-09-16 nicht
+beantworten, weil es **keine Messung gibt**: kein WER-Harness, kein Korpus,
+`recordings.raw_text` in 0 von 234 Diktaten belegt, das persönliche Wörterbuch nach 234
+Diktaten leer, und die Konfidenz, die FluidAudio je Token mitliefert, wird nirgends
+gelesen. 39 baut deshalb zuerst das Maß und dann die fünf Hebel, die *vor* dem Modell
+liegen — ein Modellwechsel steht ausdrücklich nicht darin.
+
+Offene Entscheidungen in 36 §7, 37 §7, 38 §7, 39 §7.
 
 Daneben liegen die Specs der ersten Ausbaustufe — `note-management-ui.md`,
 `speaker-naming.md`, `auto-detect-consent.md`, `release-and-signing.md` und die

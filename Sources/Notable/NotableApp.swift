@@ -182,6 +182,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             container.settingsRoute.requested = SettingsView.Pane(rawValue: pane)
             container.presentWindow("settings")
         }
+        // The weekly review leads into the window its numbers came from.
+        NotificationCenterService.shared.onOpenStats = { container.presentWindow("stats") }
+        // What Notable says about itself over time (Spec 37): the milestone
+        // markers for everything already passed are set **silently** on the
+        // first launch after the update, and Monday's review is posted at the
+        // first activity after 8:00 — no timer, and never twice in a week.
+        Task { await UsageMoments.shared.launch() }
         // "Jetzt installieren" on the 72-hour nudge — the manual path, with every
         // hard lock still in force.
         NotificationCenterService.shared.onInstallUpdateNow = {
@@ -514,7 +521,6 @@ struct MenuContentView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var dictation: DictationController
     @EnvironmentObject private var meeting: MeetingController
-    @EnvironmentObject private var notesFolder: NotesFolderManager
     @EnvironmentObject private var updateChecker: UpdateChecker
     @EnvironmentObject private var updateInstaller: UpdateInstaller
     @EnvironmentObject private var history: DictationHistory
@@ -524,13 +530,28 @@ struct MenuContentView: View {
     @AppStorage(DefaultsKey.showNextMeeting.key) private var showNextMeeting = DefaultsKey.showNextMeeting.fallback
     @AppStorage(DefaultsKey.showUsageInMenu.key) private var showUsageInMenu = DefaultsKey.showUsageInMenu.fallback
 
-    /// The header must never say "Bereit" while a meeting is being recorded —
-    /// meeting state lives outside `appState.captureState`.
-    private var statusLabel: String {
+    /// The line at the very top — **only when there is something to say**
+    /// (Spec 38 §3.3).
+    ///
+    /// It used to be unconditional, and in the idle case it said "Bereit",
+    /// which is the one thing a status line can say that is not information.
+    /// The microphone row folded into it: whoever reads "MacBook Pro
+    /// Microphone" with the lid shut needs no further diagnosis (Spec 23), and
+    /// it was a second line saying half of the first one's sentence.
+    ///
+    /// Meeting state lives outside `appState.captureState`, so the header must
+    /// never fall through to the dictation state while a meeting runs.
+    private var statusLine: String? {
         switch meeting.state {
-        case .recording: String(localized: "Meeting wird aufgezeichnet…")
-        case .processing: String(localized: "Meeting wird verarbeitet…")
-        case .idle: appState.captureState.label
+        case .recording:
+            if let device = meeting.inputDeviceName {
+                return String(localized: "Meeting wird aufgezeichnet · \(device)")
+            }
+            return String(localized: "Meeting wird aufgezeichnet…")
+        case .processing:
+            return String(localized: "Meeting wird verarbeitet…")
+        case .idle:
+            return appState.captureState == .idle ? nil : appState.captureState.label
         }
     }
 
@@ -541,8 +562,11 @@ struct MenuContentView: View {
     }
 
     var body: some View {
-        // Status line + any setup notice (render as disabled menu items).
-        Text(statusLabel)
+        // Eight entries, three dividers, no submenu (Spec 38 §3.3). Everything
+        // else appears only when there is something to do, at its own place.
+        if let statusLine {
+            Text(statusLine)
+        }
         if let error = dictation.setupError {
             Text("⚠︎ \(error)")
         } else if dictation.isUsingBootstrap {
@@ -556,17 +580,25 @@ struct MenuContentView: View {
             Text(dictation.downloadProgress.map { DownloadProgressRow.percent($0) }
                 ?? dictation.modelState.label)
         }
-        // Today's numbers at a glance; the window has the full picture. Omitted
-        // entirely on a day with nothing to report (see UsageMetrics.menuLine).
+        // Today's numbers at a glance, and the way into the window that has the
+        // full picture — the line *is* the entry now, where it used to sit as
+        // disabled text next to a separate "Statistik…".
+        //
+        // Exactly one of the two is always present. On a day with nothing to
+        // report there is no line (see `UsageMetrics.menuLine`), and with the
+        // line switched off there is none either — and in both cases the
+        // statistics window would otherwise be unreachable from this menu.
         if showUsageInMenu, let usageLine = usage.line {
-            Text(usageLine)
+            Button(usageLine) { open("stats") }
+        } else {
+            Button("Statistik…") { open("stats") }
         }
         // Only above the threshold, and it leads somewhere: the page where the
         // retention rules are switched on. The line is a way to the decision,
         // never a substitute for it.
         if let storageLine = storageNotice.line {
             Button(storageLine) {
-                AppContainer.shared.settingsRoute.requested = .storage
+                AppContainer.shared.settingsRoute.requested = .data
                 open("settings")
             }
         }
@@ -593,14 +625,14 @@ struct MenuContentView: View {
         // "⌘⇧V" next to "Letztes Diktat einfügen" promised exactly the thing it
         // could not do: press it in the app you want the text in, and nothing
         // happens. ⌘, and ⌘Q stay, because macOS routes those itself.
-        Button(liveNotes.isActive ? "Notizen zum Meeting…" : "Meeting-Notizen…") { open("meetingNotes") }
+        //
+        // Only during a call (Spec 38 §3.3): a notes window for a meeting that
+        // is not being recorded is an empty editor with a timestamp button.
+        if meeting.state.isRecording || liveNotes.isActive {
+            Button("Notizen zum Meeting…") { open("meetingNotes") }
+        }
         if let next = nextEvent {
             Text("Nächstes: \(Self.nextEventLabel(next))")
-        }
-        // Which microphone is being recorded. Whoever reads "MacBook Pro
-        // Microphone" with the lid shut needs no further diagnosis (Spec 23).
-        if meeting.state.isRecording, let device = meeting.inputDeviceName {
-            Text("Mikrofon: \(device)")
         }
         if let message = meeting.statusMessage {
             Text(message)
@@ -618,11 +650,12 @@ struct MenuContentView: View {
         // Dictation
         // The dictation that failed keeps its audio (Spec 30 §3.7) and comes
         // first: it is the one thing in this section that is otherwise lost.
-        if let failed = history.failedClip {
-            Menu("Fehlgeschlagenes Diktat · \(failed.recordedAt.formatted(date: .omitted, time: .shortened))") {
-                Text(failed.failure)
-                Button("Wiederholen") { AppContainer.shared.dictation.retryLastClip() }
-                Button("Verwerfen") { AppContainer.shared.dictation.discardLastClip() }
+        // One entry rather than a submenu — discarding it, and reading why it
+        // failed, both live in "Letzte Diktate", which can show more than a
+        // menu item can.
+        if history.failedClip != nil {
+            Button("Fehlgeschlagenes Diktat wiederholen") {
+                AppContainer.shared.dictation.retryLastClip()
             }
         }
         Button("Letztes Diktat einfügen") {
@@ -639,75 +672,40 @@ struct MenuContentView: View {
             }
         }
             .disabled(history.last == nil)
-        Button("Letztes Diktat kopieren") { Task { await history.copyLast() } }
-            .disabled(history.last == nil)
+            // Copying is the same act with a different destination, so it is the
+            // ⌥ face of the same row rather than a row of its own — macOS 15 and
+            // later; on 14 "Letzte Diktate" has a copy button per entry.
+            .optionAlternate {
+                Button("Letztes Diktat kopieren") { Task { await history.copyLast() } }
+                    .disabled(history.last == nil)
+            }
         // Only present once the feature has been switched on — the switch is the
         // consent, so an unconfigured install offers no way to send text out.
+        // One entry with the automatic profile; the profiles themselves are a
+        // setting (Diktat › KI), not eight menu rows behind a submenu.
         if EnhancementSettings.isEnabled {
-            Menu("Letztes Diktat verbessern") {
-                ForEach(EnhancementProfile.all()) { profile in
-                    Button(profile.title) {
-                        Task {
-                            let result = await history.enhanceLast(profile: profile)
-                            guard let result else { return }
-                            if result.didEnhance {
-                                NotificationCenterService.shared.postDictationEnhanced(
-                                    id: "dictation.enhanced",
-                                    preview: DictationHistory.menuTitle(for: result.text, limit: 80)
-                                )
-                            }
-                        }
+            Button("Letztes Diktat verbessern") {
+                Task {
+                    let profile = EnhancementSettings.profile(for: .unknown)
+                    let result = await history.enhanceLast(profile: profile)
+                    guard let result else { return }
+                    if result.didEnhance {
+                        NotificationCenterService.shared.postDictationEnhanced(
+                            id: "dictation.enhanced",
+                            preview: DictationHistory.menuTitle(for: result.text, limit: 80)
+                        )
                     }
                 }
             }
             .disabled(history.last == nil)
         }
-        if history.recent.isEmpty {
-            Button("Letzte Diktate…") { open("recent") }
-        } else {
-            Menu("Letzte Diktate") {
-                ForEach(history.recent.prefix(8)) { item in
-                    Button(item.menuTitle) {
-                        Task {
-                            // It used to be `try?`: without Accessibility the
-                            // click did nothing, and nothing said why.
-                            do {
-                                try await history.paste(item.text)
-                            } catch {
-                                let failure = DictationFailure.pasteBlocked
-                                AppContainer.shared.dictation.overlay.flashError(failure.title, hint: failure.hint)
-                            }
-                        }
-                    }
-                }
-                Divider()
-                Button("Alle anzeigen…") { open("recent") }
-            }
-        }
-
-        Divider()
-
-        // Notes & storage (folded into one submenu to stay compact)
-        Menu("Notizen") {
-            Button("Notizen verwalten…") { open("notes") }
-            Button("Durchsuchen…") { open("search") }
-            Button("Notizen-Ordner öffnen") {
-                do {
-                    try notesFolder.ensureExists()
-                    NSWorkspace.shared.open(notesFolder.folderURL)
-                } catch {
-                    // To the page whose red line says why (Spec 27 §3.4).
-                    AppContainer.shared.settingsRoute.requested = .general
-                    open("settings")
-                }
-            }
-            if let error = notesFolder.lastError {
-                Text(error)
-            }
-        }
-        // Top level, not buried in the submenu: the statistics line above is the
-        // glance, this is the way in.
-        Button("Statistik…") { open("stats") }
+        // The window, not a submenu of eight. It was a second window inside a
+        // list, and the real one is one click away and can do more: correct,
+        // retry, improve with a chosen profile.
+        Button("Letzte Diktate…") { open("recent") }
+        // Searching (⌘F) and "Ordner öffnen" are in that window's toolbar now,
+        // where the folder is actually needed — and so is the folder error.
+        Button("Notizen…") { open("notes") }
 
         Divider()
         Button("Einstellungen…") { open("settings") }
@@ -720,34 +718,19 @@ struct MenuContentView: View {
     /// The update entry sits between Einstellungen and Beenden — the place the
     /// eye goes last, and where a menu-bar app is expected to keep it.
     ///
-    /// A `.menu` MenuBarExtra closes on click, so the *result* of a manual check
-    /// can only be seen the next time the menu opens. Without a line saying so,
-    /// "Nach Updates suchen" would be indistinguishable from a no-op whenever
-    /// there is nothing to install — the exact silent failure the rest of this
-    /// app avoids. An error is therefore always stated, and a successful check
-    /// confirms itself for `resultWindow` afterwards and then gets out of the way.
+    /// **Only when there is an occasion** (Spec 38 §3.3): a found update, or one
+    /// being installed right now. "Nach Updates suchen" and the "ist aktuell"
+    /// confirmation moved to Allgemein › Updates, where both already stood — and
+    /// where a manual check can show its result, which a `.menu` MenuBarExtra
+    /// cannot, because it closes on click. A menu that shows an update line
+    /// without an occasion says "nothing" every single time it is opened, and
+    /// the line that is always there is the one nobody reads when it finally
+    /// matters.
     @ViewBuilder
     private var updateSection: some View {
         if let update = updateChecker.available {
             updateItems(update)
-        } else if updateChecker.isChecking {
-            Text("Suche nach Updates…")
-        } else {
-            Button("Nach Updates suchen") { Task { await updateChecker.check() } }
-            if let error = updateChecker.lastError {
-                Text(error)
-            } else if let checked = updateChecker.lastChecked,
-                      Date().timeIntervalSince(checked) < Self.resultWindow {
-                Text("Notable \(Self.currentVersionString) ist aktuell (\(checked.formatted(date: .omitted, time: .shortened)))")
-            }
         }
-    }
-
-    /// How long a completed check keeps confirming itself in the menu.
-    private static let resultWindow: TimeInterval = 5 * 60
-
-    private static var currentVersionString: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
     }
 
     @ViewBuilder

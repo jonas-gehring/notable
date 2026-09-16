@@ -63,12 +63,47 @@ enum Theme {
         static let hero = Font.system(size: 40, weight: .semibold)
     }
 
-    /// Durations for appearing, disappearing and changing state — the HUD's
-    /// numbers from Spec 30, named once.
+    /// The app's entire vocabulary of movement (Spec 37 §3.1).
+    ///
+    /// This used to be three `Double`s that **nothing referenced**: five
+    /// animations in 25 000 lines of Swift, each with its duration written out
+    /// where it stood. The rule now is `Motion.x` or nothing, and `ThemeTests`
+    /// reads the source to keep it that way.
+    ///
+    /// The same numbers appear in two shapes, because two frameworks want them
+    /// differently: SwiftUI takes an `Animation`, and `NSAnimationContext` —
+    /// which is the only way to fade the HUD's own `NSPanel`, a window SwiftUI
+    /// knows nothing about — takes seconds.
     enum Motion {
-        static let appear: Double = 0.12
-        static let disappear: Double = 0.16
-        static let state: Double = 0.20
+        // Seconds. The panel fade, and the two display durations of the
+        // success moment, which are shown *after* the paste and therefore
+        // never on the measured stretch (Spec 37 §3.2, rule 1).
+        static let appearSeconds: Double = 0.12
+        static let disappearSeconds: Double = 0.16
+        static let stateSeconds: Double = 0.30
+        /// How long "✓ · 42 Wörter" stands before the HUD goes.
+        static let doneSeconds: Double = 0.7
+        /// A milestone gets longer, because it is a sentence, not a number.
+        static let milestoneSeconds: Double = 1.5
+
+        /// Something arrives.
+        static let appear = Animation.easeOut(duration: appearSeconds)
+        /// Something goes.
+        static let disappear = Animation.easeIn(duration: disappearSeconds)
+        /// A change of shape — the HUD's states, a chip flipping.
+        static let state = Animation.spring(response: 0.30, dampingFraction: 0.85)
+        /// Numbers counting up and charts redrawing: slower, because the eye is
+        /// meant to follow the value rather than notice the movement.
+        static let gentle = Animation.spring(response: 0.55, dampingFraction: 0.90)
+        /// The one thing that never stops: the capsule breathing while a
+        /// hands-free recording listens to silence.
+        static let breathe = Animation.easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+        /// One waveform sample. 30 Hz is the rate the level arrives at.
+        static let level = Animation.linear(duration: 1.0 / 30)
+
+        /// A staggered appearance — the statistics tiles, 40 ms apart.
+        static func appear(delay: Double) -> Animation { appear.delay(delay) }
+        static let stagger: Double = 0.04
     }
 
     // MARK: Private

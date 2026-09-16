@@ -97,6 +97,35 @@ final class SpeakerLabelsStoreTests: XCTestCase {
         XCTAssertEqual(segments.map(\.cluster), [nil, "Lukas", "Lukas"])
     }
 
+    /// The `CHECK` constraint lists the sources by hand. When `calendar` was
+    /// added to the enum and not to the constraint, the first one-to-one meeting
+    /// that found a name would have failed inside `insertMeeting`'s transaction
+    /// and lost the entire recording. Every case, written and read back.
+    func testEverySourceCanBeWritten() async throws {
+        for source in RecordingStore.SpeakerLabel.Source.allCases {
+            let recording = meeting()
+            try await store.insertMeeting(recording, segments: [segment("Anna", 0, 2, cluster: "Sprecher 1")],
+                                          labels: [.init(cluster: "Sprecher 1", name: "Anna", source: source)])
+            let labels = try await store.speakerLabels(for: recording.id)
+            XCTAssertEqual(labels.first?.source, source, "Quelle \(source.rawValue) muss schreibbar sein")
+        }
+    }
+
+    /// The failure mode that made this urgent: the label is written inside the
+    /// same transaction as the recording, so a rejected source loses the meeting.
+    func testACalendarNameDoesNotCostTheMeeting() async throws {
+        let recording = meeting()
+        try await store.insertMeeting(recording, segments: [segment("Jana Schultze", 0, 5, cluster: "Sprecher 1")],
+                                      labels: [.init(cluster: "Sprecher 1", name: "Jana Schultze", source: .calendar)])
+        let loaded = try await store.meeting(id: recording.id)
+        XCTAssertNotNil(loaded, "die Aufnahme muss die Benennung überleben")
+        let segments = try await store.segments(for: recording.id)
+        let labels = try await store.speakerLabels(for: recording.id)
+        XCTAssertEqual(segments.count, 1)
+        XCTAssertEqual(labels.first?.name, "Jana Schultze")
+        XCTAssertEqual(labels.first?.source, .calendar)
+    }
+
     func testParticipantsRoundTrip() async throws {
         var recording = meeting()
         recording.participants = ["Anna Weber", "Ben Kraus"]

@@ -1,39 +1,15 @@
 import SwiftUI
 
+/// The settings window: four pages in a native `NavigationSplitView` sidebar
+/// (resizable, standard macOS System-Settings look). Earlier this was a
+/// hand-rolled top tab bar to dodge `TabView`'s titlebar-overflow inside a plain
+/// `Window`; the sidebar is more native and never crowds long labels.
+///
+/// The frame and nothing else — every page is its own file.
 struct SettingsView: View {
-    /// The seven settings pages, shown in a native `NavigationSplitView` sidebar
-    /// (resizable, standard macOS System-Settings look). Earlier this was a
-    /// hand-rolled top tab bar to dodge `TabView`'s titlebar-overflow inside a
-    /// plain `Window`; the sidebar is more native and never crowds long labels.
-    enum Pane: String, CaseIterable, Identifiable {
-        case general, dictation, meetings, menubar, summary, storage, permissions
-        var id: String { rawValue }
-
-        var label: String {
-            let key: String.LocalizationValue = switch self {
-            case .general: "Allgemein"
-            case .dictation: "Diktat"
-            case .meetings: "Meetings"
-            case .menubar: "Menüleiste"
-            case .summary: "Zusammenfassung"
-            case .storage: "Speicherplatz"
-            case .permissions: "Berechtigungen"
-            }
-            return String(localized: key)
-        }
-
-        var icon: String {
-            switch self {
-            case .general: "gearshape"
-            case .dictation: "mic"
-            case .meetings: "person.2.wave.2"
-            case .menubar: "menubar.rectangle"
-            case .summary: "text.justify.left"
-            case .storage: "internaldrive"
-            case .permissions: "lock.shield"
-            }
-        }
-    }
+    /// The pages themselves live in `SettingsRoute.swift`, which is pure and
+    /// therefore testable; this keeps the name they are referred to by.
+    typealias Pane = SettingsPane
 
     @State private var selection: Pane? = .general
     @ObservedObject private var route = AppContainer.shared.settingsRoute
@@ -68,10 +44,7 @@ struct SettingsView: View {
         case .general: GeneralSettingsView()
         case .dictation: DictationSettingsView()
         case .meetings: MeetingsSettingsView()
-        case .menubar: MenuBarSettingsView()
-        case .summary: SummarizationSettingsView()
-        case .storage: StorageSettingsView()
-        case .permissions: PermissionsSettingsView()
+        case .data: DataSettingsView()
         }
     }
 }

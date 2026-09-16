@@ -120,6 +120,10 @@ final class MeetingController: ObservableObject {
     /// Reads the call window while recording (Spec 24). nil when switched off,
     /// without Accessibility, or when no adapter knows the call app.
     private var screenObserver: CallScreenObserver?
+    /// The self-running Stufe-0 measurement (Spec 36 §3.1): scheduled at the
+    /// start of a call whose app has no adapter, cancelled when the recording
+    /// ends before the minute is up.
+    private var screenProbeTask: Task<Void, Never>?
 
     init(notesFolder: NotesFolderManager, calendar: CalendarMonitor, liveNotes: LiveNotesController) {
         self.notesFolder = notesFolder
@@ -143,6 +147,12 @@ final class MeetingController: ObservableObject {
                 // would be thrown away too.
                 self.statusMessage = String(localized: "System-Audio nach Gerätewechsel verloren — ab hier nur Mikrofon: \(error.localizedDescription)")
             }
+        }
+        // "Sprecher benennen…" on a finished note (Spec 36 §3.2). The dialog is
+        // a sheet of the note list, and the moment somebody wants it the list is
+        // closed — so the notification opens it in a window of its own.
+        NotificationCenterService.shared.onNameSpeakers = { recordingID in
+            SpeakerEditorWindow.present(recordingID: recordingID)
         }
     }
 
@@ -350,6 +360,12 @@ final class MeetingController: ObservableObject {
         // Who the call shows and who it highlights (Spec 24) — on its own
         // queue, never in the capture path.
         screenObserver = callProcess().flatMap { CallScreenObserver.start(bundleIDs: $0.bundleIDs, spool: currentSpool) }
+        // And when no adapter knows this app: measure it, once per app and
+        // version, a minute from now — the measurement that has been waiting
+        // for a button press since 2026-09-11 (Spec 36 §3.1).
+        screenProbeTask = callProcess().flatMap {
+            ScreenProbe.automaticProbe(bundleIDs: $0.bundleIDs, callName: $0.name)
+        }
 
         // Live notes open for business: the buffer is bound to this recording's
         // spool from here until stop() consumes it.
@@ -771,20 +787,25 @@ final class MeetingController: ObservableObject {
         // finished, and only this line says otherwise.
         statusMessage = (outcome.captureWarning.map { $0 + " " } ?? "")
             + (outcome.summaryError.map { String(localized: "Notiz gespeichert, aber ohne Zusammenfassung: \($0)") } ?? saved)
+            + (outcome.screenWarning.map { " " + $0 } ?? "")
 
         if let captureWarning = outcome.captureWarning {
             notifyReady(title: String(localized: "Aufnahme unvollständig"),
-                        body: captureWarning, noteURL: outcome.url)
+                        body: captureWarning, noteURL: outcome.url,
+                        speakersFor: outcome.speakersToName)
         } else if let summaryError = outcome.summaryError {
             notifyReady(title: String(localized: "Notiz gespeichert — ohne Zusammenfassung"),
                         body: String(localized: "\(summaryError) — im Menü erneut versuchen."),
-                        noteURL: outcome.url)
+                        noteURL: outcome.url,
+                        speakersFor: outcome.speakersToName)
         } else {
             notifyReady(title: recovered
                             ? String(localized: "Unterbrochene Aufnahme wiederhergestellt")
                             : String(localized: "Zusammenfassung fertig"),
-                        body: outcome.url.deletingPathExtension().lastPathComponent,
-                        noteURL: outcome.url)
+                        body: outcome.url.deletingPathExtension().lastPathComponent
+                            + (outcome.screenWarning.map { " — " + $0 } ?? ""),
+                        noteURL: outcome.url,
+                        speakersFor: outcome.speakersToName)
         }
         Self.runMeetingHook(noteURL: outcome.url)
     }
@@ -799,8 +820,13 @@ final class MeetingController: ObservableObject {
         stopMicWatchdog()
         stopDeviceMonitor()
         stopSilenceWatch()
+        // Whether an adapter was watching at all — a meeting without one says
+        // nothing about an adapter having gone blind (`ScreenDataWatch`).
+        let screenAdapter = screenObserver != nil
         let screen = screenObserver?.stop() ?? []
         screenObserver = nil
+        screenProbeTask?.cancel()
+        screenProbeTask = nil
         let diagnostics = diagnosticsLog.last
         if let name = inputDeviceName {
             UserDefaults.standard.set(name, forKey: DefaultsKey.lastMeetingInputDevice.key)
@@ -866,6 +892,7 @@ final class MeetingController: ObservableObject {
                     spool: spool,
                     diagnostics: diagnostics,
                     screen: screen,
+                    screenAdapter: screenAdapter,
                     callSource: source,
                     eventFoundAtStop: stopEvent != nil
                 )
@@ -913,6 +940,7 @@ final class MeetingController: ObservableObject {
         let event: CalendarMonitor.EventMatch? = meta.eventTitle.map {
             CalendarMonitor.EventMatch(title: $0, eventIdentifier: meta.eventID ?? "")
         }
+        let recoveredScreen = SpoolStore.readScreenObservations(session)
         Task {
             do {
                 let note = try await Self.produceNote(
@@ -925,7 +953,10 @@ final class MeetingController: ObservableObject {
                     userNotes: recoveredNotes,
                     spool: session,
                     diagnostics: meta.diagnostics?.last,
-                    screen: SpoolStore.readScreenObservations(session),
+                    screen: recoveredScreen,
+                    // A recovered meeting cannot say whether an adapter ran and
+                    // found nothing, so it never counts against one.
+                    screenAdapter: !recoveredScreen.isEmpty,
                     callSource: meta.callSource
                 )
                 handle(outcome: note, spool: session, userNotes: recoveredNotes, recovered: true)
@@ -946,13 +977,14 @@ final class MeetingController: ObservableObject {
     /// The menu keeps the full history in `statusMessage`; this is the signal for
     /// the moment the user is somewhere else entirely — the meeting just ended
     /// and the note (or the failure) is ready. Click opens the note.
-    private func notifyReady(title: String, body: String, noteURL: URL?) {
+    private func notifyReady(title: String, body: String, noteURL: URL?, speakersFor recordingID: String? = nil) {
         guard DefaultsKey.notifyOnMeetingReady.value() else { return }
         NotificationCenterService.shared.postMeetingReady(
             id: "meeting-ready-\(UUID().uuidString)",
             title: title,
             body: body,
-            noteURL: noteURL
+            noteURL: noteURL,
+            speakersFor: recordingID
         )
     }
 
@@ -968,6 +1000,12 @@ final class MeetingController: ObservableObject {
         /// The note is still written — half a meeting beats none — but the gap
         /// must be reported, or it reads as a complete transcript.
         var captureWarning: String?
+        /// Set when an adapter has found nothing for three meetings running
+        /// (Spec 36 §3.1) — what an app update looks like from in here.
+        var screenWarning: String?
+        /// The recording whose speakers are still unnamed, for the
+        /// "Sprecher benennen…" button on the notification (§3.2).
+        var speakersToName: String?
     }
 
     /// Re-runs summarization for the last note whose summary failed.
@@ -1091,6 +1129,9 @@ final class MeetingController: ObservableObject {
         diagnostics: CaptureDiagnostics? = nil,
         /// What the call window showed, if an adapter read it (Spec 24).
         screen: [ScreenObservation] = [],
+        /// Whether an adapter was watching at all — an adapter that finds
+        /// nothing is news, no adapter is not (Spec 36 §3.1).
+        screenAdapter: Bool = false,
         /// The detected call, for the title when there is no event (Spec 35).
         callSource: String? = nil,
         /// `event` was found only when the recording stopped (Spec 35).
@@ -1106,15 +1147,19 @@ final class MeetingController: ObservableObject {
         // rather than "was invited" — and the calendar has been empty for every
         // meeting measured (Spec 24 §1.2).
         let expectedSpeakers = ScreenRoster.expectedRemoteSpeakers(screen) ?? Self.expectedRemoteSpeakers(of: event)
-        let segments = try await Task.detached(priority: .userInitiated) {
+        // `processDetailed`, because the voices have to survive the pipeline:
+        // a profile is the centroid of a large cluster (Spec 36 §3.3), and the
+        // embeddings exist only for the length of the diarization.
+        let processed = try await Task.detached(priority: .userInitiated) {
             let transcriber = try await meetingTranscriber()
-            return try await MeetingPipeline.process(
+            return try await MeetingPipeline.processDetailed(
                 micSamples: micSamples,
                 systemSamples: systemSamples,
                 transcriber: transcriber,
                 expectedSpeakers: expectedSpeakers
             )
         }.value
+        let segments = processed.segments
 
         // A track that was recorded but carries no signal at all is a capture
         // fault, and it is invisible downstream: the pipeline happily transcribes
@@ -1137,6 +1182,18 @@ final class MeetingController: ObservableObject {
         case (false, false):
             captureWarning = nil
         }
+
+        // An adapter that has stopped finding anything (Spec 36 §3.1). The good
+        // failure — the other one writes a confident wrong name — but it still
+        // has to be said, or the names quietly stop appearing.
+        let screenWithoutData = ScreenDataWatch.update(adapterRan: screenAdapter, observations: screen.count)
+        let screenDiagnosis = NoteDiagnosis.screen(
+            adapterRan: screenAdapter, observations: screen.count, meetingsWithoutData: screenWithoutData
+        )
+        let screenWarning = screenAdapter && screen.isEmpty && screenWithoutData >= ScreenDataWatch.warnAfter
+            ? String(localized: "Das Call-Fenster liefert seit \(screenWithoutData) Meetings keine Namen mehr.")
+            : nil
+        log.notice("Bildschirm: \(screenDiagnosis, privacy: .public)")
 
         // Minted here rather than just before the SQLite write: the naming call
         // below is a provider round-trip whose spend is booked against this
@@ -1165,7 +1222,11 @@ final class MeetingController: ObservableObject {
         var namingOutcome: SpeakerNameResolver.Outcome?
         var screenNamed = 0
         var calendarNamed = 0
+        var voiceNamed = 0
         var openLabels = 0
+        /// Whether the screen's own self-check held for this meeting — only
+        /// then is a screen name evidence a voice profile may learn from.
+        var screenTrusted = false
         if !segments.isEmpty, !micSilent {
             let owner = SpeakerNameResolver.ownerNameTokens
             let fromScreen = ScreenNaming.apply(segments, observations: screen, recordingStart: startedAt, ownerTokens: owner)
@@ -1173,20 +1234,53 @@ final class MeetingController: ObservableObject {
             participants = fromScreen.participants
             labelRecords += fromScreen.names.map { .init(cluster: $0.key, name: $0.value, source: .screen) }
             screenNamed = fromScreen.names.count
+            screenTrusted = ScreenSelfCheck.trusts(fromScreen.selfCheck)
 
-            // One remote voice, one invited guest: that voice is that person
-            // (Spec 35). Before the model, because the calendar attests it and
-            // the transcript often does not — and only onto a label the screen
-            // left open.
+            // Clusters by speech time, computed once: the voice, the one-to-one
+            // rule and the profiles all ask the same question of it — which of
+            // these are large clusters rather than splinters.
             let remoteSeconds = named.reduce(into: [String: TimeInterval]()) { totals, segment in
                 guard let cluster = segment.cluster, cluster != SpeakerNameResolver.micSpeakerLabel,
                       cluster != SpeakerNameResolver.unknownSpeakerLabel else { return }
                 totals[cluster, default: 0] += max(0, segment.end - segment.start)
             }
+            let largeClusters = SpeakerClusterCleanup.largeLabels(remoteSeconds)
+
+            // The voice, between the screen and the calendar (Spec 36 §3.3):
+            // somebody named in an earlier meeting carries their name again,
+            // without the calendar, without it being spoken, without anything
+            // leaving the device. Only large clusters, only labels the screen
+            // left open, and only when `VoiceProfiles.assign` is certain — a
+            // second profile within the margin means a number, not a guess.
+            if DefaultsKey.voiceProfilesEnabled.value(), !processed.voices.isEmpty {
+                let open = ScreenNaming.unnamedLabels(in: named)
+                let candidates = processed.voices
+                    .filter { open.contains($0.key) && largeClusters.contains($0.key) }
+                    .map { VoiceProfiles.Candidate(cluster: $0.key, centroid: $0.value) }
+                let profiles = (try? await RecordingStore.shared.voiceProfiles()) ?? []
+                let matches = VoiceProfiles.assign(candidates, profiles: profiles,
+                                                   taken: Set(fromScreen.names.values))
+                if !matches.isEmpty {
+                    // Not verbatim-checked, for the same reason as the calendar
+                    // rule: the point is that the name was never spoken. What
+                    // `validated` refuses — the owner's own name, a collision —
+                    // still applies.
+                    let proposed = Dictionary(matches.map { ($0.cluster, $0.name) }, uniquingKeysWith: { first, _ in first })
+                    let mapping = SpeakerNameResolver.validated(proposed, in: named, requireVerbatim: false, ownerTokens: owner)
+                    named = SpeakerNameResolver.applyMapping(named, mapping: mapping, requireVerbatim: false, ownerTokens: owner)
+                    labelRecords += mapping.map { .init(cluster: $0.key, name: $0.value, source: .voice) }
+                    voiceNamed = mapping.count
+                }
+            }
+
+            // One remote voice, one invited guest: that voice is that person
+            // (Spec 35). Before the model, because the calendar attests it and
+            // the transcript often does not — and only onto a label nothing
+            // else has named.
             if let oneToOne = OneToOneNaming.name(
                 attendees: event?.attendeeNames ?? [],
                 openLabels: ScreenNaming.unnamedLabels(in: named),
-                largeClusters: SpeakerClusterCleanup.largeLabels(remoteSeconds).sorted(),
+                largeClusters: largeClusters.sorted(),
                 ownerTokens: owner
             ) {
                 // Not verbatim-checked: the point of this rule is that the name
@@ -1207,7 +1301,9 @@ final class MeetingController: ObservableObject {
                     providerID: providerID,
                     recordingID: recordingID
                 )
-                let taken = Set(fromScreen.names.values.map { $0.lowercased() })
+                // Every name already handed out, whatever gave it — the model
+                // must not put one of them on a second cluster.
+                let taken = Set(labelRecords.compactMap { $0.name?.lowercased() })
                 let usable = resolved.mapping.filter { open.contains($0.key) && !taken.contains($0.value.lowercased()) }
                 let applied = SpeakerNameResolver.validated(usable, in: named)
                 named = SpeakerNameResolver.applyMapping(named, mapping: applied)
@@ -1222,6 +1318,7 @@ final class MeetingController: ObservableObject {
             remoteLabels: SpeakerNameResolver.remoteLabels(in: segments).count,
             screenNamed: screenNamed,
             calendarNamed: calendarNamed,
+            voiceNamed: voiceNamed,
             openLabels: openLabels,
             enabled: DefaultsKey.speakerNamingEnabled.value(),
             outcome: namingOutcome
@@ -1233,10 +1330,17 @@ final class MeetingController: ObservableObject {
         // No calendar event ⇒ the title is a fallback ("Meeting") that the model
         // may replace with a concise generated one.
         let titleIsAuto = (event == nil)
-        // Without an event, the call the recording belonged to names it until
-        // the model supplies a title: "Microsoft Teams · 10:03" says which
-        // meeting this was, "Meeting" said nothing (Spec 35).
+        // The call window's own title, ranked **before** the model (Spec 36
+        // §3.1, decided 2026-09-16): it is the title the organiser set, where
+        // the model's is invented from the transcript. Only without an event —
+        // the calendar still outranks it — and only if `CallWindowTitle` finds
+        // something that is a title rather than an app name.
+        let windowTitle = event == nil ? CallWindowTitle.fromObservations(screen) : nil
+        // Without either, the call the recording belonged to names it until the
+        // model supplies a title: "Microsoft Teams · 10:03" says which meeting
+        // this was, "Meeting" said nothing (Spec 35).
         var finalTitle = event?.title
+            ?? windowTitle
             ?? callSource.map { "\($0) · \(startedAt.formatted(date: .omitted, time: .shortened))" }
             ?? String(localized: "Meeting")
         let fallbackTitle = finalTitle
@@ -1296,9 +1400,10 @@ final class MeetingController: ObservableObject {
                     purpose: .summary, recordingID: recordingID
                 )
 
-                // Auto title: only when there is no calendar event and the model
-                // supplied one. Rename the file to match (collision-safe).
-                if titleIsAuto,
+                // Auto title: only when there is no calendar event, the call
+                // window gave none either, and the model supplied one. Rename
+                // the file to match (collision-safe).
+                if titleIsAuto, windowTitle == nil,
                    let modelTitle = summary.title?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !modelTitle.isEmpty {
                     finalTitle = modelTitle
@@ -1353,9 +1458,34 @@ final class MeetingController: ObservableObject {
             labels: labelRecords
         )
 
+        // What the voices of this meeting sounded like, and which of the names
+        // are evidence a profile may learn from (Spec 36 §3.3): the user, the
+        // screen with a trusted self-check, the calendar's one-to-one. Never the
+        // model, and never a voice match — a source that confirms itself would
+        // walk a profile onto whoever it first hit. Best-effort throughout: a
+        // profile that is not written costs recognition, never a meeting.
+        if DefaultsKey.voiceProfilesEnabled.value(), !processed.voices.isEmpty {
+            let large = SpeakerClusterCleanup.largeLabels(processed.seconds)
+                .subtracting([SpeakerNameResolver.unknownSpeakerLabel])
+            let centroids = processed.voices.filter { large.contains($0.key) }
+            var confirmed: [String: String] = [:]
+            for record in labelRecords {
+                guard let name = record.name, centroids[record.cluster] != nil else { continue }
+                switch record.source {
+                case .user, .calendar: confirmed[record.cluster] = name
+                case .screen where screenTrusted: confirmed[record.cluster] = name
+                default: continue
+                }
+            }
+            try? await RecordingStore.shared.rememberVoices(
+                centroids, seconds: processed.seconds, confirmed: confirmed, recordingID: recordingID
+            )
+        }
+
         let titleDiagnosis = NoteDiagnosis.title(
             eventAtStart: event != nil && !eventFoundAtStop,
             eventAtStop: eventFoundAtStop,
+            windowTitled: windowTitle != nil,
             modelTitled: titleIsAuto && finalTitle != fallbackTitle,
             callSource: callSource != nil,
             calendarAccess: CalendarMonitor.hasFullAccess,
@@ -1367,6 +1497,7 @@ final class MeetingController: ObservableObject {
             SpoolStore.updateMeta(spool) {
                 $0.naming = namingDiagnosis
                 $0.titleSource = titleDiagnosis
+                $0.screen = screenDiagnosis
             }
         }
 
@@ -1375,7 +1506,14 @@ final class MeetingController: ObservableObject {
             summaryError: summaryError,
             retry: retry,
             producedTranscript: !named.isEmpty,
-            captureWarning: captureWarning
+            captureWarning: captureWarning,
+            screenWarning: screenWarning,
+            // Nothing was named and there is more than one voice to tell apart:
+            // the one case where the dialog is worth a button (Spec 36 §3.2).
+            speakersToName: NoteDiagnosis.offersSpeakerNaming(
+                naming: namingDiagnosis,
+                remoteLabels: SpeakerNameResolver.remoteLabels(in: segments).count
+            ) ? recordingID : nil
         )
     }
 }

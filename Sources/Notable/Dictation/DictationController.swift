@@ -262,7 +262,9 @@ final class DictationController: ObservableObject {
             return
         }
         isCapturing = false
-        overlay.hide()
+        // Shrinks instead of fading (Spec 37 §3.2): once the capsule is gone,
+        // nothing else distinguishes "discarded" from "pasted".
+        overlay.hide(.shrink)
         feedback.playCue(.cancelled)
         publishCaptureState()
     }
@@ -438,8 +440,10 @@ final class DictationController: ObservableObject {
                 await previous?.value
                 guard isLive(generation) else { return }
                 feedback.hideIfIdle()
+                var pasted = false
                 switch DictationTextStages.deliver(text.toPaste, target: job.targetBundleID) {
                 case .pasted:
+                    pasted = true
                     feedback.playCue(.done)
                     lastDictationText = text.toPaste
                     DictationTextStages.watchForCorrections(text.toPaste, capture: job.target)
@@ -466,6 +470,14 @@ final class DictationController: ObservableObject {
                 )
                 if !saved, !isCapturing {
                     overlay.flashError(String(localized: "Diktat nicht gespeichert — Text ist eingefügt."))
+                }
+                // The success moment (Spec 37 §3.2) — here, after the paste and
+                // after the save, and nowhere earlier: the measured stretch
+                // ended at `deliver` above.
+                if let moment = DictationTextStages.successMoment(
+                    text, job: job, pasted: pasted, saved: saved, isCapturing: isCapturing
+                ) {
+                    overlay.flashDone(moment)
                 }
                 await AppContainer.shared.dictationHistory.refresh()
                 await AppContainer.shared.usage.refresh()

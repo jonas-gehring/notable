@@ -1,16 +1,24 @@
 import SwiftUI
 
-/// Settings → Speicherplatz (issue #2).
+/// Settings → **Daten**: *Was weiß Notable, was behält es, was darf es?*
 ///
-/// Six weeks of use left 9.8 GB of raw meeting audio on disk and nothing ever
-/// deleted any of it. This is where that gets a rule — and where the two things
-/// that must *not* be deleted are stated out loud, because a cleanup screen that
-/// only lists what it destroys is one nobody will trust.
-struct StorageSettingsView: View {
+/// One page out of two (Spec 38 §3.2). "Speicherplatz" and "Berechtigungen"
+/// were separate pages answering one question between them, and neither could
+/// be read without the other: what is on the disk, how long it stays, what is
+/// recorded about you, and which rights make any of it possible.
+///
+/// The retention half is where six weeks of use left 9.8 GB of raw meeting
+/// audio with nothing ever deleting it (issue #2). Six pickers asked about that
+/// in six ways; one asks now, and the two things that must **not** be deleted
+/// are still stated out loud, because a cleanup screen that only lists what it
+/// destroys is one nobody will trust.
+struct DataSettingsView: View {
+    @EnvironmentObject private var permissions: PermissionsManager
+
     @AppStorage(RetentionPolicy.Key.enabled) private var enabled = false
-    @AppStorage(RetentionPolicy.Key.audioAge) private var audioDays = 30
-    @AppStorage(RetentionPolicy.Key.audioBudget) private var audioBudgetGB = 20
-    @AppStorage(RetentionPolicy.Key.failedAge) private var failedDays = 90
+    @AppStorage(RetentionPolicy.Key.audioAge) private var audioDays = RetentionPolicy.default.audioMaxAgeDays ?? 30
+    @AppStorage(RetentionPolicy.Key.audioBudget) private var audioBudgetGB = RetentionPolicy.defaultBudgetGigabytes
+    @AppStorage(RetentionPolicy.Key.failedAge) private var failedDays = RetentionPolicy.default.failedMaxAgeDays ?? 60
     @AppStorage(RetentionPolicy.Key.dictationAge) private var dictationDays = 0
     @AppStorage(RetentionPolicy.Key.meetingAge) private var meetingDays = 0
     @AppStorage(RetentionPolicy.Key.chatAge) private var chatDays = 0
@@ -29,12 +37,23 @@ struct StorageSettingsView: View {
     @State private var confirmClearApps = false
     @State private var clearedApps: Int?
 
+    private let refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
     private static let ages: [(Int, LocalizedStringKey)] = [
         (0, "Aus"), (7, "7 Tage"), (30, "30 Tage"), (90, "90 Tage"), (365, "1 Jahr"),
     ]
     private static let budgets: [(Int, LocalizedStringKey)] = [
         (0, "Aus"), (5, "5 GB"), (10, "10 GB"), (20, "20 GB"), (50, "50 GB"),
     ]
+
+    /// The one retention control. `AudioRetentionChoice` holds the pure half —
+    /// including what a hand-set number that is none of the five reads as.
+    private var audioChoice: Binding<AudioRetentionChoice> {
+        Binding(
+            get: { AudioRetentionChoice.nearest(days: audioDays) },
+            set: { audioDays = $0.rawValue }
+        )
+    }
 
     var body: some View {
         Form {
@@ -52,92 +71,179 @@ struct StorageSettingsView: View {
                 Text("Alles, was Notable auf die Platte legt.")
             }
 
+            retentionSection
+            statisticsSection
+            permissionsSection
             modelSection
             compressionSection
-
-            Section {
-                Toggle("Beim Start automatisch aufräumen", isOn: $enabled)
-                picker("Meeting-Audio löschen nach", $audioDays, Self.ages)
-                picker("Gesamtbudget für Meeting-Audio", $audioBudgetGB, Self.budgets)
-                picker("Fehlgeschlagene Aufnahmen löschen nach", $failedDays, Self.ages)
-            } header: {
-                Text("Aufnahmen")
-            } footer: {
-                Text("Frist und Budget gelten beide; fehlgeschlagene Aufnahmen bekommen mehr Zeit.")
-            }
-
-            Section {
-                picker("Diktattext löschen nach", $dictationDays, Self.ages)
-                picker("Meeting-Transkripte löschen nach", $meetingDays, Self.ages)
-                picker("Chat-Verläufe löschen nach", $chatDays, Self.ages)
-            } header: {
-                Text("Texte in der Datenbank")
-            } footer: {
-                Text("Gelöscht wird nur der Text — die Statistik bleibt unverändert.")
-            }
-
-            Section {
-                Toggle("Ziel-App der Diktate erfassen", isOn: $appStatistics)
-                // Confirmed and counted: it is a database write with no undo,
-                // and it used to give no sign that anything had happened.
-                Button("Erfasste Ziel-Apps löschen", role: .destructive) { confirmClearApps = true }
-                    .confirmationDialog(
-                        "Erfasste Ziel-Apps löschen?",
-                        isPresented: $confirmClearApps
-                    ) {
-                        Button("Löschen", role: .destructive) { clearSourceApps() }
-                        Button("Abbrechen", role: .cancel) {}
-                    } message: {
-                        Text("Die Zuordnung „welches Diktat ging in welche App“ geht verloren. Wortzahlen und Zeiten bleiben.")
-                    }
-                if let clearedApps {
-                    Text("\(clearedApps) Einträge gelöscht.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } header: {
-                Text("App-Statistik")
-            } footer: {
-                Text("Die Bundle-ID bleibt in der lokalen Datenbank und geht nie in eine Anfrage.")
-            }
-
-            Section {
-                if let pending {
-                    if pending.removals.isEmpty {
-                        Text("Nichts aufzuräumen.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(Self.sessions(pending.removals.count)), \(byteText(pending.reclaimedBytes)) werden gelöscht.")
-                        HStack {
-                            Button("Endgültig löschen", role: .destructive) { runPlan(pending) }
-                            Button("Abbrechen") { self.pending = nil }
-                        }
-                    }
-                } else {
-                    Button("Jetzt aufräumen…") { preview() }
-                        .disabled(isWorking)
-                }
-                if let lastResult, lastResult.removedSessions > 0 {
-                    Text("Zuletzt gelöscht: \(Self.sessions(lastResult.removedSessions)), \(byteText(lastResult.reclaimedBytes)).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                // A failed database clean-up used to report itself as "0
-                // segments cleared" — indistinguishable from nothing to do.
-                if let lastResult, !lastResult.errors.isEmpty {
-                    Text("Aufräumen unvollständig: \(lastResult.errors.joined(separator: "; "))")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .textSelection(.enabled)
-                }
-            } header: {
-                Text("Manuell aufräumen")
-            } footer: {
-                Text("Notizen, Statistik und KI-Kosten werden nie gelöscht; du siehst immer erst den Plan.")
-            }
+            manualCleanupSection
+            advancedSection
         }
         .formStyle(.grouped)
         .task { await measure() }
+        .onAppear { permissions.refresh() }
+        .onReceive(refreshTimer) { _ in permissions.refresh() }
+    }
+
+    // MARK: - Aufbewahrung
+
+    /// One switch and one age. The budget is fixed at 20 GB and the grace period
+    /// for failed recordings is twice the age — both derived rather than asked
+    /// (§3.1 rule 1) — and the three **text** deadlines have stopped being
+    /// automatic altogether: they were off in the default and stayed off, and
+    /// whoever wants transcripts gone has "Jetzt aufräumen…". All six keys are
+    /// still read; the pickers for them live under "Erweitert", for whoever set
+    /// one.
+    private var retentionSection: some View {
+        Section {
+            Toggle("Alte Aufnahmen automatisch aufräumen", isOn: $enabled)
+            Picker("Meeting-Audio behalten", selection: audioChoice) {
+                ForEach(AudioRetentionChoice.allCases) { choice in
+                    Text(choice.label).tag(choice)
+                }
+            }
+            .disabled(!enabled)
+        } header: {
+            Text("Aufbewahrung")
+        } footer: {
+            Text("Gilt nur für rohes Audio. Notizen, Transkripte, Statistik und KI-Kosten werden nie automatisch gelöscht.")
+        }
+    }
+
+    // MARK: - Statistik
+
+    private var statisticsSection: some View {
+        Section {
+            Toggle("Ziel-App der Diktate erfassen", isOn: $appStatistics)
+            // Confirmed and counted: it is a database write with no undo,
+            // and it used to give no sign that anything had happened.
+            Button("Erfasste Ziel-Apps löschen", role: .destructive) { confirmClearApps = true }
+                .confirmationDialog(
+                    "Erfasste Ziel-Apps löschen?",
+                    isPresented: $confirmClearApps
+                ) {
+                    Button("Löschen", role: .destructive) { clearSourceApps() }
+                    Button("Abbrechen", role: .cancel) {}
+                } message: {
+                    Text("Die Zuordnung „welches Diktat ging in welche App“ geht verloren. Wortzahlen und Zeiten bleiben.")
+                }
+            if let clearedApps {
+                Text("\(clearedApps) Einträge gelöscht.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Statistik")
+        } footer: {
+            Text("Die Bundle-ID bleibt in der lokalen Datenbank und geht nie in eine Anfrage.")
+        }
+    }
+
+    // MARK: - Berechtigungen
+
+    /// The page that was. "Status aktualisieren" is gone — it refreshes every
+    /// two seconds while this page is open — and "Notable neu starten" moved to
+    /// Allgemein › Erweitert, next to the other thing a restart is for.
+    private var permissionsSection: some View {
+        Section {
+            ForEach(PermissionsManager.Kind.allCases) { kind in
+                permissionRow(kind)
+            }
+        } header: {
+            Text("Berechtigungen")
+        } footer: {
+            // No count: there were six kinds behind a sentence claiming
+            // five, and the onboarding said next door that only the
+            // microphone is required. Both cannot be true, and the number
+            // was the part that had to go.
+            Text("Zwingend ist nur das Mikrofon. Fehlt eine der anderen, meldet das jeweilige Feature es und arbeitet eingeschränkt weiter.")
+        }
+    }
+
+    @ViewBuilder
+    private func permissionRow(_ kind: PermissionsManager.Kind) -> some View {
+        let status = permissions.status(of: kind)
+        HStack(alignment: .top) {
+            Image(systemName: status.symbolName)
+                .foregroundStyle(status.color)
+                .accessibilityLabel(status.label)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(kind.name)
+                Text(kind.purpose)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if permissions.canPrompt(kind) {
+                Button("Erlauben") {
+                    Task { await permissions.request(kind) }
+                }
+            } else {
+                Button("Systemeinstellungen…") {
+                    permissions.openSystemSettings(for: kind)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - Erweitert
+
+    /// The five deadlines that lost their place over the fold. Nothing here is
+    /// new and nothing here is required — it exists so that a value somebody
+    /// set before Spec 38 stays reachable (§3.5).
+    private var advancedSection: some View {
+        Section {
+            DisclosureGroup("Erweitert") {
+                picker("Diktattext löschen nach", $dictationDays, Self.ages)
+                picker("Meeting-Transkripte löschen nach", $meetingDays, Self.ages)
+                picker("Chat-Verläufe löschen nach", $chatDays, Self.ages)
+                picker("Gesamtbudget für Meeting-Audio", $audioBudgetGB, Self.budgets)
+                picker("Fehlgeschlagene Aufnahmen löschen nach", $failedDays, Self.ages)
+                Text("Gelöscht wird bei Texten nur der Text — die Statistik bleibt unverändert.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Manuell aufräumen
+
+    private var manualCleanupSection: some View {
+        Section {
+            if let pending {
+                if pending.removals.isEmpty {
+                    Text("Nichts aufzuräumen.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(Self.sessions(pending.removals.count)), \(byteText(pending.reclaimedBytes)) werden gelöscht.")
+                    HStack {
+                        Button("Endgültig löschen", role: .destructive) { runPlan(pending) }
+                        Button("Abbrechen") { self.pending = nil }
+                    }
+                }
+            } else {
+                Button("Jetzt aufräumen…") { preview() }
+                    .disabled(isWorking)
+            }
+            if let lastResult, lastResult.removedSessions > 0 {
+                Text("Zuletzt gelöscht: \(Self.sessions(lastResult.removedSessions)), \(byteText(lastResult.reclaimedBytes)).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            // A failed database clean-up used to report itself as "0
+            // segments cleared" — indistinguishable from nothing to do.
+            if let lastResult, !lastResult.errors.isEmpty {
+                Text("Aufräumen unvollständig: \(lastResult.errors.joined(separator: "; "))")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Text("Manuell aufräumen")
+        } footer: {
+            Text("Notizen, Statistik und KI-Kosten werden nie gelöscht; du siehst immer erst den Plan.")
+        }
     }
 
     /// "1 Sitzung" / "4 Sitzungen" — picked, not interpolated blindly.
@@ -175,9 +281,6 @@ struct StorageSettingsView: View {
 
     // MARK: - Modelle (Spec 20)
 
-    /// The models get rows in the section that already exists, not a tab of
-    /// their own — an eighth settings tab is exactly the growth Spec 22 is
-    /// written against.
     @ViewBuilder
     private var modelSection: some View {
         Section {
@@ -290,7 +393,7 @@ struct StorageSettingsView: View {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    /// Measured when the tab opens, never continuously — walking four
+    /// Measured when the page opens, never continuously — walking four
     /// directories of multi-gigabyte files is not something to do on a timer.
     private func measure() async {
         let engine = ASREngineID.current

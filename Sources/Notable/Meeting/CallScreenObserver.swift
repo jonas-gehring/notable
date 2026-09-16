@@ -14,6 +14,10 @@ protocol CallScreenAdapter: Sendable {
     func observe(_ application: AXUIElement) -> ScreenObservation?
 }
 
+// An adapter that can read the call window's title puts it into its
+// observation (`ScreenObservation.windowTitle`, Spec 36 §3.1). Nothing forces
+// it to: a missing title costs a fallback, a wrong roster costs a wrong name.
+
 enum CallScreenAdapters {
     /// Empty until the measurement says which app exposes what.
     static let all: [any CallScreenAdapter] = []
@@ -109,6 +113,8 @@ final class CallScreenObserver: @unchecked Sendable {
 /// in Teams, Zoom and Meet; the files decide which adapter is possible at all.
 @MainActor
 enum ScreenProbe {
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "screen")
+
     enum ProbeError: LocalizedError {
         case accessibilityMissing
         case noCallApp
@@ -136,11 +142,87 @@ enum ScreenProbe {
             .appendingPathComponent("Library/Logs/Notable/screen-probe", isDirectory: true)
     }
 
+    /// The running app of the detected call, if it is there.
+    static func runningCallApp(bundleIDs: [String]) -> NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first { app in
+            app.bundleIdentifier.map { belongs($0, to: bundleIDs) } ?? false
+        }
+    }
+
+    /// The app's own version — part of the marker, because a new release is
+    /// exactly what changes the tree an adapter was built from.
+    static func version(of app: NSRunningApplication) -> String {
+        guard let url = app.bundleURL, let bundle = Bundle(url: url),
+              let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        else { return "?" }
+        return version
+    }
+
+    /// **The measurement that happens by itself** (Spec 36 §3.1).
+    ///
+    /// Stufe 0 of Spec 24 asked for a button press in Settings in the middle of
+    /// a call, and in five weeks nobody pressed it — `~/Library/Logs/Notable`
+    /// did not even exist. So when a call app has no adapter, the window writes
+    /// itself out: once per app and version, a minute in, at the exact moment an
+    /// adapter would have been asked for something.
+    ///
+    /// Bound to the same switch as the observer (`screenSpeakerRecognition`):
+    /// this reads the call window, and that switch is where reading the call
+    /// window is agreed to. The file holds the names shown in the window, lives
+    /// in the logs and is deleted after thirty days.
+    ///
+    /// Returns the task so a recording that ends first can cancel it.
+    @discardableResult
+    static func automaticProbe(bundleIDs: [String], callName: String) -> Task<Void, Never>? {
+        guard DefaultsKey.screenSpeakerRecognition.value(), AXIsProcessTrusted() else { return nil }
+        guard let app = runningCallApp(bundleIDs: bundleIDs), let bundle = app.bundleIdentifier,
+              CallScreenAdapters.adapter(for: bundle) == nil,
+              ScreenProbeRule.shouldProbe(bundleID: bundle, version: version(of: app))
+        else { return nil }
+
+        return Task { @MainActor in
+            try? await Task.sleep(for: .seconds(ScreenProbeRule.delay))
+            guard !Task.isCancelled else { return }
+            // A minute later the call may be over, or be a different app.
+            guard let running = runningCallApp(bundleIDs: bundleIDs), let id = running.bundleIdentifier,
+                  CallScreenAdapters.adapter(for: id) == nil else { return }
+            let appVersion = version(of: running)
+            guard ScreenProbeRule.shouldProbe(bundleID: id, version: appVersion) else { return }
+            pruneOldProbes()
+            do {
+                let url = try dump(bundleIDs: bundleIDs, callName: callName)
+                // Marked only now: a probe that threw must be able to happen again.
+                ScreenProbeRule.markProbed(bundleID: id, version: appVersion)
+                log.notice("Bildschirm-Messung geschrieben: \(url.lastPathComponent, privacy: .public)")
+            } catch {
+                log.notice("Bildschirm-Messung nicht möglich: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// The probe files, newest first — what Settings counts and reveals.
+    static func files() -> [(url: URL, modified: Date)] {
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        return entries
+            .filter { $0.pathExtension == "txt" }
+            .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()) }
+            .sorted { $0.1 > $1.1 }
+    }
+
+    /// The probe holds names from the call window. Nothing else deletes it —
+    /// retention only knows `spool-*` — so it deletes itself, thirty days on.
+    static func pruneOldProbes(now: Date = Date()) {
+        for url in ScreenProbeRule.expired(files(), now: now) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     static func dump(bundleIDs: [String], callName: String) throws -> URL {
         guard AXIsProcessTrusted() else { throw ProbeError.accessibilityMissing }
-        guard let app = NSWorkspace.shared.runningApplications.first(where: { app in
-            app.bundleIdentifier.map { belongs($0, to: bundleIDs) } ?? false
-        }), let bundle = app.bundleIdentifier else { throw ProbeError.noCallApp }
+        guard let app = runningCallApp(bundleIDs: bundleIDs), let bundle = app.bundleIdentifier
+        else { throw ProbeError.noCallApp }
 
         let element = AXUIElementCreateApplication(app.processIdentifier)
         var lines = ["# \(callName) — \(app.localizedName ?? bundle) (\(bundle)), \(Date().formatted(.iso8601))"]

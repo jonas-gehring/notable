@@ -178,3 +178,31 @@ enum NotesRelocation {
         return "\(base) \(number)"
     }
 }
+
+/// What a project folder may be called (the one flat level under the notes
+/// folder). Pure, so `NoteManager` and its tests agree on it.
+enum ProjectFolderName {
+    static let inbox = "Inbox"
+
+    /// The key a typed name is stored under, or `nil` when nothing usable is
+    /// left. Path separators and characters Finder or iCloud reject go; so do
+    /// leading dots, because "." and ".." would resolve to the notes folder
+    /// itself or to the folder above it, and ".Projekt" would be a hidden
+    /// folder the note list never shows again. Any spelling of "Inbox" *is* the
+    /// Inbox: APFS ignores case, so "inbox" names the same directory under a
+    /// key that matches nothing.
+    static func key(for rawName: String) -> String? {
+        let cleaned = rawName
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = String(cleaned.drop(while: { $0 == "." }))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return nil }
+        return isInbox(key) ? inbox : key
+    }
+
+    static func isInbox(_ name: String) -> Bool {
+        name.compare(inbox, options: .caseInsensitive) == .orderedSame
+    }
+}

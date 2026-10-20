@@ -158,4 +158,27 @@ final class NotesFolderRulesTests: XCTestCase {
         XCTAssertEqual(NotesRelocation.targetName(existing: ["Notable"]), "Notable 2")
         XCTAssertEqual(NotesRelocation.targetName(existing: ["Notable", "Notable 2"]), "Notable 3")
     }
+
+    // MARK: - Project folder names
+
+    func testDotNamesNeverLeaveTheNotesFolder() {
+        XCTAssertNil(ProjectFolderName.key(for: "."))
+        XCTAssertNil(ProjectFolderName.key(for: ".."))
+        XCTAssertNil(ProjectFolderName.key(for: " ../ "))
+        XCTAssertEqual(ProjectFolderName.key(for: "../Privat"), "Privat")
+        XCTAssertEqual(ProjectFolderName.key(for: ".Projekt"), "Projekt", "versteckt hieße: nie wieder in der Liste")
+    }
+
+    func testAnySpellingOfInboxIsTheInbox() {
+        XCTAssertEqual(ProjectFolderName.key(for: "inbox"), "Inbox")
+        XCTAssertEqual(ProjectFolderName.key(for: " INBOX "), "Inbox")
+        XCTAssertTrue(ProjectFolderName.isInbox("Inbox"))
+    }
+
+    func testOrdinaryNamesOnlyLoseWhatFinderRejects() {
+        XCTAssertEqual(ProjectFolderName.key(for: "Kunde A/B"), "Kunde AB")
+        XCTAssertEqual(ProjectFolderName.key(for: "Q3 Planung"), "Q3 Planung")
+        XCTAssertEqual(ProjectFolderName.key(for: "v1.4 Release."), "v1.4 Release.")
+        XCTAssertNil(ProjectFolderName.key(for: "   "))
+    }
 }

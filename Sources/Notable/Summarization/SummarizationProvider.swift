@@ -8,6 +8,14 @@ struct MeetingContext: Sendable {
     /// The user's own notes — ground truth the summarizer weaves into the
     /// Zusammenfassung and prefers over the transcript on conflict.
     var userNotes: String? = nil
+    /// Who "Ich" is. Without it the model treats "Ich" as a name and writes
+    /// "Ich arbeitet an …" into the summary (benchmark of 2026-10-20).
+    var ownerName: String? = nil
+    /// Every voice came through the one microphone, so who is "Ich" and who
+    /// is "Sprecher n" is an estimate (`OwnerVoice`). Told to the model so it
+    /// trusts the content over the labels: one such meeting came back with
+    /// the two people's roles swapped.
+    var singleMicrophone = false
 }
 
 /// Token spend of one provider round-trip, and what it cost.
@@ -294,6 +302,21 @@ enum SummarizationPrompt {
         header += " am \(context.date.formatted(date: .long, time: .shortened))"
         if let duration = context.durationSeconds {
             header += String(format: " (%.0f Minuten)", duration / 60)
+        }
+        // Who is who, before the transcript: what follows "Transkript:" is
+        // quoted material, this is not.
+        var hints: [String] = []
+        if let owner = context.ownerName?.trimmingCharacters(in: .whitespacesAndNewlines), !owner.isEmpty {
+            hints.append("„Ich“ im Transkript ist \(owner), der Nutzer dieser App. "
+                + "Schreib in der Zusammenfassung und bei den Action Items „\(owner)“ statt „Ich“.")
+        }
+        if context.singleMicrophone {
+            hints.append("Alle Stimmen kamen über ein einziges Mikrofon, die Zuordnung zu den Sprechern ist "
+                + "deshalb geschätzt. Wo der Inhalt ihr widerspricht (wer sich vorstellt, wer fragt, "
+                + "wer antwortet), folge dem Inhalt.")
+        }
+        if !hints.isEmpty {
+            header += "\n\n" + hints.joined(separator: "\n")
         }
         var body = header + "\n\nTranskript:\n\n" + transcript
         // The user's own notes: a clearly labelled, higher-trust block the model

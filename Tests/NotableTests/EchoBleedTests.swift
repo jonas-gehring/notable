@@ -10,8 +10,9 @@ import XCTest
 ///
 /// Diese Suite baut genau das nach — Mikrofonspur = eigene Sprache **plus**
 /// gedämpfte, verzögerte, verrauschte Kopie der Systemspur — und schickt es
-/// durch `MeetingPipeline.process`. Erwartetes (Fehl-)Verhalten: die Sätze der
-/// Gegenseite tauchen ein zweites Mal auf, zugeschrieben an 'Ich'.
+/// durch `MeetingPipeline.process`. Ohne Bereinigung tauchen die Sätze der
+/// Gegenseite ein zweites Mal auf, zugeschrieben an 'Ich'. Mit ihr nimmt
+/// `EchoFilter` sie Satz für Satz wieder heraus (Abschnitt 3).
 final class EchoBleedTests: XCTestCase {
 
     // MARK: - Szenario
@@ -105,13 +106,18 @@ final class EchoBleedTests: XCTestCase {
         return (mic, system)
     }
 
-    private func run(_ tracks: (mic: [Float], system: [Float])) async throws -> [MeetingTranscriptSegment] {
+    /// - Parameter cleanup: `[]` zeigt, was die Spracherkennung allein liefert.
+    private func run(
+        _ tracks: (mic: [Float], system: [Float]),
+        cleanup: MeetingPipeline.Cleanup = .all
+    ) async throws -> [MeetingTranscriptSegment] {
         let transcriber = ParakeetTranscriber()
         try await transcriber.prepare()
         return try await MeetingPipeline.process(
             micSamples: tracks.mic,
             systemSamples: tracks.system,
-            transcriber: transcriber
+            transcriber: transcriber,
+            cleanup: cleanup
         )
     }
 
@@ -134,28 +140,24 @@ final class EchoBleedTests: XCTestCase {
     /// zugeschrieben an 'Ich'. Eine Notiz, in der ich sage, was mein Gegenüber
     /// gesagt hat, ist schlimmer als eine fehlende Notiz.
     func testSpeakerBleedPutsRemoteWordsIntoMyMouth() async throws {
-        let segments = try await run(buildTracks(withBleed: true))
+        let segments = try await run(buildTracks(withBleed: true), cleanup: [])
         dump("BLEED_PROBE", segments)
 
         let phantoms = Self.remoteKeywords.flatMap { carriers(of: $0, on: "Ich", in: segments) }
         print("BLEED_PROBE phantom segments on \"Ich\": \(phantoms.count) → \(phantoms.map(\.text))")
 
-        // Die Gegenmaßnahme sitzt eine Ebene HÖHER: der Meeting-Recorder schaltet
-        // jetzt Voice-Processing/AEC ein (AudioRecorder.voiceProcessing,
-        // MeetingController.start), damit der Bleed gar nicht erst in die
-        // Mikrofonspur gelangt. Headless lässt sich das nicht prüfen — VPIO
-        // filtert das, was das *Gerät* gerade abspielt, nicht Samples, die wir
-        // künstlich hineinmischen.
-        //
-        // Dieser Test hält deshalb fest, was passiert, WENN doch Bleed durchkommt
-        // (VPIO nicht verfügbar, Restecho, exotische Route): die Pipeline schreibt
-        // dem Nutzer die Worte der Gegenseite in den Mund. Er bleibt die
-        // Begründung dafür, dass die AEC-Schicht existieren muss.
+        // Ohne Bereinigung (`cleanup: []`): was Parakeet allein aus der
+        // Mikrofonspur macht. Voice-Processing (`meetingEchoCancellation`) würde
+        // den Bleed im Signal stoppen, ist aber standardmäßig aus, und headless
+        // lässt es sich ohnehin nicht prüfen: VPIO filtert, was das *Gerät*
+        // abspielt, nicht Samples, die wir hineinmischen. Der Benchmark vom
+        // 20.10.2026 hat gezeigt, dass genau das im Alltag passiert (27 bis 68 %
+        // doppelte Passagen). Was dagegen hilft, prüft Abschnitt 3.
         XCTExpectFailure(
             "Bekannt: Bleed, der bis in die Mikrofonspur durchkommt, dupliziert die " +
-            "Gegenseite auf 'Ich' — das Echo füllt zudem die Pausen, sodass die VAD " +
-            "es mit der eigenen Rede verschmilzt (MeetingPipeline.swift:86). Verhindert " +
-            "wird das upstream durch AEC (AudioRecorder.voiceProcessing), nicht hier."
+            "Gegenseite auf 'Ich', und das Echo füllt die Pausen, sodass die VAD " +
+            "es mit der eigenen Rede verschmilzt. Herausgenommen wird es danach, " +
+            "satzweise, von EchoFilter (testTheSentenceFilterTakesTheEchoOut…)."
         ) {
             for keyword in Self.remoteKeywords {
                 XCTAssertTrue(
@@ -202,7 +204,7 @@ final class EchoBleedTests: XCTestCase {
     /// Damit ist jede Dedup auf *Segment*-Ebene chancenlos: das Segment ist
     /// halb Geist, halb echt. Dieser Test hält beide Hörner des Dilemmas fest.
     func testSegmentLevelDedupCannotFixThisBecauseVADFusesEchoWithMySpeech() async throws {
-        let segments = try await run(buildTracks(withBleed: true))
+        let segments = try await run(buildTracks(withBleed: true), cleanup: [])
         dump("FUSION_PROBE", segments)
 
         // Horn 0 — die Fusion selbst: ein Mikrofonsegment trägt Wörter der
@@ -239,8 +241,30 @@ final class EchoBleedTests: XCTestCase {
         )
         print("FUSION_PROBE aggressive Dedup verliert eigene Marker: \(lostOwnWords)")
 
-        // Fazit, das der Test beweist: der Fix muss VOR den VAD, ins Signal
-        // (AEC auf der Mikrofonspur) — nicht hinter die Segmentierung.
+        // Fazit: auf Segment-Ebene geht es nicht. Entweder ins Signal (AEC)
+        // oder eine Ebene feiner, pro Satz (Abschnitt 3).
+    }
+
+    // MARK: - 3. Was hilft: pro Satz statt pro Segment
+
+    /// Dieselbe Aufnahme mit Bleed, diesmal mit Bereinigung. Das verschmolzene
+    /// Segment verliert die Sätze der Gegenseite und behält meine.
+    func testTheSentenceFilterTakesTheEchoOutAndKeepsMyWords() async throws {
+        let segments = try await run(buildTracks(withBleed: true))
+        dump("FILTER_PROBE", segments)
+
+        for keyword in Self.remoteKeywords {
+            XCTAssertTrue(
+                carriers(of: keyword, on: "Ich", in: segments).isEmpty,
+                "'\(keyword)' (Gegenseite) steht nach dem Filter noch auf 'Ich'"
+            )
+        }
+        for keyword in Self.myKeywords {
+            XCTAssertFalse(
+                carriers(of: keyword, on: "Ich", in: segments).isEmpty,
+                "Eigener Marker '\(keyword)' ist mit dem Echo verschwunden"
+            )
+        }
     }
 
     /// Prototyp der Gegenmaßnahme (b), nur im Test. `requireSimilarText: true`

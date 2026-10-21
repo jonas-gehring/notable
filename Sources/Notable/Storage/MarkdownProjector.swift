@@ -20,6 +20,12 @@ enum MarkdownProjector {
         /// woven into the summary elsewhere). Default nil keeps notes-free
         /// rendering byte-for-byte identical.
         var userNotes: String? = nil
+        /// When each segment starts, in seconds from the start of the
+        /// recording, in the order of `segments`. Rendered as "[mm:ss]" in
+        /// front of every line of the transcript, so a passage can be found in
+        /// the recording again. Nil, or a count that does not match, renders
+        /// none.
+        var startTimes: [TimeInterval]? = nil
     }
 
     /// The distinct speaker labels the transcript actually carries, in the
@@ -116,17 +122,30 @@ enum MarkdownProjector {
         if !note.segments.isEmpty {
             lines.append("## Transkript")
             lines.append("")
-            for segment in note.segments {
+            let starts = note.startTimes?.count == note.segments.count ? note.startTimes : nil
+            for (index, segment) in note.segments.enumerated() {
+                let stamp = starts.map { "[\(timestamp($0[index]))] " } ?? ""
                 if let speaker = segment.speaker, !speaker.isEmpty {
-                    lines.append("**\(speaker):** \(segment.text)")
+                    lines.append("\(stamp)**\(speaker):** \(segment.text)")
                 } else {
-                    lines.append(segment.text)
+                    lines.append(stamp + segment.text)
                 }
                 lines.append("")
             }
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// "03:07", and "1:02:03" past the hour.
+    static func timestamp(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        let hours = total / 3600
+        let minutes = total % 3600 / 60
+        let rest = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, rest)
+            : String(format: "%02d:%02d", minutes, rest)
     }
 
     /// Backslashes first, then quotes; newlines cannot appear in single-line

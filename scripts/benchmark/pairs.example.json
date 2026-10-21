@@ -1,0 +1,11 @@
+{
+  "Beispiel Teams-Call": {
+    "notable": "notable/2026-10-01 16.02 Beispiel.md",
+    "wispr": "wispr/2026-10-01 Beispiel.textClipping.txt",
+    "owner": "Vorname Nachname"
+  },
+  "Beispiel nur Notable": {
+    "notable": "notable/2026-10-05 11.02 Beispiel.md",
+    "wispr": null
+  }
+}

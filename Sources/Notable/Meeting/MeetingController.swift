@@ -1043,7 +1043,8 @@ final class MeetingController: ObservableObject {
                         attendees: rec.attendees,
                         participants: rec.participants,
                         segments: loaded.segments.map { ($0.speaker, $0.text) },
-                        summary: rec.summary, userNotes: rec.userNotes
+                        summary: rec.summary, userNotes: rec.userNotes,
+                        startTimes: loaded.segments.map(\.start)
                     )
                     let url = rec.markdownPath.map { URL(fileURLWithPath: $0) } ?? payload.fileURL
                     try? MarkdownProjector.render(note).write(to: url, atomically: true, encoding: .utf8)
@@ -1160,6 +1161,7 @@ final class MeetingController: ObservableObject {
             )
         }.value
         let segments = processed.segments
+        log.notice("Bereinigung: \(processed.report.summary, privacy: .public)")
 
         // A track that was recorded but carries no signal at all is a capture
         // fault, and it is invisible downstream: the pipeline happily transcribes
@@ -1353,7 +1355,8 @@ final class MeetingController: ObservableObject {
             participants: participants,
             segments: named.map { ($0.speaker, $0.text) },
             summary: nil,
-            userNotes: userNotes
+            userNotes: userNotes,
+            startTimes: named.map(\.start)
         )
 
         // New notes land in the Inbox; the user files them into project folders
@@ -1383,7 +1386,11 @@ final class MeetingController: ObservableObject {
             let transcriptText = named
                 .map { "\($0.speaker ?? "Unbekannt"): \($0.text)" }
                 .joined(separator: "\n")
-            let context = MeetingContext(title: finalTitle, date: startedAt, durationSeconds: duration, userNotes: userNotes)
+            let context = MeetingContext(
+                title: finalTitle, date: startedAt, durationSeconds: duration, userNotes: userNotes,
+                ownerName: SpeakerNameResolver.ownerDisplayName,
+                singleMicrophone: processed.report.microphoneVoices
+            )
             do {
                 let summary = try await SummarizationService.summarize(
                     transcript: transcriptText,
@@ -1498,6 +1505,7 @@ final class MeetingController: ObservableObject {
                 $0.naming = namingDiagnosis
                 $0.titleSource = titleDiagnosis
                 $0.screen = screenDiagnosis
+                $0.cleanup = processed.report.summary
             }
         }
 

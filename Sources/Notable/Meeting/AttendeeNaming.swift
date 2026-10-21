@@ -30,11 +30,27 @@ enum OneToOneNaming {
     ) -> (label: String, name: String)? {
         let guests = attendees
             .map(AttendeeName.readable)
-            .filter { !$0.isEmpty && !SpeakerNameResolver.isOwnerName($0, ownerTokens: ownerTokens) }
+            .filter { !$0.isEmpty && !mayBeOwner($0, ownerTokens: ownerTokens) }
         guard guests.count == 1, largeClusters.count == 1 else { return nil }
         let label = largeClusters[0]
         guard openLabels.contains(label) else { return nil }
         return (label, guests[0])
+    }
+
+    /// Stricter than `SpeakerNameResolver.isOwnerName`, on purpose. There the
+    /// name was spoken, and containment spares a colleague who shares the
+    /// user's first name. Here nothing was spoken, and an invitee who shares
+    /// even one name with the user is more likely the user under a second
+    /// account than a namesake. Seen on 2026-09-21: the remote voice of a
+    /// one-to-one came out as "Jonas Gehring", the user's own name. Containment
+    /// lets that through whenever the account knows only part of the name, and
+    /// `isCurrentUser` misses an invitation sent to another address.
+    static func mayBeOwner(_ name: String, ownerTokens: Set<String>) -> Bool {
+        if SpeakerNameResolver.isOwnerName(name, ownerTokens: ownerTokens) { return true }
+        let tokens = Set(name.lowercased()
+            .components(separatedBy: CharacterSet.letters.inverted)
+            .filter { $0.count >= 2 })
+        return !tokens.isDisjoint(with: ownerTokens)
     }
 }
 

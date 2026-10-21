@@ -38,6 +38,15 @@ enum SpeakerNameResolver {
         nameTokens(in: NSFullUserName()).union(nameTokens(in: DefaultsKey.ownerName.value()))
     }
 
+    /// The name to write where the transcript says "Ich": the one from
+    /// Settings when it is set, because macOS often knows only the first name.
+    static var ownerDisplayName: String? {
+        let configured = DefaultsKey.ownerName.value().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !configured.isEmpty { return configured }
+        let account = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        return account.isEmpty ? nil : account
+    }
+
     /// Forms of address, which say nothing about *who* someone is.
     private static let honorifics: Set<String> = [
         "herr", "frau", "mr", "mrs", "ms", "miss", "dr", "prof", "professor",

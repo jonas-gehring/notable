@@ -144,16 +144,34 @@ enum MeetingPipeline {
     ///   `nil` means "let the diarizer decide", which is what a call with no
     ///   calendar event gets. It is a prior, not a promise: someone who never
     ///   speaks costs nothing, and an uninvited joiner still gets a label.
+    ///   - cleanup: the steps after the speech recognition. All of them by
+    ///     default; `EchoBleedTests` switches them off to show what they repair.
     static func process(
         micSamples: [Float],
         systemSamples: [Float],
         transcriber: any TranscriptionEngine,
-        expectedSpeakers: Int? = nil
+        expectedSpeakers: Int? = nil,
+        cleanup: Cleanup = .all
     ) async throws -> [MeetingTranscriptSegment] {
         try await processDetailed(
             micSamples: micSamples, systemSamples: systemSamples,
-            transcriber: transcriber, expectedSpeakers: expectedSpeakers
+            transcriber: transcriber, expectedSpeakers: expectedSpeakers,
+            cleanup: cleanup
         ).segments
+    }
+
+    /// What the pipeline repairs after the speech recognition (benchmark of
+    /// 2026-10-20, see `EchoFilter`, `MeetingLanguageGuard`, `OwnerVoice`).
+    struct Cleanup: OptionSet, Sendable {
+        let rawValue: Int
+        /// The far side's words, heard a second time through the microphone.
+        static let echo = Cleanup(rawValue: 1 << 0)
+        /// Short English strays in a German meeting.
+        static let language = Cleanup(rawValue: 1 << 1)
+        /// Several voices on the microphone and none on the system track.
+        static let microphoneVoices = Cleanup(rawValue: 1 << 2)
+
+        static let all: Cleanup = [.echo, .language, .microphoneVoices]
     }
 
     /// What one meeting's audio became — and what its voices sounded like.
@@ -172,13 +190,41 @@ enum MeetingPipeline {
         /// Speech seconds per cluster, so a caller can tell a large cluster
         /// from a splinter without walking the transcript again.
         var seconds: [String: TimeInterval] = [:]
+        /// What the cleanup did, for the log and `meta.json`, so a note that
+        /// lost a sentence can say why.
+        var report = CleanupReport()
+    }
+
+    struct CleanupReport: Equatable, Sendable {
+        var echoSentences = 0
+        var echoWords = 0
+        var language: String?
+        var languageDropped = 0
+        var languageDroppedWords = 0
+        var languageRewritten = 0
+        /// The microphone was split into voices (no speech on the system track).
+        var microphoneVoices = false
+        /// …and one of them was loud enough to be "Ich".
+        var ownerFound = false
+
+        /// One line for the log and `meta.json`, e.g. "echo 41 Sätze/512 Wörter ·
+        /// german: 3 verworfen, 7 umgeschrieben · mikrofon: mehrere Stimmen, Ich erkannt".
+        var summary: String {
+            var parts = ["echo \(echoSentences) Sätze/\(echoWords) Wörter"]
+            parts.append("\(language ?? "sprache?"): \(languageDropped) verworfen, \(languageRewritten) umgeschrieben")
+            if microphoneVoices {
+                parts.append(ownerFound ? "mikrofon: mehrere Stimmen, Ich erkannt" : "mikrofon: mehrere Stimmen, Ich nicht erkannt")
+            }
+            return parts.joined(separator: " · ")
+        }
     }
 
     static func processDetailed(
         micSamples: [Float],
         systemSamples: [Float],
         transcriber: any TranscriptionEngine,
-        expectedSpeakers: Int? = nil
+        expectedSpeakers: Int? = nil,
+        cleanup: Cleanup = .all
     ) async throws -> Outcome {
         let sampleRate = PCMDownsampler.targetSampleRate
 
@@ -202,7 +248,7 @@ enum MeetingPipeline {
         var voices: [String: [Float]] = [:]
         var seconds: [String: TimeInterval] = [:]
         if !systemSamples.isEmpty, let vad {
-            let diarized = try await diarizeSystemTrack(systemSamples, vad: vad, expectedSpeakers: expectedSpeakers)
+            let diarized = try await diarizeTrack(systemSamples, vad: vad, expectedSpeakers: expectedSpeakers)
             systemSegments = diarized.cleaned.flatMap { segment in
                 mapToOriginal(start: segment.start, end: segment.end, regions: diarized.regions)
                     .map { (segment.label, $0.start, $0.end) }
@@ -216,7 +262,25 @@ enum MeetingPipeline {
             }
         }
 
-        let specs = groupedSpecs(orderedSpecs(micSegments: micSegments, systemSegments: systemSegments))
+        var specs = orderedSpecs(micSegments: micSegments, systemSegments: systemSegments)
+        var report = CleanupReport()
+
+        // No speech on the system track means nobody was on the far end of a
+        // call, so every voice of the meeting came through the microphone (a
+        // meeting in the room, a phone on speaker). The mic track is then
+        // diarized like the system track, and `OwnerVoice` decides which voice
+        // is "Ich". With a single voice nothing changes. Expected voices: the
+        // remote ones the calendar suggests, plus the user.
+        if systemSegments.isEmpty, !micSegments.isEmpty, cleanup.contains(.microphoneVoices), let vad {
+            let diarized = try await diarizeTrack(micSamples, vad: vad, expectedSpeakers: expectedSpeakers.map { $0 + 1 })
+            if let split = microphoneVoices(diarized, samples: micSamples) {
+                specs = split.specs.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
+                seconds = split.seconds
+                report.microphoneVoices = true
+                report.ownerFound = split.ownerFound
+            }
+        }
+        specs = groupedSpecs(specs)
 
         var transcript: [MeetingTranscriptSegment] = []
         for spec in specs where spec.end - spec.start >= minimumSegmentDuration {
@@ -241,26 +305,99 @@ enum MeetingPipeline {
                 cluster: spec.speaker
             ))
         }
-        return Outcome(segments: transcript, voices: voices, seconds: seconds)
+
+        // Echo first: the language of the meeting is better counted without the
+        // second copy of the other side.
+        if cleanup.contains(.echo), !systemSegments.isEmpty {
+            let filtered = EchoFilter.filtered(transcript)
+            transcript = filtered.segments
+            report.echoSentences = filtered.removedSentences
+            report.echoWords = filtered.removedWords
+        }
+        if cleanup.contains(.language) {
+            let guarded = MeetingLanguageGuard.guarded(transcript)
+            transcript = guarded.segments
+            report.language = guarded.language?.rawValue
+            report.languageDropped = guarded.dropped
+            report.languageDroppedWords = guarded.droppedWords
+            report.languageRewritten = guarded.rewritten
+        }
+        return Outcome(segments: transcript, voices: voices, seconds: seconds, report: report)
     }
 
-    /// The system track, VAD-compacted, diarized, and cleaned of splinters
-    /// (Spec 24, Stufe 1) — on the compacted timeline, with the regions to map
-    /// it back. Split out so `MeetingReplayTests` can print the label
+    /// The microphone track split into voices, or nil when it holds fewer
+    /// than two, which leaves it "Ich" from end to end as before.
+    struct MicrophoneVoices: Sendable {
+        var specs: [SegmentSpec]
+        /// Speech seconds under the displayed label, "Ich" left out: the
+        /// same shape as the system track's, which never contains "Ich".
+        var seconds: [String: TimeInterval]
+        var ownerFound: Bool
+    }
+
+    /// No centroids come out of here, on purpose: a room microphone and a
+    /// call's codec are two different recordings of the same voice, and
+    /// nobody has measured whether a voice profile (Spec 36) carries over
+    /// between them. A profile that does not is a confident wrong name.
+    static func microphoneVoices(_ diarized: Diarization, samples: [Float]) -> MicrophoneVoices? {
+        let totals = SpeakerClusterCleanup.totals(diarized.cleaned)
+        let large = SpeakerClusterCleanup.largeLabels(totals).subtracting([SpeakerClusterCleanup.unknownLabel])
+        guard large.count >= 2 else { return nil }
+
+        let sampleRate = Double(PCMDownsampler.targetSampleRate)
+        var levels: [String: [Float]] = [:]
+        var intervals: [(cluster: String, start: TimeInterval, end: TimeInterval)] = []
+        for segment in diarized.cleaned {
+            for interval in mapToOriginal(start: segment.start, end: segment.end, regions: diarized.regions) {
+                intervals.append((cluster: segment.label, start: interval.start, end: interval.end))
+                let from = max(0, min(Int(interval.start * sampleRate), samples.count))
+                let to = max(from, min(Int(interval.end * sampleRate), samples.count))
+                guard to > from else { continue }
+                levels[segment.label, default: []].append(OwnerVoice.decibels(samples[from..<to]))
+            }
+        }
+        let owner = OwnerVoice.owner(levels: levels, large: large)
+        // The diarizer's labels count up by speech share ("1", "2", …); "?" last.
+        let clusters = totals.keys.sorted { lhs, rhs in
+            (Int(lhs) ?? .max, lhs) < (Int(rhs) ?? .max, rhs)
+        }
+        let labels = OwnerVoice.displayLabels(clusters: clusters, owner: owner)
+
+        var seconds: [String: TimeInterval] = [:]
+        for (cluster, total) in totals where cluster != owner {
+            seconds[labels[cluster] ?? "Sprecher \(cluster)", default: 0] += total
+        }
+        let specs = intervals.map {
+            SegmentSpec(track: .microphone, speaker: labels[$0.cluster] ?? "Sprecher \($0.cluster)", start: $0.start, end: $0.end)
+        }
+        return MicrophoneVoices(specs: specs, seconds: seconds, ownerFound: owner != nil)
+    }
+
+    /// One track's diarization: before and after the splinter cleanup, on the
+    /// compacted timeline, with the regions to map it back.
+    struct Diarization: Sendable {
+        var raw: [SpeakerClusterCleanup.Segment]
+        var cleaned: [SpeakerClusterCleanup.Segment]
+        var regions: [SpeechRegion]
+    }
+
+    /// A track, VAD-compacted, diarized, and cleaned of splinters (Spec 24,
+    /// Stufe 1). The system track always; the microphone when the system track
+    /// had no speech. Split out so `MeetingReplayTests` can print the label
     /// statistics before and after the cleanup on archived meetings.
     ///
-    /// The track is mostly silence: it holds nothing while *I* speak. Handing
-    /// that to the diarizer destroys it — measured on identical audio, the
-    /// silence holes alone collapse a British male and an American female into
-    /// a single speaker, while the compacted signal separates them cleanly. So
-    /// VAD first, diarize speech only, then map back.
-    static func diarizeSystemTrack(
-        _ systemSamples: [Float],
+    /// The system track is mostly silence: it holds nothing while *I* speak.
+    /// Handing that to the diarizer destroys it — measured on identical audio,
+    /// the silence holes alone collapse a British male and an American female
+    /// into a single speaker, while the compacted signal separates them
+    /// cleanly. So VAD first, diarize speech only, then map back.
+    static func diarizeTrack(
+        _ samples: [Float],
         vad: VadManager,
         expectedSpeakers: Int?
-    ) async throws -> (raw: [SpeakerClusterCleanup.Segment], cleaned: [SpeakerClusterCleanup.Segment], regions: [SpeechRegion]) {
+    ) async throws -> Diarization {
         let sampleRate = PCMDownsampler.targetSampleRate
-        let speech = try await vad.segmentSpeech(systemSamples)
+        let speech = try await vad.segmentSpeech(samples)
 
         var compact: [Float] = []
         var regions: [SpeechRegion] = []
@@ -270,8 +407,8 @@ enum MeetingPipeline {
             $0 + Int(($1.endTime - $1.startTime + compactionPadding) * Double(sampleRate))
         })
         for segment in speech {
-            let from = max(0, min(Int(segment.startTime * Double(sampleRate)), systemSamples.count))
-            let to = max(from, min(Int(segment.endTime * Double(sampleRate)), systemSamples.count))
+            let from = max(0, min(Int(segment.startTime * Double(sampleRate)), samples.count))
+            let to = max(from, min(Int(segment.endTime * Double(sampleRate)), samples.count))
             guard to > from else { continue }
             if !compact.isEmpty { compact += padding }
             regions.append(SpeechRegion(
@@ -279,9 +416,9 @@ enum MeetingPipeline {
                 originalStart: segment.startTime,
                 duration: Double(to - from) / Double(sampleRate)
             ))
-            compact += systemSamples[from..<to]
+            compact += samples[from..<to]
         }
-        guard !compact.isEmpty else { return ([], [], regions) }
+        guard !compact.isEmpty else { return Diarization(raw: [], cleaned: [], regions: regions) }
 
         let models = try await DiarizerModels.downloadIfNeeded(to: ModelInventory.directory(.diarizer))
         let diarizer = DiarizerManager(config: Self.diarizerConfig(expectedSpeakers: expectedSpeakers))
@@ -298,6 +435,6 @@ enum MeetingPipeline {
                 quality: $0.qualityScore
             )
         }
-        return (raw, SpeakerClusterCleanup.cleaned(raw), regions)
+        return Diarization(raw: raw, cleaned: SpeakerClusterCleanup.cleaned(raw), regions: regions)
     }
 }

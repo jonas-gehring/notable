@@ -3,6 +3,8 @@ import SwiftUI
 
 /// Overview of the most recent **dictations**, newest first, in a trailing time
 /// window (default 24 h). Each shows its spoken text with copy + re-insert.
+/// Lives in the notes window since it became one window; there the sidebar
+/// picks the period and passes it in, so the segmented picker is hidden.
 struct RecentDictationsView: View {
     /// Trailing time windows offered above the list.
     enum Window: Int, CaseIterable, Identifiable {
@@ -21,6 +23,9 @@ struct RecentDictationsView: View {
         }
     }
 
+    /// Set by the notes window, which chooses the period in its own column.
+    var period: Window?
+
     @State private var window: Window = .day
     @State private var items: [RecordingStore.ActivityItem] = []
     @State private var loaded = false
@@ -32,29 +37,10 @@ struct RecentDictationsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Picker("Zeitraum", selection: $window) {
-                    ForEach(Window.allCases) { win in
-                        Text(win.label).tag(win)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
-                Spacer()
-
-                Button {
-                    reloadToken += 1
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("Aktualisieren")
-                .accessibilityLabel("Aktualisieren")
+            if period == nil {
+                periodBar
+                Divider()
             }
-            .padding(Theme.Spacing.m)
-
-            Divider()
 
             if let failed {
                 failedRow(failed)
@@ -78,8 +64,6 @@ struct RecentDictationsView: View {
                 RecentDictationsList(items: items)
             }
         }
-        .windowMinimum(WindowSize.recent)
-        .windowFrameAutosave(WindowSize.recent)
         .task(id: reloadKey) {
             loaded = false
             failed = LastClipStore.pending()
@@ -87,10 +71,36 @@ struct RecentDictationsView: View {
             // in the window ate slots, so "all dictations" was quietly capped
             // at whatever share of the last 200 rows happened to be dictations.
             items = (try? await RecordingStore.shared.recentActivity(
-                kind: .dictation, within: window.rawValue
+                kind: .dictation, within: activeWindow.rawValue
             )) ?? []
             loaded = true
         }
+    }
+
+    private var activeWindow: Window { period ?? window }
+
+    private var periodBar: some View {
+        HStack {
+            Picker("Zeitraum", selection: $window) {
+                ForEach(Window.allCases) { win in
+                    Text(win.label).tag(win)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            Spacer()
+
+            Button {
+                reloadToken += 1
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("Aktualisieren")
+            .accessibilityLabel("Aktualisieren")
+        }
+        .padding(Theme.Spacing.m)
     }
 
     /// The failed dictation, here too. Retrying stays in the menu: it pastes, and
@@ -126,5 +136,5 @@ struct RecentDictationsView: View {
     }
 
     /// One value that changes whenever we must re-query.
-    private var reloadKey: String { "\(window.rawValue)-\(reloadToken)" }
+    private var reloadKey: String { "\(activeWindow.rawValue)-\(reloadToken)" }
 }

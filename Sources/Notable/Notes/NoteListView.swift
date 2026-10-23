@@ -1,6 +1,16 @@
 import AppKit
 import SwiftUI
 
+/// Where the menu wants the notes window to open. The menu and the window are
+/// different scenes, so "Letzte Diktate…" leaves its wish here and the window
+/// picks it up when it appears (or at once, when it is already open).
+@MainActor
+final class NotesWindowRoute: ObservableObject {
+    static let shared = NotesWindowRoute()
+    @Published var request: NoteScope?
+    private init() {}
+}
+
 /// The notes window, laid out like Notes or Voice Memos: folders on the left,
 /// the notes of the chosen folder in the middle, the note itself on the right.
 /// The search field in the toolbar looks at titles, folders and, through
@@ -14,6 +24,8 @@ struct NoteListView: View {
     @State private var selectedID: String?
     @State private var query = ""
     @State private var transcriptHits: Set<String> = []
+    @State private var dictationHits: [RecordingStore.SearchHit] = []
+    @State private var dictationPeriod: RecentDictationsView.Window = .day
     @State private var errorMessage: String?
     @State private var renameTarget: RecordingStore.Recording?
     @State private var draftTitle = ""
@@ -26,6 +38,7 @@ struct NoteListView: View {
     /// `NoteManager`, and the folder error has to re-render the list when it
     /// appears.
     @ObservedObject private var notesFolder = AppContainer.shared.notesFolder
+    @ObservedObject private var route = NotesWindowRoute.shared
 
     var body: some View {
         NavigationSplitView {
@@ -54,7 +67,14 @@ struct NoteListView: View {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            transcriptHits = trimmed.isEmpty ? [] : await noteManager.transcriptMatches(for: trimmed)
+            let hits = trimmed.isEmpty ? [] : await noteManager.searchHits(for: trimmed)
+            transcriptHits = Set(hits.filter { $0.kind == .meeting }.map(\.recordingID))
+            dictationHits = hits.filter { $0.kind == .dictation }
+        }
+        .onReceive(route.$request) { request in
+            guard let request else { return }
+            scope = request
+            route.request = nil
         }
         .onChange(of: scope) { _, _ in
             if let id = selectedID, !visible.contains(where: { $0.id == id }) { selectedID = nil }
@@ -95,6 +115,8 @@ struct NoteListView: View {
                     .tag(NoteScope.all)
                 Label("Inbox", systemImage: "tray")
                     .tag(NoteScope.folder(NoteManager.inboxFolder))
+                Label("Diktate", systemImage: "mic")
+                    .tag(NoteScope.dictations)
             }
             if !noteManager.projectFolders.isEmpty {
                 Section("Projekte") {
@@ -120,6 +142,29 @@ struct NoteListView: View {
 
     @ViewBuilder
     private var noteList: some View {
+        if scope == .dictations {
+            dictationPeriods
+        } else {
+            meetingList
+        }
+    }
+
+    /// For dictations the middle column picks the period; the list itself
+    /// needs the width of the right column, because a dictation is its text.
+    private var dictationPeriods: some View {
+        List(RecentDictationsView.Window.allCases, selection: periodSelection) { period in
+            Text(period.label)
+                .tag(period)
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 280, max: 400)
+    }
+
+    private var periodSelection: Binding<RecentDictationsView.Window?> {
+        Binding(get: { dictationPeriod }, set: { if let period = $0 { dictationPeriod = period } })
+    }
+
+    @ViewBuilder
+    private var meetingList: some View {
         VStack(spacing: 0) {
             // The folder error stands where the folder is needed (Spec 38 §3.3).
             if let error = notesFolder.lastError {
@@ -186,7 +231,9 @@ struct NoteListView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let note = selected {
+        if scope == .dictations {
+            dictationDetail
+        } else if let note = selected {
             NoteDetailView(note: note, onError: { errorMessage = $0 })
                 .id(note.id)
         } else {
@@ -195,6 +242,27 @@ struct NoteListView: View {
                 systemImage: "doc.text",
                 description: Text("Wähle in der Liste eine Notiz aus.")
             )
+        }
+    }
+
+    /// The dictations of the chosen period, or, while the search field holds
+    /// something, every dictation that matches, whatever its age: the search
+    /// window this replaces searched dictations too.
+    @ViewBuilder
+    private var dictationDetail: some View {
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            RecentDictationsView(period: dictationPeriod)
+        } else if dictationHits.isEmpty {
+            ContentUnavailableView(
+                "Keine Treffer",
+                systemImage: "magnifyingglass",
+                description: Text("Kein Diktat passt zur Eingabe.")
+            )
+        } else {
+            List(dictationHits) { hit in
+                SearchHitRow(hit: hit)
+            }
+            .listStyle(.inset)
         }
     }
 

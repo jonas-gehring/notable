@@ -31,6 +31,10 @@ final class NoteBrowserTests: XCTestCase {
         XCTAssertEqual(NoteBrowser.visible(notes, scope: .folder("Kunde A"), query: "").map(\.id), ["b"])
     }
 
+    func testTheDictationsScopeListsNoNotes() {
+        XCTAssertEqual(NoteBrowser.visible(notes, scope: .dictations, query: "").map(\.id), [])
+    }
+
     func testSearchMatchesTitleSubtitleFolderAndTranscriptHits() {
         XCTAssertEqual(NoteBrowser.visible(notes, scope: .all, query: "budget").map(\.id), ["a"])
         XCTAssertEqual(NoteBrowser.visible(notes, scope: .all, query: "zeitplan").map(\.id), ["b"])

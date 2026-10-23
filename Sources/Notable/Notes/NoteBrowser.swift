@@ -1,9 +1,11 @@
 import Foundation
 
-/// Which notes the notes window lists: all of them, or one folder.
+/// What the notes window shows: all notes, one folder, or the dictations,
+/// which have their own list and need no note column.
 enum NoteScope: Hashable, Sendable {
     case all
     case folder(String)
+    case dictations
 }
 
 /// The decisions behind the notes window (folders, list, note in one window),
@@ -27,6 +29,8 @@ enum NoteBrowser {
             switch scope {
             case .all:
                 return true
+            case .dictations:
+                return false
             case let .folder(key):
                 guard let folder = note.folder, !folder.isEmpty else { return false }
                 if ProjectFolderName.isInbox(key) { return ProjectFolderName.isInbox(folder) }

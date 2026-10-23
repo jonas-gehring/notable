@@ -84,7 +84,7 @@ final class AppContainer {
     /// The window scenes reopened after an update (§3.6). The live notes window
     /// is not among them: it belongs to a recording, and a recording is a hard
     /// lock, so it is never open when an update installs.
-    static let restorableWindowIDs = ["notes", "search", "recent", "stats", "settings", "onboarding"]
+    static let restorableWindowIDs = ["notes", "stats", "settings", "onboarding"]
 
     /// Which of those are open. SwiftUI names a `Window` scene's `NSWindow` after
     /// the scene id, possibly with a suffix — hence the prefix match.
@@ -366,7 +366,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
-        for id in ids { container.presentWindow(id, activate: false) }
+        // A marker written by an older version may name a window that no
+        // longer exists ("search" and "recent" went into the notes window).
+        for id in ids where AppContainer.restorableWindowIDs.contains(id) {
+            container.presentWindow(id, activate: false)
+        }
     }
 }
 
@@ -418,24 +422,12 @@ struct NotableApp: App {
         .menuBarExtraStyle(.menu)
 
         // Sizes from one table (Spec 33 §3.4); each view reads its minimum from it.
-        Window("Notizen durchsuchen", id: "search") {
-            SearchWindowView()
-        }
-        .windowResizability(.contentSize)
-        .defaultSize(WindowSize.search.ideal)
-
         Window("Notizen", id: "notes") {
             NoteListView()
                 .environmentObject(AppContainer.shared.notes)
         }
         .windowResizability(.contentSize)
         .defaultSize(WindowSize.notes.ideal)
-
-        Window("Letzte Diktate", id: "recent") {
-            RecentDictationsView()
-        }
-        .windowResizability(.contentSize)
-        .defaultSize(WindowSize.recent.ideal)
 
         Window("Statistik", id: "stats") {
             StatsView()
@@ -701,8 +693,12 @@ struct MenuContentView: View {
         }
         // The window, not a submenu of eight. It was a second window inside a
         // list, and the real one is one click away and can do more: correct,
-        // retry, improve with a chosen profile.
-        Button("Letzte Diktate…") { open("recent") }
+        // retry, improve with a chosen profile. Since the notes window became
+        // the one window, this opens it on the dictations.
+        Button("Letzte Diktate…") {
+            NotesWindowRoute.shared.request = .dictations
+            open("notes")
+        }
         // Searching (⌘F) and "Ordner öffnen" are in that window's toolbar now,
         // where the folder is actually needed — and so is the folder error.
         Button("Notizen…") { open("notes") }

@@ -211,12 +211,10 @@ final class NoteManager: ObservableObject {
         (try? await store.meeting(id: id))?.segments ?? []
     }
 
-    /// Recording ids whose transcript or title contains `query` (FTS5), for
-    /// the search field of the notes window. Dictations are left out: the
-    /// window lists meetings only.
-    func transcriptMatches(for query: String) async -> Set<String> {
-        let hits = (try? await store.search(query, limit: 200)) ?? []
-        return Set(hits.filter { $0.kind == .meeting }.map(\.recordingID))
+    /// Meetings and dictations whose text or title contains `query` (FTS5),
+    /// for the search field of the notes window.
+    func searchHits(for query: String) async -> [RecordingStore.SearchHit] {
+        (try? await store.search(query, limit: 200)) ?? []
     }
 
     func speakers(of recording: RecordingStore.Recording) async -> [RecordingStore.SpeakerLabel] {

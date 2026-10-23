@@ -1006,3 +1006,15 @@
 "Gesprochene Wörter je Minute Aufnahme gegen %lld WPM Tippen." = "Spoken words per minute of recording against %lld WPM of typing.";
 "%lld Wörter in %lld s. Getippt: etwa %lld s." = "%lld words in %lld s. Typed: about %lld s.";
 "%1$lld Wörter in %2$lld s. Getippt: etwa %3$lld s." = "%1$lld words in %2$lld s. Typed: about %3$lld s.";
+
+/* Notes window: folders, list and note in one window */
+"Titel, Ordner oder Transkript" = "Title, folder or transcript";
+"Umbenennen" = "Rename";
+"Alle Notizen" = "All Notes";
+"Projekte" = "Projects";
+"Weder Titel noch Ordner noch Transkript passen zur Eingabe." = "No title, folder or transcript matches your search.";
+"Keine Notiz ausgewählt" = "No Note Selected";
+"Wähle in der Liste eine Notiz aus." = "Choose a note from the list.";
+"Transkript" = "Transcript";
+"Keine eigenen Notizen." = "No notes of your own.";
+"Kein Transkript gespeichert." = "No transcript saved.";

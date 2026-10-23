@@ -16,7 +16,7 @@ enum WindowSize {
     }
 
     static let search = Spec(id: "search", ideal: CGSize(width: 560, height: 440), minimum: CGSize(width: 480, height: 360))
-    static let notes = Spec(id: "notes", ideal: CGSize(width: 520, height: 480), minimum: CGSize(width: 460, height: 360))
+    static let notes = Spec(id: "notes", ideal: CGSize(width: 980, height: 620), minimum: CGSize(width: 760, height: 420))
     static let recent = Spec(id: "recent", ideal: CGSize(width: 560, height: 440), minimum: CGSize(width: 480, height: 360))
     static let stats = Spec(id: "stats", ideal: CGSize(width: 640, height: 620), minimum: CGSize(width: 620, height: 600))
     static let meetingNotes = Spec(id: "meetingNotes", ideal: CGSize(width: 380, height: 320), minimum: CGSize(width: 380, height: 300))

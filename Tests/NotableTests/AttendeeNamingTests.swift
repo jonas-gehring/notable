@@ -39,6 +39,26 @@ final class OneToOneNamingTests: XCTestCase {
         let result = name(attendees: ["Jana Schultze"], open: ["Sprecher 1", "Sprecher ?"], large: ["Sprecher 1"])
         XCTAssertEqual(result?.label, "Sprecher 1")
     }
+
+    /// 2026-09-21: the account knew only the first name, the invitation listed
+    /// the user under their full name, and the remote voice was named after
+    /// them. Containment does not catch that; sharing a name does.
+    func testTheUserUnderTheirFullNameIsNeverTheGuest() {
+        let firstNameOnly: Set<String> = ["jonas"]
+        XCTAssertNil(OneToOneNaming.name(
+            attendees: ["Jonas Gehring"], openLabels: ["Sprecher 1"], largeClusters: ["Sprecher 1"], ownerTokens: firstNameOnly
+        ))
+        let result = OneToOneNaming.name(
+            attendees: ["Jonas Gehring", "Tom Meier"], openLabels: ["Sprecher 1"], largeClusters: ["Sprecher 1"], ownerTokens: firstNameOnly
+        )
+        XCTAssertEqual(result?.name, "Tom Meier")
+    }
+
+    /// The price, paid on purpose: a namesake as the only guest stays
+    /// "Sprecher 1" here. The model can still name him if his name is spoken.
+    func testANamesakeIsNotNamedFromTheCalendar() {
+        XCTAssertNil(name(attendees: ["Jonas Weber"]))
+    }
 }
 
 final class AttendeeNameTests: XCTestCase {

@@ -41,9 +41,11 @@ final class MeetingSilenceWatchTests: XCTestCase {
 
     /// One observation per second from `from` through `to`, both included.
     private func feed(_ watch: inout MeetingSilenceWatch, mic: Float, system: Float?,
-                      from: Int, to: Int) -> [MeetingSilenceWatch.Event] {
+                      from: Int, to: Int, call: Bool = false) -> [MeetingSilenceWatch.Event] {
         guard from <= to else { return [] }
-        return (from...to).compactMap { watch.observe(micLevel: mic, systemLevel: system, at: TimeInterval($0)) }
+        return (from...to).compactMap {
+            watch.observe(micLevel: mic, systemLevel: system, at: TimeInterval($0), callActive: call)
+        }
     }
 
     func testAsksAfterThreeMinutesAndStopsTwoMinutesLater() {
@@ -78,19 +80,69 @@ final class MeetingSilenceWatchTests: XCTestCase {
         XCTAssertEqual(watch.silentMinutes, 10)
     }
 
-    /// Room noise hovering between the thresholds neither starts nor resets.
-    func testTheBandBetweenThresholdsKeepsTheState() {
-        var never = MeetingSilenceWatch()
-        XCTAssertEqual(feed(&never, mic: between, system: between, from: 0, to: 1000), [], "startet keine Stille")
+    /// Room noise between the thresholds is not silence.
+    func testTheBandBetweenThresholdsNeverStartsSilence() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: between, system: between, from: 0, to: 1000), [])
+    }
 
-        var counting = MeetingSilenceWatch()
-        XCTAssertEqual(feed(&counting, mic: quiet, system: quiet, from: 0, to: 60), [])
-        XCTAssertEqual(feed(&counting, mic: between, system: quiet, from: 61, to: 180), [.ask], "setzt sie nicht zurück")
+    /// Until 2026-10 one quiet second followed by soft sound kept counting, and
+    /// five minutes of quiet speech stopped the recording. Any sound ends the
+    /// count now.
+    func testAnySoundEndsTheSilenceCount() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 60), [])
+        XCTAssertEqual(feed(&watch, mic: between, system: quiet, from: 61, to: 400), [], "leiser Ton ist keine Stille")
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 401, to: 580), [])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 581, to: 581), [.ask])
+    }
+
+    /// Soft sound keeps an open question (no flicker) but holds the stop until
+    /// two unbroken minutes of silence have passed again.
+    func testSoftSoundKeepsTheQuestionAndHoldsTheStop() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 180), [.ask])
+        XCTAssertEqual(feed(&watch, mic: between, system: quiet, from: 181, to: 200), [], "kein Zurückziehen, kein Stopp")
+        XCTAssertNotNil(watch.askedAt)
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 201, to: 320), [])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 321, to: 321), [.stop])
     }
 
     func testWithoutASystemTrackTheMicrophoneDecidesAlone() {
         var watch = MeetingSilenceWatch()
         XCTAssertEqual(feed(&watch, mic: quiet, system: nil, from: 0, to: 180), [.ask])
+    }
+
+    /// 2026-09-21: the watch stopped a Safari call after ten of its 27 minutes.
+    /// While the detector sees the call, the call ends the recording; the watch
+    /// still asks, but never stops.
+    func testARunningCallIsAskedAboutButNeverStopped() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 3600, call: true), [.ask])
+    }
+
+    /// Once the call is gone, the question's two minutes run from then, not
+    /// from when it was asked: an hour-old question must not stop at once.
+    func testTheTwoMinutesRunOnceTheCallIsGone() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 400, call: true), [.ask])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 401, to: 519), [])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 520, to: 520), [.stop])
+    }
+
+    func testSoundDuringTheCallWithdrawsTheQuestion() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 180, call: true), [.ask])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: speech, from: 181, to: 181, call: true), [.withdraw])
+        XCTAssertNil(watch.askedAt)
+    }
+
+    /// A question asked without a call does not stop once the detector has
+    /// confirmed one meanwhile (the recording then belongs to the call).
+    func testACallConfirmedAfterTheQuestionHoldsTheStop() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 180), [.ask])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 181, to: 1000, call: true), [])
     }
 }
 

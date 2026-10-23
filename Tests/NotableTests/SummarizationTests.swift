@@ -12,6 +12,27 @@ final class SummarizationPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("30 Minuten"))
         XCTAssertTrue(prompt.contains("Hallo zusammen."))
     }
+
+    /// "Ich arbeitet an …": without being told, the model takes "Ich" for a
+    /// name (benchmark of 2026-10-20).
+    func testTheModelIsToldWhoIchIs() {
+        var context = MeetingContext(title: nil, date: .now, durationSeconds: nil)
+        XCTAssertFalse(SummarizationPrompt.user(transcript: "Ich: Hallo.", context: context).contains("im Transkript ist"))
+
+        context.ownerName = "Jonas Gehring"
+        let prompt = SummarizationPrompt.user(transcript: "Ich: Hallo.", context: context)
+        guard let hint = prompt.range(of: "„Ich“ im Transkript ist Jonas Gehring"),
+              let transcript = prompt.range(of: "Transkript:\n")
+        else { return XCTFail("hint or transcript missing: \(prompt)") }
+        XCTAssertLessThan(hint.lowerBound, transcript.lowerBound, "the hint belongs before the quoted transcript")
+    }
+
+    func testASharedMicrophoneIsMentioned() {
+        var context = MeetingContext(title: nil, date: .now, durationSeconds: nil)
+        XCTAssertFalse(SummarizationPrompt.user(transcript: "x", context: context).contains("einziges Mikrofon"))
+        context.singleMicrophone = true
+        XCTAssertTrue(SummarizationPrompt.user(transcript: "x", context: context).contains("einziges Mikrofon"))
+    }
 }
 
 /// Real end-to-end call through the locally installed, logged-in Claude Code

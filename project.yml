@@ -154,6 +154,13 @@ targets:
       # means (Spec 22) — the pair is what stopped drifting apart.
       - path: Sources/Notable/Support/DefaultsKey.swift
       - path: Sources/Notable/Meeting/MeetingPipeline.swift
+      # What the pipeline repairs after the speech recognition (benchmark of
+      # 2026-10-20): the far side heard twice through the microphone, short
+      # English strays in German meetings, and which voice on a shared
+      # microphone is "Ich". All three pure, and MeetingPipeline calls them.
+      - path: Sources/Notable/Meeting/EchoFilter.swift
+      - path: Sources/Notable/Meeting/MeetingLanguageGuard.swift
+      - path: Sources/Notable/Meeting/OwnerVoice.swift
       - path: Sources/Notable/Meeting/MeetingDetector.swift
       # MeetingDetector references MeetingIdentityKey; the store + identity mapping
       # are pure, so the unit target compiles them directly (panel/coordinator are

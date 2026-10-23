@@ -121,6 +121,10 @@ targets:
       - path: Sources/Notable/Storage/RecordingStore.swift
       # The notes folder's pure rules; the store's relocation uses them (Spec 27).
       - path: Sources/Notable/Storage/NotesFolderRules.swift
+      # What the notes window lists and how it lays a note out. Compiled in
+      # rather than imported: it takes `RecordingStore` types, and the test
+      # target has its own copy of those.
+      - path: Sources/Notable/Notes/NoteBrowser.swift
       - path: Sources/Notable/Storage/MarkdownProjector.swift
       # Retention rules (issue #2). The planner is pure; the runner is the only
       # thing that deletes, and it is what the "statistics must not shrink"

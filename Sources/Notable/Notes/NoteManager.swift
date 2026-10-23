@@ -206,6 +206,17 @@ final class NoteManager: ObservableObject {
 
     // MARK: - Sprecher (Spec 24, Stufe 4)
 
+    /// The transcript of one note, for the detail column of the notes window.
+    func segments(of id: String) async -> [RecordingStore.Segment] {
+        (try? await store.meeting(id: id))?.segments ?? []
+    }
+
+    /// Meetings and dictations whose text or title contains `query` (FTS5),
+    /// for the search field of the notes window.
+    func searchHits(for query: String) async -> [RecordingStore.SearchHit] {
+        (try? await store.search(query, limit: 200)) ?? []
+    }
+
     func speakers(of recording: RecordingStore.Recording) async -> [RecordingStore.SpeakerLabel] {
         (try? await store.speakerLabels(for: recording.id)) ?? []
     }

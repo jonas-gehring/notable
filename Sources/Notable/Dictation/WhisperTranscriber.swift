@@ -46,17 +46,32 @@ enum WhisperModelSize: String, CaseIterable, Identifiable {
 /// The model is downloaded from HuggingFace (`argmaxinc/whisperkit-coreml`) on
 /// first use and cached locally, mirroring the Parakeet path. A whole-clip
 /// engine: unlike the streaming/incremental engines it decodes the finished
-/// recording in one pass, so it is a dictation-only alternative and does not
-/// touch the meeting pipeline (which stays on Parakeet).
+/// recording in one pass. Meetings use it only when it is chosen for them
+/// (`MeetingEngineChoice`), and then through `MeetingWhisperTranscriber`.
 final class WhisperTranscriber: TranscriptionEngine, @unchecked Sendable {
     let displayName = "Whisper (OpenAI, lokal, CoreML/ANE)"
 
+    /// The model meetings use when Whisper is chosen for them
+    /// (`MeetingEngineChoice.whisperTurbo`): large-v3's encoder with four
+    /// decoder layers instead of 32.
+    static let meetingModel = "large-v3-v20240930_turbo"
+    /// Whisper conditions on at most 224 tokens of previous text; the rest of
+    /// the window is the transcript itself.
+    static let maximumPromptTokens = 200
+
     private let modelName: String
+    /// Names and terms Whisper is nudged towards, handed over as the "previous
+    /// text" it conditions on. Empty for dictation; a meeting's invitees and
+    /// dictionary for a meeting.
+    private let vocabulary: [String]
     /// Set once in `prepare()`, read-only afterwards.
     private var pipe: WhisperKit?
+    /// `vocabulary`, tokenized once the tokenizer is loaded. Set with `pipe`.
+    private var promptTokens: [Int] = []
 
-    init(modelName: String = WhisperModelSize.current.modelName) {
+    init(modelName: String = WhisperModelSize.current.modelName, vocabulary: [String] = []) {
         self.modelName = modelName
+        self.vocabulary = vocabulary
     }
 
     /// Downloads (first run) and loads the CoreML model. Call once before the
@@ -70,6 +85,33 @@ final class WhisperTranscriber: TranscriptionEngine, @unchecked Sendable {
         // drive. Up to 1,5 GB of model weights belong in Application Support
         // next to FluidAudio's, where the storage pane can also count them.
         pipe = try await WhisperKit(model: modelName, downloadBase: ModelInventory.whisperDownloadBase)
+        promptTokens = Self.promptTokens(for: vocabulary, tokenizer: pipe?.tokenizer)
+    }
+
+    /// The vocabulary as Whisper's prompt: one comma-separated line, special
+    /// tokens removed (as WhisperKit's own command line does it), cut to
+    /// `maximumPromptTokens`.
+    private static func promptTokens(for vocabulary: [String], tokenizer: (any WhisperTokenizer)?) -> [Int] {
+        guard !vocabulary.isEmpty, let tokenizer else { return [] }
+        let text = " " + vocabulary.joined(separator: ", ") + "."
+        let tokens = tokenizer.encode(text: text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+        return Array(tokens.prefix(maximumPromptTokens))
+    }
+
+    /// One clip in a language the caller decided: a code pins it, nil lets
+    /// Whisper detect it. Returns the language Whisper says it heard, so a
+    /// meeting can settle on one (`MeetingLanguagePin`).
+    func transcribe(samples: [Float], language: String?) async throws -> (text: String, language: String?) {
+        let pipe = try await loadedPipe()
+        var options = language.map { DecodingOptions(task: .transcribe, language: $0, detectLanguage: false) }
+            ?? DecodingOptions(task: .transcribe, detectLanguage: true)
+        if !promptTokens.isEmpty { options.promptTokens = promptTokens }
+        let results = try await pipe.transcribe(audioArray: samples, decodeOptions: options)
+        let text = results
+            .map(\.text)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text, results.first?.language)
     }
 
     func transcribe(samples: [Float], sampleRate: Int) async throws -> String {

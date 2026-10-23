@@ -335,10 +335,15 @@ final class SettingsBindingsTests: XCTestCase {
     /// 2026-10-21). Der Schalter schickt das Meeting-Transkript ein zweites Mal
     /// an den Anbieter. Wie oft Text den Mac verlässt, kann der Code nicht für
     /// den Nutzer entscheiden, also ein Schalter, und der steht auf aus.
+    ///
+    /// **Schalter 30 → 29, Picker 19 → 20 am 2026-10-23**: „Meetings mit dem
+    /// gewählten Diktat-Modell transkribieren“ wurde zum Picker „Modell für
+    /// Meetings“ mit drei Stellungen (Parakeet, wie beim Diktat, Whisper
+    /// large-v3-turbo). Eine Frage, ein Bedienelement, nur eine andere Form.
     func testTheControlCountDoesNotGrowBack() throws {
         let counts = try Self.controlCounts()
-        XCTAssertLessThanOrEqual(counts.toggles, 30, "Ein Schalter mehr in den Einstellungen — war das eine Entscheidung, die der Code nicht treffen kann?")
-        XCTAssertLessThanOrEqual(counts.pickers, 19, "Ein Picker mehr in den Einstellungen — siehe Spec 38 §3.1")
+        XCTAssertLessThanOrEqual(counts.toggles, 29, "Ein Schalter mehr in den Einstellungen — war das eine Entscheidung, die der Code nicht treffen kann?")
+        XCTAssertLessThanOrEqual(counts.pickers, 20, "Ein Picker mehr in den Einstellungen — siehe Spec 38 §3.1")
     }
 
     /// The four pages, and no fifth. Every page absorbed since Spec 38 has to

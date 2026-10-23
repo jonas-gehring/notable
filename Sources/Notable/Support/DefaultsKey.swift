@@ -98,6 +98,10 @@ enum DefaultsKey {
     static let transcriptRefinementEnabled = DefaultsEntry(key: "transcriptRefinementEnabled", fallback: false)
     static let meetingEchoCancellation = DefaultsEntry(key: "meetingEchoCancellation", fallback: false)
     static let meetingUseDictationEngine = DefaultsEntry(key: "meetingUseDictationEngine", fallback: false)
+    /// Which model transcribes meetings (`MeetingEngineChoice`). Empty means
+    /// "never chosen", and then `meetingUseDictationEngine` above decides, so
+    /// a choice made before the picker existed survives it.
+    static let meetingEngine = DefaultsEntry(key: "meetingEngine", fallback: "")
     static let openNotesOnMeetingStart = DefaultsEntry(key: "openNotesOnMeetingStart", fallback: true)
     /// **No interface since Spec 38** (§3.2, Meetings › Notizen im Call): the
     /// notes window floats — that is what it is for. A switch turning off the

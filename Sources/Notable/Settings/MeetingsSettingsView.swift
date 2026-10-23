@@ -14,6 +14,7 @@ struct MeetingsSettingsView: View {
     @AppStorage(DefaultsKey.screenSpeakerRecognition.key) private var screenSpeakers = DefaultsKey.screenSpeakerRecognition.fallback
     @AppStorage(DefaultsKey.meetingEchoCancellation.key) private var echoCancellation = DefaultsKey.meetingEchoCancellation.fallback
     @AppStorage(DefaultsKey.meetingUseDictationEngine.key) private var useDictationEngine = DefaultsKey.meetingUseDictationEngine.fallback
+    @AppStorage(DefaultsKey.meetingEngine.key) private var meetingEngineRaw = DefaultsKey.meetingEngine.fallback
     @AppStorage(ASREngineID.storageKey) private var engineRaw = ASREngineID.parakeetV3.rawValue
     @AppStorage(DefaultsKey.showNextMeeting.key) private var showNextMeeting = DefaultsKey.showNextMeeting.fallback
     @AppStorage(DefaultsKey.openNotesOnMeetingStart.key) private var openNotesOnStart = DefaultsKey.openNotesOnMeetingStart.fallback
@@ -26,10 +27,31 @@ struct MeetingsSettingsView: View {
     /// What the automatic measurement has written so far (Spec 36 §3.1).
     @State private var probeFiles: [(url: URL, modified: Date)] = []
 
-    /// Which engine a meeting will actually use given the toggle — Unified can't
-    /// batch-transcribe, so it resolves to Parakeet v3.
-    private var effectiveMeetingEngineLabel: String {
-        guard useDictationEngine else { return "Parakeet v3" }
+    /// The old switch and the new key, read as one choice (`MeetingEngineChoice`).
+    /// Writing keeps the old key in step, so a build from before the picker
+    /// still reads the nearest thing it knows.
+    private var meetingEngine: Binding<MeetingEngineChoice> {
+        Binding(
+            get: { MeetingEngineChoice(stored: meetingEngineRaw, useDictationEngine: useDictationEngine) },
+            set: { choice in
+                meetingEngineRaw = choice.rawValue
+                useDictationEngine = choice.usesDictationEngine
+                if choice == .whisperTurbo { MeetingEngineChoice.prefetchWhisper() }
+            }
+        )
+    }
+
+    /// What the chosen position means, and for "like dictation" which model
+    /// that is today.
+    private var meetingEngineCaption: String {
+        let choice = meetingEngine.wrappedValue
+        guard choice == .dictation else { return choice.explanation }
+        return choice.explanation + " " + String(localized: "Gerade: \(dictationEngineForMeetings)")
+    }
+
+    /// Which engine "like dictation" resolves to — Unified can't batch-transcribe,
+    /// so it resolves to Parakeet v3.
+    private var dictationEngineForMeetings: String {
         switch ASREngineID(rawValue: engineRaw) ?? .parakeetV3 {
         case .parakeetV3: return "Parakeet v3"
         case .unifiedEnglish: return String(localized: "Parakeet v3 (Unified ist nur fürs Diktat)")
@@ -134,8 +156,14 @@ struct MeetingsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Toggle("Meetings mit dem gewählten Diktat-Modell transkribieren", isOn: $useDictationEngine)
-                LabeledContent("Modell für Meetings", value: effectiveMeetingEngineLabel)
+                Picker("Modell für Meetings", selection: meetingEngine) {
+                    ForEach(MeetingEngineChoice.allCases) { choice in
+                        Text(choice.label).tag(choice)
+                    }
+                }
+                Text(meetingEngineCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 if let cli = SummarizationProviderID(rawValue: summarizationRaw), cli.isCLI {
                     CLIArgumentsRow(provider: cli)

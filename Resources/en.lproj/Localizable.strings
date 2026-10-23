@@ -343,7 +343,6 @@
 "Meeting-Verarbeitung fehlgeschlagen" = "Processing the meeting failed";
 "Meetings" = "Meetings";
 "Meetings (optional)" = "Meetings (optional)";
-"Meetings mit dem gewählten Diktat-Modell transkribieren" = "Transcribe meetings with the selected dictation model";
 "meine Adresse" = "my address";
 "Menüleiste" = "Menu bar";
 "Menüleisten-Symbol" = "Menu bar icon";
@@ -1012,3 +1011,12 @@
 /* Transcript refinement (meetings) */
 "Transkript per KI nachbessern" = "Refine transcript with AI";
 "Korrigiert falsch erkannte Namen, Fachbegriffe und Satzzeichen, mit einer Begriffsliste aus Kalender, Call-Fenster und Wörterbuch. Das Transkript geht dafür ein zweites Mal an denselben Anbieter. Was ursprünglich erkannt wurde, bleibt gespeichert." = "Corrects misrecognised names, technical terms and punctuation, using a word list from the calendar, the call window and the dictionary. The transcript goes to the same provider a second time for this. What was originally recognised stays stored.";
+
+/* Meeting engine (meetings settings) */
+"Parakeet v3 (Standard)" = "Parakeet v3 (default)";
+"Wie beim Diktat" = "Same as dictation";
+"Whisper large-v3-turbo" = "Whisper large-v3-turbo";
+"Schnell und auf dem Gerät. Der Standard." = "Fast and on the device. The default.";
+"Nimmt das Modell aus den Diktat-Einstellungen." = "Uses the model from the dictation settings.";
+"Langsamer als Parakeet. Bekommt Namen aus Kalender und Wörterbuch als Hinweis und legt die Sprache nach der ersten Minute Sprache fest. Lädt beim Auswählen einmal gut ein Gigabyte herunter." = "Slower than Parakeet. Gets names from the calendar and the dictionary as a hint and settles on one language after the first minute of speech. Downloads a little over a gigabyte once when selected.";
+"Gerade: %@" = "Currently: %@";

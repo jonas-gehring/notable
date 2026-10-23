@@ -102,6 +102,7 @@ if grep -q "cdhash" <<<"$DR"; then
   echo "Set a stable CODE_SIGN_IDENTITY in project.yml and rebuild." >&2
   exit 1
 fi
+"$REPO_ROOT/scripts/check-entitlements.sh" "$APP"
 
 # ----- 4. zip, notarize, staple ------------------------------------------
 # Notarization needs a "Developer ID Application" signature + hardened runtime,

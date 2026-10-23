@@ -403,12 +403,15 @@ final class UpdateInstaller: ObservableObject {
     /// Positional args: `$1` = pid to wait on, `$2` = staged new app, `$3` = the
     /// bundle to replace. Waits up to ~20 s for the app to quit, moves the old
     /// bundle aside, copies the new one in (rolling back on failure), then relaunches.
+    /// The old bundle is kept until the new one has started and is still running a
+    /// few seconds later; a new version that does not come up is swapped back out.
     nonisolated static let swapScript = """
     #!/bin/sh
     pid="$1"
     newapp="$2"
     dest="$3"
     tries="${NOTABLE_RELAUNCH_TRIES:-10}"
+    settle="${NOTABLE_SETTLE_SECONDS:-5}"
 
     # Start the app and make sure it runs. The pid being gone is the kernel's
     # answer; LaunchServices learns it a moment later, and an `open` in that gap
@@ -449,9 +452,7 @@ final class UpdateInstaller: ObservableObject {
     # already quit — so start it again. Unattended, a bare `exit 1` meant no
     # menu-bar item and no dictation until someone noticed.
     mv "$dest" "$dest.old" || { relaunch; rm -f "$0"; exit 1; }
-    if /usr/bin/ditto "$newapp" "$dest"; then
-      rm -rf "$dest.old" "$newapp"
-    else
+    if ! /usr/bin/ditto "$newapp" "$dest"; then
       # Roll back to the previous bundle on any copy failure — but only if there
       # is one. Unconditional `rm -rf "$dest"` deleted the app outright whenever
       # `$dest.old` had never been created.
@@ -459,8 +460,29 @@ final class UpdateInstaller: ObservableObject {
         rm -rf "$dest"
         mv "$dest.old" "$dest"
       fi
+      relaunch
+      rm -f "$0"
+      exit 1
     fi
+
+    # `$dest.old` stays until the new version has started *and* is still running
+    # after `settle` seconds. It used to be deleted right after the copy, so a
+    # release that crashed at launch left no app at all, unattended, with
+    # nobody there to notice. The next launch of the old version reports the
+    # attempt as not installed (`UpdateMarkers.consumeOutcome`). The check
+    # after the pause is what counts, so a slow first start still keeps the new
+    # version.
     relaunch
+    sleep "$settle"
+    if pgrep -f "$dest/Contents/MacOS/" >/dev/null 2>&1; then
+      rm -rf "$dest.old" "$newapp"
+    else
+      rm -rf "$dest"
+      mv "$dest.old" "$dest"
+      relaunch
+      rm -f "$0"
+      exit 1
+    fi
     rm -f "$0"
     """
 }

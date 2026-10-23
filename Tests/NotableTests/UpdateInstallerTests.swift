@@ -59,12 +59,26 @@ final class UpdateInstallerTests: XCTestCase {
         let script = dir.appendingPathComponent("swap.sh")
         try UpdateInstaller.swapScript.write(to: script, atomically: true, encoding: .utf8)
 
+        // The bundles are plain folders, so a real `open` would launch nothing
+        // and the script would roll the update back. Fake `open` and `pgrep`
+        // say the app came up; the case where it does not is tested below.
+        let bin = dir.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        for name in ["open", "pgrep"] {
+            let url = bin.appendingPathComponent(name)
+            try "#!/bin/sh\nexit 0\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [script.path, String(pid), staged.path, dest.path]
-        // `open` at the end has nothing to open here; its noise is not the point,
-        // and one attempt is enough — retrying is tested on its own below.
-        process.environment = ["PATH": "/usr/bin:/bin", "NOTABLE_RELAUNCH_TRIES": "1"]
+        // One attempt is enough — retrying is tested on its own below.
+        process.environment = [
+            "PATH": "\(bin.path):/usr/bin:/bin",
+            "NOTABLE_RELAUNCH_TRIES": "1",
+            "NOTABLE_SETTLE_SECONDS": "0",
+        ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -179,7 +193,7 @@ final class UpdateInstallerTests: XCTestCase {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = [script.path, "999999", staged.path, dest.path]
-        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin"]
+        process.environment = ["PATH": "\(bin.path):/usr/bin:/bin", "NOTABLE_SETTLE_SECONDS": "0"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -187,6 +201,53 @@ final class UpdateInstallerTests: XCTestCase {
 
         let opened = try String(contentsOf: log, encoding: .utf8).split(separator: "\n")
         XCTAssertEqual(opened.count, 2, "öffnet erneut, bis die App läuft — und dann nicht mehr")
+    }
+
+    /// A release that does not start (or quits again within the settle time)
+    /// used to leave no app at all: the old bundle was deleted right after the
+    /// copy. Now it is swapped back in and started. Fake `pgrep` never sees the
+    /// app run; fake `open` records each launch.
+    func testRestoresAndRelaunchesTheOldAppWhenTheNewOneDoesNotStart() throws {
+        let fm = FileManager.default
+        let dir = fm.temporaryDirectory.appendingPathComponent("swap-dead-\(UUID().uuidString)", isDirectory: true)
+        let dest = dir.appendingPathComponent("Notable.app", isDirectory: true)
+        let staged = dir.appendingPathComponent("new/Notable.app", isDirectory: true)
+        let bin = dir.appendingPathComponent("bin", isDirectory: true)
+        let log = dir.appendingPathComponent("opened.txt")
+        for folder in [dest, staged, bin] { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
+        defer { try? fm.removeItem(at: dir) }
+        try "alt".write(to: dest.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+        try "neu".write(to: staged.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
+        let fakes = [
+            "open": "#!/bin/sh\necho \"$1\" >> '\(log.path)'\n",
+            "pgrep": "#!/bin/sh\nexit 1\n",
+        ]
+        for (name, body) in fakes {
+            let url = bin.appendingPathComponent(name)
+            try body.write(to: url, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let script = dir.appendingPathComponent("swap.sh")
+        try UpdateInstaller.swapScript.write(to: script, atomically: true, encoding: .utf8)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path, "999999", staged.path, dest.path]
+        process.environment = [
+            "PATH": "\(bin.path):/usr/bin:/bin",
+            "NOTABLE_RELAUNCH_TRIES": "1",
+            "NOTABLE_SETTLE_SECONDS": "0",
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertNotEqual(process.terminationStatus, 0)
+        XCTAssertEqual(marker(dir), "alt", "die alte App muss wieder an ihrem Platz sein")
+        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent("Notable.app.old").path))
+        let opened = try String(contentsOf: log, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(opened.count, 2, "erst die neue Version, dann nach dem Zurücktauschen die alte")
     }
 
     /// The script wrote itself into the temp directory and never cleaned up.

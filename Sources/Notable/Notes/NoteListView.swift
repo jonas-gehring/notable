@@ -46,9 +46,9 @@ struct NoteListView: View {
             list
         }
         .toolbar { toolbarItems }
-        // ⌘F focuses the field. SwiftUI's own search-focus binding is macOS 15
-        // and the deployment target is 14.4, so this is a zero-size button in
-        // the key-equivalent chain instead.
+        // ⌘F focuses the field. The field is a plain `TextField` in the
+        // toolbar, not `.searchable`, so this is a zero-size button in the
+        // key-equivalent chain.
         .background(
             Button("") { searchFocused = true }
                 .keyboardShortcut("f", modifiers: [.command])

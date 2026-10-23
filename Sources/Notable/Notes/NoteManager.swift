@@ -7,7 +7,7 @@ import Foundation
 @MainActor
 final class NoteManager: ObservableObject {
     /// The folder key every new note lands in; also the target of "move to Inbox".
-    static let inboxFolder = "Inbox"
+    static let inboxFolder = ProjectFolderName.inbox
 
     /// Recent meeting notes, newest first — the list UI binds to this.
     @Published private(set) var notes: [RecordingStore.Recording] = []
@@ -59,7 +59,7 @@ final class NoteManager: ObservableObject {
         return entries
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
             .map { $0.lastPathComponent }
-            .filter { $0 != Self.inboxFolder }
+            .filter { !ProjectFolderName.isInbox($0) }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
@@ -67,8 +67,7 @@ final class NoteManager: ObservableObject {
     /// Rejects empty names and the reserved "Inbox".
     @discardableResult
     func createFolder(named rawName: String) throws -> String {
-        let key = Self.sanitizeFolderName(rawName)
-        guard !key.isEmpty else { throw NoteError.invalidFolderName }
+        guard let key = ProjectFolderName.key(for: rawName) else { throw NoteError.invalidFolderName }
         guard key != Self.inboxFolder else { throw NoteError.reservedFolderName }
         try FileManager.default.createDirectory(at: url(forFolder: key), withIntermediateDirectories: true)
         return key
@@ -108,8 +107,7 @@ final class NoteManager: ObservableObject {
     /// is re-projected (title/date unchanged, so it is identical) at a fresh
     /// collision-free name in the destination; the old file is removed.
     func move(_ recording: RecordingStore.Recording, toFolder folder: String) async throws {
-        let key = folder == Self.inboxFolder ? folder : Self.sanitizeFolderName(folder)
-        guard !key.isEmpty else { throw NoteError.invalidFolderName }
+        guard let key = ProjectFolderName.key(for: folder) else { throw NoteError.invalidFolderName }
 
         guard let loaded = try await store.meeting(id: recording.id) else { throw NoteError.notFound }
         let record = loaded.recording
@@ -250,13 +248,6 @@ final class NoteManager: ObservableObject {
     private func removeStaleFile(_ old: URL?, keeping target: URL) {
         guard let old, old.standardizedFileURL.path != target.standardizedFileURL.path else { return }
         try? FileManager.default.removeItem(at: old)
-    }
-
-    private static func sanitizeFolderName(_ name: String) -> String {
-        name
-            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
-            .joined()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     enum NoteError: LocalizedError {

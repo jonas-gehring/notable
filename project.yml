@@ -2,7 +2,7 @@ name: Notable
 options:
   createIntermediateGroups: true
   deploymentTarget:
-    macOS: "14.4"
+    macOS: "26.0"
   # The German text in the source is the localization *key*, not a translation —
   # Notable was written in German. The development language is nonetheless `en`,
   # because it decides what a system in a language Notable does not speak falls
@@ -16,7 +16,7 @@ settings:
     # That is the only ground truth for the keys of interpolated strings, whose
     # format specifiers (%@ vs %lld) cannot be read off the source text.
     SWIFT_EMIT_LOC_STRINGS: YES
-    MACOSX_DEPLOYMENT_TARGET: "14.4"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
 packages:
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio

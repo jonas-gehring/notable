@@ -31,24 +31,23 @@ enum LocalModelAvailability: Equatable, Sendable {
 
     static var current: LocalModelAvailability {
         #if canImport(FoundationModels)
-        if #available(macOS 26, *) {
-            switch SystemLanguageModel.default.availability {
-            case .available:
-                return .available
-            case .unavailable(.deviceNotEligible):
-                return .deviceNotEligible
-            case .unavailable(.appleIntelligenceNotEnabled):
-                return .appleIntelligenceOff
-            case .unavailable(.modelNotReady):
-                return .modelNotReady
-            case .unavailable:
-                return .unavailable
-            @unknown default:
-                return .unavailable
-            }
+        switch SystemLanguageModel.default.availability {
+        case .available:
+            return .available
+        case .unavailable(.deviceNotEligible):
+            return .deviceNotEligible
+        case .unavailable(.appleIntelligenceNotEnabled):
+            return .appleIntelligenceOff
+        case .unavailable(.modelNotReady):
+            return .modelNotReady
+        case .unavailable:
+            return .unavailable
+        @unknown default:
+            return .unavailable
         }
-        #endif
+        #else
         return .requiresNewerSystem
+        #endif
     }
 }
 
@@ -64,7 +63,6 @@ struct LocalPolishResult: Sendable, Equatable {
 }
 
 #if canImport(FoundationModels)
-@available(macOS 26, *)
 @Generable
 struct PolishedDictation {
     @Guide(description: "Der aufbereitete Text, sonst nichts.")
@@ -82,7 +80,6 @@ struct PolishedDictation {
 /// dictation must know nothing of the one before — nor fill a 4 096-token
 /// context over an afternoon. The next session is created and prewarmed right
 /// after each use, so the one waiting is warm.
-@available(macOS 26, *)
 actor LocalPolisher {
     static let shared = LocalPolisher()
 

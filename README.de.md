@@ -1,7 +1,7 @@
 # Notable
 
 Lokale Diktat- und Meeting-Transkription für macOS. Menüleisten-App, Apple Silicon,
-macOS 14.4+.
+macOS 26+.
 
 <p align="center">
   <img src="docs/images/dictation.gif" width="640" alt="Die Diktat-Anzeige: eine kleine dunkle Kapsel mit laufender Wellenform, danach „Transkribiere…“">
@@ -20,11 +20,10 @@ lässt sich in den Einstellungen fest auf eine der beiden stellen.
 
 **Diktat.** Hotkey halten, sprechen, loslassen — der polierte Text landet im fokussierten
 Feld. Kurz antippen schaltet freihändig, der nächste Tipp beendet. Warm gemessen: 5 s
-Audio → ~119 ms, 60 s → ~397 ms; lange Diktate dekodieren inkrementell mit, so dass beim
-Loslassen nur noch der Rest zu tun ist.
+Audio → ~119 ms, 60 s → ~397 ms. Transkribiert wird der ganze Clip beim Loslassen.
 
-- Parakeet TDT v3 (mehrsprachig, Standard) oder Parakeet Unified (Englisch, echtes
-  Streaming); Whisper als Vergleichsoption
+- Parakeet TDT v3 (mehrsprachig, Standard) oder Parakeet Unified (nur Englisch);
+  Whisper als Vergleichsoption
 - Regelbasierte Nachbearbeitung: Füllwörter, Zahlen und Daten, persönliches Wörterbuch,
   Absätze und gesprochene Struktur-Kommandos („neue Zeile", „Stichpunkt", „erstens…")
 - **Textbausteine**: gesprochene Kürzel expandieren zu beliebigem, auch mehrzeiligem Text

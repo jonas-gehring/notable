@@ -51,6 +51,9 @@ xcodebuild -project Notable.xcodeproj -scheme Notable -configuration Release \
 APP="$DERIVED/Build/Products/Release/Notable.app"
 [ -d "$APP" ] || { echo "Build did not produce $APP" >&2; exit 1; }
 
+echo "==> Checking entitlements"
+"$REPO_ROOT/scripts/check-entitlements.sh" "$APP"
+
 DEST="/Applications/Notable.app"
 quit_notable "$DEST"
 echo "==> Installing to $DEST"

@@ -821,6 +821,9 @@ final class MeetingController: ObservableObject {
 
     private func stop(reason: MeetingEndReason) {
         guard case .recording(let startedAt) = capture else { return }
+        // Where "stop to finished note" starts (`NoteTimings.totalMs`): before
+        // the tracks are drained, since that is part of what the user waits for.
+        let stoppedAt = ContinuousClock.now
 
         Self.log.notice("Aufnahme beendet: \(reason.rawValue, privacy: .public)")
         if let spool = currentSpool {
@@ -903,7 +906,8 @@ final class MeetingController: ObservableObject {
                     screen: screen,
                     screenAdapter: screenAdapter,
                     callSource: source,
-                    eventFoundAtStop: stopEvent != nil
+                    eventFoundAtStop: stopEvent != nil,
+                    stoppedAt: stoppedAt
                 )
                 handle(outcome: note, spool: spool, userNotes: userNotes, recovered: false)
             } catch {
@@ -1145,8 +1149,13 @@ final class MeetingController: ObservableObject {
         /// The detected call, for the title when there is no event (Spec 35).
         callSource: String? = nil,
         /// `event` was found only when the recording stopped (Spec 35).
-        eventFoundAtStop: Bool = false
+        eventFoundAtStop: Bool = false,
+        /// When the recording stopped; nil for a recovered meeting, whose
+        /// clock starts here.
+        stoppedAt: ContinuousClock.Instant? = nil
     ) async throws -> NoteOutcome {
+        let processingStart = stoppedAt ?? ContinuousClock.now
+        var timings = NoteTimings()
         // Transcribe + diarize (detached — CoreML work must not block main).
         // Parakeet v3 is shared with dictation's cache (no second copy of the
         // weights); Whisper is loaded fresh for the meeting when selected.
@@ -1160,15 +1169,23 @@ final class MeetingController: ObservableObject {
         // `processDetailed`, because the voices have to survive the pipeline:
         // a profile is the centroid of a large cluster (Spec 36 §3.3), and the
         // embeddings exist only for the length of the diarization.
-        let processed = try await Task.detached(priority: .userInitiated) {
+        let pipelineStart = ContinuousClock.now
+        let (processed, modelLoad) = try await Task.detached(priority: .userInitiated) {
+            let modelStart = ContinuousClock.now
             let transcriber = try await meetingTranscriber()
-            return try await MeetingPipeline.processDetailed(
+            let loaded = modelStart.duration(to: .now)
+            let outcome = try await MeetingPipeline.processDetailed(
                 micSamples: micSamples,
                 systemSamples: systemSamples,
                 transcriber: transcriber,
                 expectedSpeakers: expectedSpeakers
             )
+            return (outcome, loaded)
         }.value
+        timings.pipelineMs = NoteTimings.milliseconds(pipelineStart.duration(to: .now))
+        timings.modelMs = NoteTimings.milliseconds(modelLoad)
+        timings.segmentationMs = NoteTimings.milliseconds(processed.segmentation)
+        timings.transcriptionMs = NoteTimings.milliseconds(processed.transcription)
         let segments = processed.segments
         log.notice("Bereinigung: \(processed.report.summary, privacy: .public)")
 
@@ -1238,6 +1255,7 @@ final class MeetingController: ObservableObject {
         /// Whether the screen's own self-check held for this meeting — only
         /// then is a screen name evidence a voice profile may learn from.
         var screenTrusted = false
+        let namingStart = ContinuousClock.now
         if !segments.isEmpty, !micSilent {
             let owner = SpeakerNameResolver.ownerNameTokens
             let fromScreen = ScreenNaming.apply(segments, observations: screen, recordingStart: startedAt, ownerTokens: owner)
@@ -1334,6 +1352,7 @@ final class MeetingController: ObservableObject {
             enabled: DefaultsKey.speakerNamingEnabled.value(),
             outcome: namingOutcome
         )
+        timings.namingMs = NoteTimings.milliseconds(namingStart.duration(to: .now))
         log.notice("Sprecherbenennung: \(namingDiagnosis, privacy: .public)")
 
         let duration = Double(max(micSamples.count, systemSamples.count))
@@ -1400,6 +1419,10 @@ final class MeetingController: ObservableObject {
                 ownerName: SpeakerNameResolver.ownerDisplayName,
                 singleMicrophone: processed.report.microphoneVoices
             )
+            let summaryStart = ContinuousClock.now
+            // Measured on both exits: a provider that times out is exactly the
+            // kind of minute this number is meant to show.
+            defer { timings.summaryMs = NoteTimings.milliseconds(summaryStart.duration(to: .now)) }
             do {
                 let summary = try await SummarizationService.summarize(
                     transcript: transcriptText,
@@ -1509,12 +1532,17 @@ final class MeetingController: ObservableObject {
             summaryFailed: summaryError != nil
         )
         log.notice("Titel: \(titleDiagnosis, privacy: .public)")
+        timings.audioSeconds = Int(duration.rounded())
+        timings.totalMs = NoteTimings.milliseconds(processingStart.duration(to: .now))
+        let finalTimings = timings
+        log.notice("Verarbeitung: \(finalTimings.summary, privacy: .public)")
         if let spool {
             SpoolStore.updateMeta(spool) {
                 $0.naming = namingDiagnosis
                 $0.titleSource = titleDiagnosis
                 $0.screen = screenDiagnosis
                 $0.cleanup = processed.report.summary
+                $0.timings = finalTimings
             }
         }
 

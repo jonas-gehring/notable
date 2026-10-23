@@ -97,6 +97,9 @@ final class SmartReplaceTests: XCTestCase {
         components.year = 2026
         components.month = 9
         components.day = 1
+        // Noon, not midnight: the formatter uses the machine's time zone, and
+        // midnight in Berlin is still 31 August in UTC (the CI runner).
+        components.hour = 12
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
         let date = calendar.date(from: components)!
@@ -186,5 +189,34 @@ final class SmartReplaceTests: XCTestCase {
             TextPolisher.polish(text, options: options),
             TextPolisher.polish(text, options: polishOptions([]))
         )
+    }
+
+    // MARK: - Cached patterns (P6)
+
+    /// The compiled alternation is reused while the table stays the same, and a
+    /// changed table never hits the old regex: the cache is keyed on the
+    /// pattern, which carries every trigger and flag.
+    func testCompiledPatternIsReusedAndFollowsTheTable() {
+        XCTAssertTrue(SmartReplace.compiled("(?:abc)") === SmartReplace.compiled("(?:abc)"))
+        XCTAssertFalse(SmartReplace.compiled("(?:abc)") === SmartReplace.compiled("(?:abd)"))
+
+        let first = [item("Adresse", "EINS")]
+        XCTAssertEqual(SmartReplace.apply(first, to: "Die Adresse."), "Die EINS.")
+        XCTAssertEqual(SmartReplace.apply(first, to: "Die Adresse."), "Die EINS.")
+        let edited = [item("Adresse", "ZWEI"), item("Telefon", "0123")]
+        XCTAssertEqual(SmartReplace.apply(edited, to: "Adresse und Telefon."), "ZWEI und 0123.")
+        let caseFlipped = [item("adresse", "EINS", caseSensitive: true)]
+        XCTAssertEqual(SmartReplace.apply(caseFlipped, to: "Die Adresse."), "Die Adresse.")
+    }
+
+    /// `mapWords` keeps its regex now; what it does with the text must not move.
+    func testMapWordsKeepsEverythingAroundTheWords() {
+        let text = "Grüße, Jonas – das ist's! 42 Mal."
+        XCTAssertEqual(FuzzyDictionary.mapWords(in: text) { _ in nil }, text)
+        XCTAssertEqual(
+            FuzzyDictionary.mapWords(in: text) { $0.uppercased() },
+            "GRÜSSE, JONAS – DAS IST'S! 42 MAL."
+        )
+        XCTAssertEqual(FuzzyDictionary.mapWords(in: "…") { _ in "x" }, "…")
     }
 }

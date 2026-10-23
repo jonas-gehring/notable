@@ -207,6 +207,10 @@ enum MeetingPipeline {
         /// What the cleanup did, for the log and `meta.json`, so a note that
         /// lost a sentence can say why.
         var report = CleanupReport()
+        /// VAD and diarization of both tracks, and the ASR loop with the
+        /// cleanup after it — the two halves of `NoteTimings.pipelineMs`.
+        var segmentation: Duration = .zero
+        var transcription: Duration = .zero
     }
 
     struct CleanupReport: Equatable, Sendable {
@@ -241,28 +245,40 @@ enum MeetingPipeline {
         cleanup: Cleanup = .all
     ) async throws -> Outcome {
         let sampleRate = PCMDownsampler.targetSampleRate
+        let segmentationStart = ContinuousClock.now
 
         // One VAD manager for both tracks — it was being loaded twice.
         let vad = (micSamples.isEmpty && systemSamples.isEmpty) ? nil : try await VadManager(modelDirectory: ModelInventory.applicationRoot)
 
-        // Mic track → utterances of "Ich".
-        var micSegments: [(TimeInterval, TimeInterval)] = []
-        if !micSamples.isEmpty, let vad {
-            micSegments = try await vad.segmentSpeech(micSamples).map { ($0.startTime, $0.endTime) }
-        }
-
-        // System track → diarized speakers.
+        // System track → diarized speakers, mic track → utterances of "Ich".
         //
-        // The track is mostly silence: it holds nothing while *I* speak. Handing
-        // that to the diarizer destroys it — measured on identical audio, the
-        // silence holes alone collapse a British male and an American female
-        // into a single speaker, while the compacted signal separates them
-        // cleanly. So VAD first, diarize speech only, then map back.
+        // The system track is mostly silence: it holds nothing while *I* speak.
+        // Handing that to the diarizer destroys it — measured on identical
+        // audio, the silence holes alone collapse a British male and an
+        // American female into a single speaker, while the compacted signal
+        // separates them cleanly. So VAD first, diarize speech only, then map
+        // back.
+        //
+        // The two tracks do not depend on each other until `orderedSpecs`, so
+        // the system track's diarization runs while the microphone's VAD does.
+        // The system track's VAD goes first and is awaited on its own: both
+        // VAD passes share one `VadManager`, an actor, so they would only take
+        // turns on it anyway, and what can genuinely overlap is the diarizer —
+        // its own model, created inside `diarizeSpeech` — with the other
+        // track's VAD. Each VAD call keeps its state local, so taking turns
+        // does not change what either returns, and the results are merged
+        // below exactly as before.
+        let systemSpeech = try await speech(of: systemSamples, vad: vad)
+        async let systemDiarized = Self.diarizeIfSegmented(
+            systemSpeech, of: systemSamples, expectedSpeakers: expectedSpeakers
+        )
+        let micSpeech = try await speech(of: micSamples, vad: vad)
+        let micSegments: [(TimeInterval, TimeInterval)] = (micSpeech ?? []).map { ($0.startTime, $0.endTime) }
+
         var systemSegments: [(String, TimeInterval, TimeInterval)] = []
         var voices: [String: [Float]] = [:]
         var seconds: [String: TimeInterval] = [:]
-        if !systemSamples.isEmpty, let vad {
-            let diarized = try await diarizeTrack(systemSamples, vad: vad, expectedSpeakers: expectedSpeakers)
+        if let diarized = try await systemDiarized {
             systemSegments = diarized.cleaned.flatMap { segment in
                 mapToOriginal(start: segment.start, end: segment.end, regions: diarized.regions)
                     .map { (segment.label, $0.start, $0.end) }
@@ -284,9 +300,10 @@ enum MeetingPipeline {
         // meeting in the room, a phone on speaker). The mic track is then
         // diarized like the system track, and `OwnerVoice` decides which voice
         // is "Ich". With a single voice nothing changes. Expected voices: the
-        // remote ones the calendar suggests, plus the user.
-        if systemSegments.isEmpty, !micSegments.isEmpty, cleanup.contains(.microphoneVoices), let vad {
-            let diarized = try await diarizeTrack(micSamples, vad: vad, expectedSpeakers: expectedSpeakers.map { $0 + 1 })
+        // remote ones the calendar suggests, plus the user. The microphone's
+        // VAD from above is reused rather than run a second time.
+        if systemSegments.isEmpty, !micSegments.isEmpty, cleanup.contains(.microphoneVoices), let micSpeech {
+            let diarized = try await diarizeSpeech(micSpeech, of: micSamples, expectedSpeakers: expectedSpeakers.map { $0 + 1 })
             if let split = microphoneVoices(diarized, samples: micSamples) {
                 specs = split.specs.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
                 seconds = split.seconds
@@ -295,6 +312,8 @@ enum MeetingPipeline {
             }
         }
         specs = groupedSpecs(specs)
+        let segmentation = segmentationStart.duration(to: .now)
+        let transcriptionStart = ContinuousClock.now
         let polish = polishOptions()
 
         var transcript: [MeetingTranscriptSegment] = []
@@ -337,7 +356,10 @@ enum MeetingPipeline {
             report.languageDroppedWords = guarded.droppedWords
             report.languageRewritten = guarded.rewritten
         }
-        return Outcome(segments: transcript, voices: voices, seconds: seconds, report: report)
+        return Outcome(
+            segments: transcript, voices: voices, seconds: seconds, report: report,
+            segmentation: segmentation, transcription: transcriptionStart.duration(to: .now)
+        )
     }
 
     /// The microphone track split into voices, or nil when it holds fewer
@@ -411,8 +433,36 @@ enum MeetingPipeline {
         vad: VadManager,
         expectedSpeakers: Int?
     ) async throws -> Diarization {
-        let sampleRate = PCMDownsampler.targetSampleRate
         let speech = try await vad.segmentSpeech(samples)
+        return try await diarizeSpeech(speech, of: samples, expectedSpeakers: expectedSpeakers)
+    }
+
+    /// A track's speech regions, or nil when there is no track or no VAD.
+    private static func speech(of samples: [Float], vad: VadManager?) async throws -> [VadSegment]? {
+        guard !samples.isEmpty, let vad else { return nil }
+        return try await vad.segmentSpeech(samples)
+    }
+
+    /// Nil in, nil out: a track that was never segmented has nothing to
+    /// diarize. Its own name rather than an overload of `diarizeSpeech`, whose
+    /// optional and non-optional forms would be ambiguous to call.
+    private static func diarizeIfSegmented(
+        _ speech: [VadSegment]?,
+        of samples: [Float],
+        expectedSpeakers: Int?
+    ) async throws -> Diarization? {
+        guard let speech else { return nil }
+        return try await diarizeSpeech(speech, of: samples, expectedSpeakers: expectedSpeakers)
+    }
+
+    /// The half of `diarizeTrack` after the VAD, so `processDetailed` can run
+    /// it next to the other track's VAD.
+    static func diarizeSpeech(
+        _ speech: [VadSegment],
+        of samples: [Float],
+        expectedSpeakers: Int?
+    ) async throws -> Diarization {
+        let sampleRate = PCMDownsampler.targetSampleRate
 
         var compact: [Float] = []
         var regions: [SpeechRegion] = []

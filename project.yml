@@ -173,6 +173,8 @@ targets:
       # The snapshot type is pure; only the CoreAudio fetch touches hardware.
       - path: Sources/Notable/Meeting/AudioProcessMonitor.swift
       - path: Sources/Notable/Meeting/SpoolStore.swift
+      # Stop-to-note timings, which SpoolStore.Meta carries into meta.json.
+      - path: Sources/Notable/Meeting/NoteTimings.swift
       # The spool's sample formats and the lossless archive re-encode. Both are
       # pure file work, and both are the kind of thing that must be proved
       # rather than believed: getting a format wrong destroys the only copy of

@@ -30,7 +30,10 @@ final class StorageNotice: ObservableObject {
 
     func refresh() async {
         let engine = ASREngineID.current
-        update(with: await Task.detached {
+        // `.utility`: the walk covers gigabytes of spool archive and models at
+        // launch, competing with the model warm-up and the first dictation for
+        // the disk, and nobody is waiting for this line to appear.
+        update(with: await Task.detached(priority: .utility) {
             StorageFootprint.measure(modelEntries: ModelInventory.current(engine: engine))
         }.value)
     }

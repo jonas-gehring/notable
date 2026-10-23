@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Disk spool for in-flight meeting recordings: one raw PCM file per track
 /// plus a metadata file. A crash mid-meeting leaves the session on disk;
@@ -6,6 +7,8 @@ import Foundation
 ///
 /// The sample format lives in the file extension — see ``SpoolAudio``.
 enum SpoolStore {
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "spool")
+
     struct Meta: Codable, Sendable {
         var startedAt: Date
         var eventTitle: String?
@@ -102,12 +105,16 @@ enum SpoolStore {
     /// by hand, never retried automatically.
     static var failedURL: URL { baseURL.deletingLastPathComponent().appendingPathComponent("spool-failed", isDirectory: true) }
 
-    static func markFailed(_ session: Session) {
-        try? FileManager.default.createDirectory(at: failedURL, withIntermediateDirectories: true)
-        try? FileManager.default.moveItem(
-            at: session.directory,
-            to: failedURL.appendingPathComponent(session.directory.lastPathComponent)
-        )
+    static func markFailed(_ session: Session, into failed: URL = SpoolStore.failedURL) {
+        do {
+            try FileManager.default.createDirectory(at: failed, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(
+                at: session.directory,
+                to: failed.appendingPathComponent(session.directory.lastPathComponent)
+            )
+        } catch {
+            log.error("Spool \(session.directory.lastPathComponent, privacy: .public) nicht nach spool-failed verschoben: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Marks a session as having produced its note.
@@ -118,22 +125,74 @@ enum SpoolStore {
     /// wrote a *second* note, "Titel (2)", for a meeting that already had one.
     /// The marker is written first and costs nothing; the worst it can do is
     /// skip a recovery for a note that does exist.
+    ///
+    /// Not swallowed any more: a marker that fails to write is exactly the
+    /// duplicate it exists to prevent, so the log says so. It still does not
+    /// throw — the note itself is on disk, and failing its production over the
+    /// marker would trade a possible duplicate for a certain error.
     static func markNoteWritten(_ session: Session, noteURL: URL) {
-        try? Data(noteURL.path.utf8).write(to: session.doneURL, options: .atomic)
+        do {
+            try Data(noteURL.path.utf8).write(to: session.doneURL, options: .atomic)
+        } catch {
+            log.error("Marker note-written für \(session.directory.lastPathComponent, privacy: .public) nicht geschrieben, eine Wiederherstellung kann die Notiz doppeln: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// How long a session without a readable `meta.json` is left alone before
+    /// the scan parks it in `spool-failed`.
+    ///
+    /// `create` writes the meta right after the directory, and every later
+    /// write of it is atomic, so a live recording is never metaless for more
+    /// than an instant — but an instant is enough for a scan that runs at the
+    /// wrong moment. An hour without any write to the folder or the files in
+    /// it is not a recording: a running one appends audio several times a
+    /// second.
+    static let unreadableGrace: TimeInterval = 60 * 60
+
+    /// Whether a session whose meta cannot be read may be moved out of
+    /// `spool/`. `lastWrite` is the newest modification date of the folder and
+    /// everything directly in it; nil (unreadable dates) means "not sure",
+    /// which leaves it where it is.
+    static func isAbandoned(lastWrite: Date?, now: Date) -> Bool {
+        guard let lastWrite else { return false }
+        return now.timeIntervalSince(lastWrite) >= unreadableGrace
     }
 
     /// Sessions left behind by a crash (meta.json present) that have not already
     /// produced a note.
-    static func orphans(base: URL = SpoolStore.baseURL) -> [(session: Session, meta: Meta)] {
+    ///
+    /// A session whose meta is missing or does not decode cannot be recovered —
+    /// without `startedAt` there is no note to make — and it used to be skipped
+    /// silently, so its audio lay in `spool/` forever: recovery never took it
+    /// and retention never touches `spool/`. Once it is clearly abandoned
+    /// (`isAbandoned`) it goes to `spool-failed`, where failed recoveries
+    /// already wait to be rescued by hand and retention eventually sees it.
+    /// The scan only ever runs while nothing is recording
+    /// (`recoverOrphanedRecordings` checks `capture`), and the age guard holds
+    /// even if that ever changes.
+    static func orphans(
+        base: URL = SpoolStore.baseURL,
+        now: Date = Date()
+    ) -> [(session: Session, meta: Meta)] {
         guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: base, includingPropertiesForKeys: nil
+            at: base, includingPropertiesForKeys: [.isDirectoryKey]
         ) else { return [] }
+        let failed = base.deletingLastPathComponent().appendingPathComponent("spool-failed", isDirectory: true)
 
         return entries.compactMap { directory in
+            // A stray file (`.DS_Store`) is not a session and must not be
+            // parked as one.
+            guard (try? directory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
             let session = Session(directory: directory)
             guard let data = try? Data(contentsOf: session.metaURL),
                   let meta = try? JSONDecoder().decode(Meta.self, from: data)
-            else { return nil }
+            else {
+                if isAbandoned(lastWrite: lastWrite(in: directory), now: now) {
+                    log.error("Spool \(directory.lastPathComponent, privacy: .public) ohne lesbare meta.json, nach spool-failed verschoben")
+                    markFailed(session, into: failed)
+                }
+                return nil
+            }
             // Its note was already written; recovering it would duplicate it.
             guard !FileManager.default.fileExists(atPath: session.doneURL.path) else {
                 archive(session)
@@ -142,6 +201,19 @@ enum SpoolStore {
             return (session, meta)
         }
         .sorted { $0.meta.startedAt < $1.meta.startedAt }
+    }
+
+    /// The newest modification date of a folder and of the files directly in
+    /// it — appending audio changes the file's date, not the folder's.
+    static func lastWrite(in directory: URL) -> Date? {
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        let children = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: keys
+        )) ?? []
+        let dates = ([directory] + children).compactMap {
+            try? $0.resourceValues(forKeys: Set(keys)).contentModificationDate
+        }
+        return dates.max()
     }
 
     /// Reads a spool file in whichever format its extension declares; a

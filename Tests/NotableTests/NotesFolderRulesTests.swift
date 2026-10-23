@@ -169,6 +169,21 @@ final class NotesFolderRulesTests: XCTestCase {
         XCTAssertEqual(ProjectFolderName.key(for: ".Projekt"), "Projekt", "versteckt hieße: nie wieder in der Liste")
     }
 
+    /// Dots behind a space: the trim used to run after the only pass over the
+    /// dots, so ". .." came out as ".." — the folder above the notes folder.
+    func testDotsBehindWhitespaceAreDotsToo() {
+        XCTAssertNil(ProjectFolderName.key(for: ". .."))
+        XCTAssertNil(ProjectFolderName.key(for: ". ."))
+        XCTAssertNil(ProjectFolderName.key(for: "...   ."))
+        XCTAssertNil(ProjectFolderName.key(for: "\t.\n.."))
+        XCTAssertEqual(ProjectFolderName.key(for: ". .Projekt"), "Projekt")
+        for raw in [". ..", " . . . ", ".. /..", ". .Projekt"] {
+            if let key = ProjectFolderName.key(for: raw) {
+                XCTAssertFalse(key.hasPrefix("."), "„\(raw)“ → „\(key)“")
+            }
+        }
+    }
+
     func testAnySpellingOfInboxIsTheInbox() {
         XCTAssertEqual(ProjectFolderName.key(for: "inbox"), "Inbox")
         XCTAssertEqual(ProjectFolderName.key(for: " INBOX "), "Inbox")

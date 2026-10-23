@@ -115,4 +115,62 @@ final class SpoolStoreTests: XCTestCase {
         try downsampler.reset()
         XCTAssertEqual(downsampler.takePeakLevel(), 0, "reset vergisst die Spitze")
     }
+
+    // MARK: - Sessions without a readable meta
+
+    /// A session whose meta is missing or garbled cannot be recovered, and it
+    /// used to lie in `spool/` forever. Once nothing has written to it for an
+    /// hour it goes to `spool-failed`; before that it is left alone, because
+    /// a scan at the wrong instant must never move a recording in progress.
+    func testUnreadableSessionIsParkedOnlyOnceAbandoned() throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory
+            .appendingPathComponent("notable-spool-\(UUID().uuidString)", isDirectory: true)
+        defer { try? files.removeItem(at: root) }
+        let base = root.appendingPathComponent("spool", isDirectory: true)
+        let failed = root.appendingPathComponent("spool-failed", isDirectory: true)
+
+        let missing = base.appendingPathComponent("ohne-meta", isDirectory: true)
+        try files.createDirectory(at: missing, withIntermediateDirectories: true)
+        try Data([1, 2, 3, 4]).write(to: missing.appendingPathComponent("mic.i16"))
+        let garbled = base.appendingPathComponent("kaputte-meta", isDirectory: true)
+        try files.createDirectory(at: garbled, withIntermediateDirectories: true)
+        try Data("{\"startedAt\":".utf8).write(to: garbled.appendingPathComponent("meta.json"))
+        let stray = base.appendingPathComponent(".DS_Store")
+        try Data().write(to: stray)
+        let healthy = try SpoolStore.create(meta: SpoolStore.Meta(startedAt: Date(timeIntervalSince1970: 5)), base: base)
+
+        let now = Date()
+        XCTAssertEqual(SpoolStore.orphans(base: base, now: now).count, 1)
+        XCTAssertTrue(files.fileExists(atPath: missing.path), "frisch: bleibt liegen")
+        XCTAssertTrue(files.fileExists(atPath: garbled.path))
+
+        let later = now.addingTimeInterval(SpoolStore.unreadableGrace + 60)
+        let orphans = SpoolStore.orphans(base: base, now: later)
+        XCTAssertEqual(orphans.map { $0.session.directory.lastPathComponent }, [healthy.directory.lastPathComponent],
+                       "eine lesbare Sitzung bleibt eine Wiederherstellung, wie alt sie auch ist")
+        XCTAssertFalse(files.fileExists(atPath: missing.path))
+        XCTAssertFalse(files.fileExists(atPath: garbled.path))
+        XCTAssertTrue(files.fileExists(atPath: failed.appendingPathComponent("ohne-meta/mic.i16").path),
+                      "das Audio geht mit")
+        XCTAssertTrue(files.fileExists(atPath: failed.appendingPathComponent("kaputte-meta").path))
+        XCTAssertTrue(files.fileExists(atPath: stray.path), "eine Datei ist keine Sitzung")
+    }
+
+    /// The folder's own date does not move while audio is appended to a file
+    /// in it; the newest date of the folder and its files is what counts.
+    func testLastWriteIsTheNewestFileNotTheFolder() throws {
+        let files = FileManager.default
+        let directory = files.temporaryDirectory
+            .appendingPathComponent("notable-spool-\(UUID().uuidString)", isDirectory: true)
+        defer { try? files.removeItem(at: directory) }
+        try files.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data([0, 0]).write(to: directory.appendingPathComponent("system.i16"))
+        try files.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)], ofItemAtPath: directory.path)
+
+        let lastWrite = try XCTUnwrap(SpoolStore.lastWrite(in: directory))
+        XCTAssertLessThan(Date().timeIntervalSince(lastWrite), 600)
+        XCTAssertFalse(SpoolStore.isAbandoned(lastWrite: lastWrite, now: Date()))
+        XCTAssertFalse(SpoolStore.isAbandoned(lastWrite: nil, now: Date()), "unklar heißt: liegen lassen")
+    }
 }

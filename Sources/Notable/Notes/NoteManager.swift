@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Coordinates note management (list / rename / move) while keeping SQLite and
 /// the Markdown files in agreement. SQLite is the source of truth; every write
@@ -22,6 +23,8 @@ final class NoteManager: ObservableObject {
     /// A restart would throw the unsaved draft away, so an update waits for it
     /// (`UpdateWindow`, Spec 25).
     @Published var isEditingUserNotes = false
+
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "notes")
 
     private let store: RecordingStore
     private let notesFolder: NotesFolderManager
@@ -95,7 +98,7 @@ final class NoteManager: ObservableObject {
         // Write, record, *then* delete. The other order deleted the old file
         // first, so a failing store write left `markdown_path` pointing at a
         // file that no longer existed and "Im Finder zeigen" stopped working.
-        try writeProjection(record: record, segments: loaded.segments, title: title, to: target)
+        try writeProjection(record: record, segments: loaded.segments, title: title, to: target, replacing: currentURL)
         try await store.updateTitle(title, titleIsAuto: false, markdownPath: target.path, for: record.id)
         removeStaleFile(currentURL, keeping: target)
         await reload()
@@ -122,7 +125,7 @@ final class NoteManager: ObservableObject {
 
         // Same order as `rename`: the old file only goes once the store knows
         // about the new one.
-        try writeProjection(record: record, segments: loaded.segments, title: title, to: target)
+        try writeProjection(record: record, segments: loaded.segments, title: title, to: target, replacing: currentURL)
         try await store.updateLocation(folder: key, markdownPath: target.path, for: record.id)
         removeStaleFile(currentURL, keeping: target)
         await reload()
@@ -143,12 +146,37 @@ final class NoteManager: ObservableObject {
     /// Rebuilds the whole `.md` from the stored record + segments (never from the
     /// on-disk file), so the projection stays faithful even if the file was
     /// hand-edited or deleted.
+    ///
+    /// Faithful to SQLite, not careless with the file: `existing` — the file
+    /// this write replaces, at its old path for a rename or move — is first
+    /// checked against `lastWritten`, the projection of the state *before* the
+    /// change. Anything else in it was typed by hand and is kept as
+    /// "… (bearbeitet).md" next to it (`HandEditGuard`). `lastWritten` defaults
+    /// to `record` rendered under its stored title, which is the state before
+    /// the change for a rename or a move; the re-projections pass theirs.
     private func writeProjection(
         record: RecordingStore.Recording,
         segments: [RecordingStore.Segment],
         title: String,
-        to target: URL
+        to target: URL,
+        replacing existing: URL?,
+        lastWritten: String? = nil
     ) throws {
+        let content = Self.projection(record: record, segments: segments, title: title)
+        if let existing {
+            let previous = lastWritten
+                ?? Self.projection(record: record, segments: segments, title: record.title ?? "Meeting")
+            try keepHandEdits(of: existing, lastWritten: previous, replacement: content)
+        }
+        try content.write(to: target, atomically: true, encoding: .utf8)
+    }
+
+    /// The Markdown a record projects to.
+    private static func projection(
+        record: RecordingStore.Recording,
+        segments: [RecordingStore.Segment],
+        title: String
+    ) -> String {
         // The event title comes out of SQLite like everything else. It used to
         // be passed as `nil` here, so every rename, move and notes-save silently
         // dropped the front-matter `event:` line from a file that had it.
@@ -163,7 +191,32 @@ final class NoteManager: ObservableObject {
             userNotes: record.userNotes,
             startTimes: segments.map(\.start)
         )
-        try MarkdownProjector.render(note).write(to: target, atomically: true, encoding: .utf8)
+        return MarkdownProjector.render(note)
+    }
+
+    /// Copies a hand-edited file aside before it is replaced. Throws when the
+    /// copy cannot be made, which stops the rename, move or save: an error the
+    /// user sees is better than an edit that silently disappears.
+    private func keepHandEdits(of existing: URL, lastWritten: String, replacement: String) throws {
+        // Gone: nothing to keep. There but unreadable: not known to be
+        // unedited, so it is copied like an edited one.
+        guard FileManager.default.fileExists(atPath: existing.path) else { return }
+        let decision = (try? Data(contentsOf: existing)).map {
+            HandEditGuard.decide(onDisk: $0, lastWritten: lastWritten, replacement: replacement)
+        } ?? .keepCopy
+        guard decision == .keepCopy else { return }
+        let directory = existing.deletingLastPathComponent()
+        let name = HandEditGuard.copyName(for: existing.lastPathComponent) {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
+        let copy = directory.appendingPathComponent(name)
+        do {
+            try FileManager.default.copyItem(at: existing, to: copy)
+        } catch {
+            Self.log.error("Von Hand bearbeitete Notiz nicht gesichert, \(existing.lastPathComponent, privacy: .public) bleibt unverändert: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+        Self.log.notice("Von Hand bearbeitete Notiz gesichert als \(name, privacy: .public)")
     }
 
     // MARK: - Eigene Notizen
@@ -172,8 +225,9 @@ final class NoteManager: ObservableObject {
     /// verbatim "## Eigene Notizen" section appears immediately.
     func saveUserNotes(_ notes: String, for recording: RecordingStore.Recording) async throws {
         let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let before = try? await store.meeting(id: recording.id)
         try await store.setUserNotes(trimmed.isEmpty ? nil : trimmed, for: recording.id)
-        try await reproject(recording.id)
+        try await reproject(recording.id, before: before)
         await reload()
     }
 
@@ -200,7 +254,7 @@ final class NoteManager: ObservableObject {
             summary.usage, provider: summary.providerID,
             purpose: .summary, recordingID: record.id, store: store
         )
-        try await reproject(record.id)
+        try await reproject(record.id, before: loaded)
         await reload()
     }
 
@@ -215,21 +269,31 @@ final class NoteManager: ObservableObject {
     /// overwrites it. One transaction in the store, then the note is projected
     /// again, as after a rename of the title.
     func renameSpeaker(_ recording: RecordingStore.Recording, cluster: String, to name: String) async throws {
+        let before = try? await store.meeting(id: recording.id)
         try await store.renameSpeaker(recordingID: recording.id, cluster: cluster, to: name)
-        try await reproject(recording.id)
+        try await reproject(recording.id, before: before)
         await reload()
     }
 
     /// Two labels, one person — allowed for the user, never automatic from the
     /// voice alone (Stufe 1 never merges two large clusters).
     func mergeSpeaker(_ recording: RecordingStore.Recording, cluster: String, into target: String) async throws {
+        let before = try? await store.meeting(id: recording.id)
         try await store.mergeSpeaker(recordingID: recording.id, cluster: cluster, into: target)
-        try await reproject(recording.id)
+        try await reproject(recording.id, before: before)
         await reload()
     }
 
     /// Rebuilds the note's .md from the stored record at its current path.
-    private func reproject(_ id: String) async throws {
+    ///
+    /// `before` is the note as it was loaded *before* the change that calls
+    /// for the re-projection: what the file holds if nobody touched it. Without
+    /// it (the load failed) the guard compares against the new state only and
+    /// keeps a copy whenever in doubt.
+    private func reproject(
+        _ id: String,
+        before: (recording: RecordingStore.Recording, segments: [RecordingStore.Segment])?
+    ) async throws {
         guard let loaded = try await store.meeting(id: id) else { return }
         let record = loaded.recording
         let title = record.title ?? "Meeting"
@@ -237,7 +301,14 @@ final class NoteManager: ObservableObject {
             ?? currentDirectory(for: record).appendingPathComponent(
                 MarkdownProjector.uniqueFileName(title: title, date: record.startedAt, in: currentDirectory(for: record))
             )
-        try writeProjection(record: record, segments: loaded.segments, title: title, to: target)
+        let lastWritten = before.map {
+            Self.projection(record: $0.recording, segments: $0.segments, title: $0.recording.title ?? "Meeting")
+        }
+        try writeProjection(
+            record: record, segments: loaded.segments, title: title, to: target,
+            replacing: record.markdownPath == nil ? nil : target,
+            lastWritten: lastWritten
+        )
         if record.markdownPath == nil {
             try await store.updateLocation(folder: record.folder, markdownPath: target.path, for: id)
         }

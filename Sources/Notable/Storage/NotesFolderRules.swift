@@ -191,12 +191,16 @@ enum ProjectFolderName {
     /// folder the note list never shows again. Any spelling of "Inbox" *is* the
     /// Inbox: APFS ignores case, so "inbox" names the same directory under a
     /// key that matches nothing.
+    ///
+    /// Dots *and* whitespace go together from the front. Dropping the dots and
+    /// trimming afterwards let ". .." through as "..": the trim ran once, after
+    /// the only pass over the dots, and uncovered a second run of them.
     static func key(for rawName: String) -> String? {
         let cleaned = rawName
             .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>"))
             .joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = String(cleaned.drop(while: { $0 == "." }))
+        let key = String(cleaned.drop(while: { $0 == "." || $0.isWhitespace }))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return nil }
         return isInbox(key) ? inbox : key

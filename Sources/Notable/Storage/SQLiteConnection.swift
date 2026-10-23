@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SQLite3
 
 /// SQLITE_TRANSIENT: tells SQLite to copy the bound bytes rather than hold the
@@ -18,6 +19,8 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 ///
 /// Not an actor: `RecordingStore` is one, and it owns the only instance.
 final class SQLiteConnection: @unchecked Sendable {
+    private static let log = Logger(subsystem: "de.jonasgehring.notable", category: "database")
+
     private let handle: OpaquePointer
 
     /// False when this build's SQLite has no FTS5. Search then falls back to
@@ -63,9 +66,15 @@ final class SQLiteConnection: @unchecked Sendable {
 
         let connection = SQLiteConnection(handle: raw)
         do {
+            // Wait up to two seconds for a lock instead of failing at once. The
+            // app holds the only connection, but the database is opened by hand
+            // with `sqlite3` to measure things (Spec 35, 39), and a reader there
+            // used to be enough to make a save here fail with SQLITE_BUSY.
+            // First, because switching to WAL can itself need the lock.
+            try connection.execute("PRAGMA busy_timeout=2000")
             try connection.execute("PRAGMA journal_mode=WAL")
             try connection.execute("PRAGMA foreign_keys=ON")
-            try connection.migrate()
+            try connection.migrate(databaseURL: url)
         } catch {
             // The instance is dropped here, so `deinit` closes the handle: a
             // failed open leaves nothing behind to be reused.
@@ -261,8 +270,11 @@ final class SQLiteConnection: @unchecked Sendable {
     /// finish the job; if one of them failed for a real reason — the database
     /// locked, the disk full, the file read-only — nothing said so, and the
     /// symptom arrived later as "no such column" from an unrelated query.
-    private func migrate() throws {
+    private func migrate(databaseURL: URL) throws {
         var version = try schemaVersion()
+        if version > 0, version < Self.migrations.count {
+            backUp(databaseURL: databaseURL, version: version)
+        }
         for (index, migration) in Self.migrations.enumerated() {
             let target = index + 1
             guard version < target else { continue }
@@ -273,6 +285,55 @@ final class SQLiteConnection: @unchecked Sendable {
             version = target
         }
         hasFullTextIndex = (try? tableExists("segments_fts")) ?? false
+    }
+
+    /// Where the copy taken before migrating away from `version` goes:
+    /// `notable.sqlite` → `notable-v8.sqlite`, beside the database.
+    static func backupURL(for databaseURL: URL, version: Int) -> URL {
+        let stem = databaseURL.deletingPathExtension().lastPathComponent
+        let ext = databaseURL.pathExtension
+        let name = ext.isEmpty ? "\(stem)-v\(version)" : "\(stem)-v\(version).\(ext)"
+        return databaseURL.deletingLastPathComponent().appendingPathComponent(name)
+    }
+
+    /// A copy of the database as it stood before a migration changed it.
+    ///
+    /// SQLite is the only source of truth — the Markdown is a projection and
+    /// cannot rebuild a database — and a migration is the one moment the app
+    /// rewrites tables it did not just create. Each migration runs in a
+    /// transaction, so one that *fails* rolls back by itself; the copy is for
+    /// the one that succeeds and is wrong (migration 7 rebuilt a table). Only
+    /// for an existing database (`user_version > 0`): a fresh one has nothing
+    /// to lose.
+    ///
+    /// `VACUUM INTO` writes a consistent, compacted copy through the open
+    /// connection, WAL included. It refuses an existing target, so the copy is
+    /// written to a temporary name and then replaces an older backup of the
+    /// *same* version — a migration that rolled back and is retried on the
+    /// next launch backs up the same state again. Backups of other versions
+    /// are never touched.
+    ///
+    /// **A failed backup is logged and does not stop the migration.** Refusing
+    /// to migrate would refuse to open the database, which means no dictation
+    /// and no meeting notes at all — certain loss of function traded for
+    /// insurance against a bug nobody has seen. And the likeliest reason for a
+    /// failing copy, a full disk, is likely to fail the migration's own
+    /// transaction too, which then rolls back and leaves the database as it
+    /// was.
+    private func backUp(databaseURL: URL, version: Int) {
+        let target = Self.backupURL(for: databaseURL, version: version)
+        let partial = target.appendingPathExtension("partial")
+        let files = FileManager.default
+        do {
+            if files.fileExists(atPath: partial.path) { try files.removeItem(at: partial) }
+            try run("VACUUM INTO ?1") { $0.bind(1, partial.path) }
+            if files.fileExists(atPath: target.path) { try files.removeItem(at: target) }
+            try files.moveItem(at: partial, to: target)
+            Self.log.notice("Datenbank vor Migration von v\(version, privacy: .public) gesichert: \(target.lastPathComponent, privacy: .public)")
+        } catch {
+            try? files.removeItem(at: partial)
+            Self.log.error("Sicherung vor Migration von v\(version, privacy: .public) fehlgeschlagen, Migration läuft trotzdem: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     private func schemaVersion() throws -> Int {

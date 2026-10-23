@@ -122,6 +122,9 @@ targets:
       # The notes folder's pure rules; the store's relocation uses them (Spec 27).
       - path: Sources/Notable/Storage/NotesFolderRules.swift
       - path: Sources/Notable/Storage/MarkdownProjector.swift
+      # Whether a note's .md was edited by hand before Notable replaces it.
+      # Pure; NoteManager, which acts on it, is @MainActor and stays out.
+      - path: Sources/Notable/Storage/HandEditGuard.swift
       # Retention rules (issue #2). The planner is pure; the runner is the only
       # thing that deletes, and it is what the "statistics must not shrink"
       # tests are aimed at.

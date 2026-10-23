@@ -1091,14 +1091,33 @@ final class MeetingController: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) else { return }
         Task.detached {
+            // A local logger: this closure is off the main actor, and the
+            // controller's own `log` is isolated to it.
+            let log = Logger(subsystem: "de.jonasgehring.notable", category: "meeting")
+            let script = URL(fileURLWithPath: path).lastPathComponent
             let process = Process()
             process.executableURL = URL(fileURLWithPath: path)
             process.arguments = [noteURL.path]
-            guard (try? process.run()) != nil else { return }
+            do {
+                try process.run()
+            } catch {
+                log.error("Meeting-Skript \(script, privacy: .public) nicht gestartet: \(error.localizedDescription, privacy: .public)")
+                return
+            }
+            let started = Date()
             let killer = DispatchWorkItem { if process.isRunning { process.terminate() } }
             DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: killer)
             process.waitUntilExit()
             killer.cancel()
+            // A script that failed or hung used to end without a trace. The
+            // timeout is read off the clock rather than a flag the killer sets,
+            // so nothing mutable is shared with the work item.
+            let status = process.terminationStatus
+            if process.terminationReason == .uncaughtSignal, Date().timeIntervalSince(started) >= 30 {
+                log.error("Meeting-Skript \(script, privacy: .public) nach 30 s abgebrochen")
+            } else if status != 0 {
+                log.error("Meeting-Skript \(script, privacy: .public) endete mit Code \(status, privacy: .public)")
+            }
         }
     }
 

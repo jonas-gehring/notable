@@ -80,14 +80,32 @@ final class MeetingSilenceWatchTests: XCTestCase {
         XCTAssertEqual(watch.silentMinutes, 10)
     }
 
-    /// Room noise hovering between the thresholds neither starts nor resets.
-    func testTheBandBetweenThresholdsKeepsTheState() {
-        var never = MeetingSilenceWatch()
-        XCTAssertEqual(feed(&never, mic: between, system: between, from: 0, to: 1000), [], "startet keine Stille")
+    /// Room noise between the thresholds is not silence.
+    func testTheBandBetweenThresholdsNeverStartsSilence() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: between, system: between, from: 0, to: 1000), [])
+    }
 
-        var counting = MeetingSilenceWatch()
-        XCTAssertEqual(feed(&counting, mic: quiet, system: quiet, from: 0, to: 60), [])
-        XCTAssertEqual(feed(&counting, mic: between, system: quiet, from: 61, to: 180), [.ask], "setzt sie nicht zurück")
+    /// Until 2026-10 one quiet second followed by soft sound kept counting, and
+    /// five minutes of quiet speech stopped the recording. Any sound ends the
+    /// count now.
+    func testAnySoundEndsTheSilenceCount() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 60), [])
+        XCTAssertEqual(feed(&watch, mic: between, system: quiet, from: 61, to: 400), [], "leiser Ton ist keine Stille")
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 401, to: 580), [])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 581, to: 581), [.ask])
+    }
+
+    /// Soft sound keeps an open question (no flicker) but holds the stop until
+    /// two unbroken minutes of silence have passed again.
+    func testSoftSoundKeepsTheQuestionAndHoldsTheStop() {
+        var watch = MeetingSilenceWatch()
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 0, to: 180), [.ask])
+        XCTAssertEqual(feed(&watch, mic: between, system: quiet, from: 181, to: 200), [], "kein Zurückziehen, kein Stopp")
+        XCTAssertNotNil(watch.askedAt)
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 201, to: 320), [])
+        XCTAssertEqual(feed(&watch, mic: quiet, system: quiet, from: 321, to: 321), [.stop])
     }
 
     func testWithoutASystemTrackTheMicrophoneDecidesAlone() {

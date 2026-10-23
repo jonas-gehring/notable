@@ -87,4 +87,32 @@ final class SpoolStoreTests: XCTestCase {
         XCTAssertEqual(drained.count, 1600)
         XCTAssertEqual(drained[10], sinf(1.0) * 0.3, accuracy: 0.01)
     }
+
+    /// The silence watch reads the loudest chunk of each second (Spec 34). The
+    /// latest chunk alone is whatever the second ended on, and a second that
+    /// ended between two words was silence to it.
+    func testThePeakLevelIsTheLoudestChunkSinceTheLastRead() throws {
+        let downsampler = PCMDownsampler()
+        try downsampler.reset()
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+        )!
+        func chunk(_ value: Float) -> AVAudioPCMBuffer {
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1600)!
+            buffer.frameLength = 1600
+            for i in 0..<1600 { buffer.floatChannelData![0][i] = value }
+            return buffer
+        }
+        downsampler.append(chunk(0.3))
+        downsampler.append(chunk(0.001))
+
+        XCTAssertEqual(downsampler.currentLevel, 0.001, accuracy: 0.001, "der letzte Chunk ist die Pause")
+        XCTAssertEqual(downsampler.takePeakLevel(), 0.3, accuracy: 0.01, "die Spitze ist das Wort davor")
+        XCTAssertEqual(downsampler.takePeakLevel(), 0, "ohne neuen Ton beginnt sie bei null")
+
+        downsampler.append(chunk(0.02))
+        XCTAssertEqual(downsampler.takePeakLevel(), 0.02, accuracy: 0.002)
+        try downsampler.reset()
+        XCTAssertEqual(downsampler.takePeakLevel(), 0, "reset vergisst die Spitze")
+    }
 }

@@ -288,12 +288,15 @@ final class NotificationCenterService: NSObject {
 
     /// Asks whether a silent recording should end (Spec 34 C). Without the
     /// permission the menu's status line carries the question, and the stop two
-    /// minutes later still happens.
+    /// minutes later still happens, unless a call is running.
     @discardableResult
-    func postMeetingSilence(id: String, minutes: Int) -> Bool {
+    func postMeetingSilence(id: String, minutes: Int, callActive: Bool = false) -> Bool {
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Kein Ton in der Aufnahme")
-        content.body = String(localized: "Seit \(minutes) Minuten spricht niemand. Ohne Antwort endet die Aufnahme in zwei Minuten.")
+        // During a call the silence watch does not stop (Spec 34): the call does.
+        content.body = callActive
+            ? String(localized: "Seit \(minutes) Minuten spricht niemand. Der Call läuft noch, deshalb nimmt Notable weiter auf, bis er endet.")
+            : String(localized: "Seit \(minutes) Minuten spricht niemand. Ohne Antwort endet die Aufnahme in zwei Minuten.")
         content.categoryIdentifier = Category.meetingSilence.rawValue
         return post(id: id, content: content)
     }

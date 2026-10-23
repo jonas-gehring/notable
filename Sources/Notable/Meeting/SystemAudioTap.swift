@@ -165,8 +165,9 @@ final class SystemAudioTap: @unchecked Sendable {
     /// mechanism behind every mis-attributed speaker in a long meeting — so it
     /// is counted and reported rather than being a bare `return` in the IO proc.
     var droppedBuffers: Int { downsampler.droppedBuffers }
-    /// RMS of the latest chunk — how the silence watch hears the far side (Spec 34).
-    var level: Float { downsampler.currentLevel }
+    /// The loudest chunk since the last call: how the silence watch hears the
+    /// far side (Spec 34).
+    func takePeakLevel() -> Float { downsampler.takePeakLevel() }
 
     /// Stops capture, tears down tap + aggregate device, returns the samples.
     func stop() -> [Float] {

@@ -22,6 +22,7 @@ final class PCMDownsampler: @unchecked Sendable {
     private let lock = NSLock()
     private var samples: [Float] = []
     private var levelValue: Float = 0
+    private var peakValue: Float = 0
     private var spoolHandle: FileHandle?
     private var spoolURL: URL?
     /// Sample format of the spool file, taken from its extension so the write
@@ -40,6 +41,22 @@ final class PCMDownsampler: @unchecked Sendable {
         defer { lock.unlock() }
         return levelValue
     }
+
+    /// The loudest chunk since the previous call; the next call starts over.
+    ///
+    /// `currentLevel` is one chunk, about 10 ms on the system tap and 85 ms on
+    /// the microphone. Read once a second it is a sample of that second, not a
+    /// measurement of it: whenever the sample lands in the pause between two
+    /// words, a second of speech reads as a second of silence. The silence
+    /// watch (Spec 34) asks "was there any sound in this second", and only the
+    /// peak answers that. Nothing arriving at all reads as 0, which is what it is.
+    func takePeakLevel() -> Float {
+        lock.lock()
+        defer { lock.unlock() }
+        let peak = peakValue
+        peakValue = 0
+        return peak
+    }
     private var converter: AVAudioConverter?
     private var sourceFormat: AVAudioFormat?
 
@@ -48,6 +65,7 @@ final class PCMDownsampler: @unchecked Sendable {
         defer { lock.unlock() }
         samples.removeAll()
         levelValue = 0
+        peakValue = 0
         capturedCount = 0
         anchor = Date()
         converter = nil
@@ -142,6 +160,7 @@ final class PCMDownsampler: @unchecked Sendable {
         lock.lock()
         writeLocked(chunk)
         levelValue = rms
+        peakValue = max(peakValue, rms)
         lock.unlock()
     }
 

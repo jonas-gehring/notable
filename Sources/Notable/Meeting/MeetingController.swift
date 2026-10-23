@@ -605,18 +605,23 @@ final class MeetingController: ObservableObject {
     private func observeSilence() {
         guard capture != .idle else { return stopSilenceWatch() }
         let now = ProcessInfo.processInfo.systemUptime
-        let system: Float? = systemTapActive ? systemTap.level : nil
+        // The loudest chunk of the past second, not the latest one: a single
+        // chunk read once a second hears every pause between two words it lands
+        // in as a silent second.
+        let mic = micRecorder.takePeakLevel()
+        let system: Float? = systemTapActive ? systemTap.takePeakLevel() : nil
         if let system, system >= silenceWatch.resetLevel {
             lastRemoteSoundUptime = now
         }
-        switch silenceWatch.observe(micLevel: micRecorder.level, systemLevel: system, at: now) {
+        let callActive = isCallActive()
+        switch silenceWatch.observe(micLevel: mic, systemLevel: system, at: now, callActive: callActive) {
         case .ask:
             let minutes = silenceWatch.silentMinutes
-            Self.log.notice("Seit \(minutes, privacy: .public) min kein Ton — frage, ob die Aufnahme enden soll")
+            Self.log.notice("Seit \(minutes, privacy: .public) min kein Ton, Call aktiv: \(callActive, privacy: .public) — frage, ob die Aufnahme enden soll")
             let id = "meeting.silence.\(UUID().uuidString)"
             silenceQuestionID = id
-            NotificationCenterService.shared.postMeetingSilence(id: id, minutes: minutes)
-            statusMessage = Self.silenceStatus
+            NotificationCenterService.shared.postMeetingSilence(id: id, minutes: minutes, callActive: callActive)
+            statusMessage = Self.silenceStatus(callActive: callActive)
         case .withdraw:
             withdrawSilenceQuestion()
         case .stop:
@@ -626,15 +631,19 @@ final class MeetingController: ObservableObject {
         }
     }
 
-    private static var silenceStatus: String {
-        String(localized: "Kein Ton seit Minuten — die Aufnahme endet bald, wenn niemand spricht.")
+    private static func silenceStatus(callActive: Bool) -> String {
+        callActive
+            ? String(localized: "Kein Ton seit Minuten, der Call läuft aber noch. Die Aufnahme endet mit ihm.")
+            : String(localized: "Kein Ton seit Minuten — die Aufnahme endet bald, wenn niemand spricht.")
     }
 
     private func withdrawSilenceQuestion() {
         guard let id = silenceQuestionID else { return }
         NotificationCenterService.shared.withdraw(id: id)
         silenceQuestionID = nil
-        if statusMessage == Self.silenceStatus { statusMessage = nil }
+        if statusMessage == Self.silenceStatus(callActive: false) || statusMessage == Self.silenceStatus(callActive: true) {
+            statusMessage = nil
+        }
     }
 
     /// The answer to "Kein Ton in der Aufnahme".

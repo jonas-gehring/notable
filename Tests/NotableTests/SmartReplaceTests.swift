@@ -97,6 +97,9 @@ final class SmartReplaceTests: XCTestCase {
         components.year = 2026
         components.month = 9
         components.day = 1
+        // Noon, not midnight: the formatter uses the machine's time zone, and
+        // midnight in Berlin is still 31 August in UTC (the CI runner).
+        components.hour = 12
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Berlin")!
         let date = calendar.date(from: components)!

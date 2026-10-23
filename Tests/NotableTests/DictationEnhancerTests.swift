@@ -331,6 +331,51 @@ final class EnhancedDictationStoreTests: XCTestCase {
         XCTAssertNil(rows[1].rawText, "ein normales Diktat hat kein Original")
     }
 
+    /// Spec 39 Stufe 0: the recogniser's output is kept for every dictation,
+    /// and independently of `raw_text`, which keeps meaning "the rule-polished
+    /// text before a model replaced it" — the original "Letzte Diktate" shows.
+    func testASRTextIsStoredForEveryDictationBesideRawText() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notable-asr-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = RecordingStore(directory: dir)
+
+        let plainID = try await store.saveDictation(
+            text: "Das ist ein Test.",
+            startedAt: Date(timeIntervalSince1970: 1000),
+            duration: 2,
+            asrText: "das ist äh ein test"
+        )
+        let enhancedID = try await store.saveDictation(
+            text: "Ein überarbeitetes Diktat.",
+            startedAt: Date(timeIntervalSince1970: 2000),
+            duration: 2,
+            enhanced: true,
+            rawText: "Ein ueberarbeitetes Diktat.",
+            asrText: "ein ueberarbeitetes diktat"
+        )
+        let legacyID = try await store.saveDictation(
+            text: "Ohne Rohtext.",
+            startedAt: Date(timeIntervalSince1970: 3000),
+            duration: 2
+        )
+
+        let plain = try await store.meeting(id: plainID)?.recording
+        XCTAssertEqual(plain?.asrText, "das ist äh ein test")
+        XCTAssertNil(plain?.rawText, "ohne Modellstufe bleibt raw_text leer")
+
+        let enhanced = try await store.meeting(id: enhancedID)?.recording
+        XCTAssertEqual(enhanced?.asrText, "ein ueberarbeitetes diktat")
+        XCTAssertEqual(enhanced?.rawText, "Ein ueberarbeitetes Diktat.")
+
+        let legacy = try await store.meeting(id: legacyID)?.recording
+        XCTAssertNil(legacy?.asrText, "nichts wird erfunden")
+
+        // The menu's history still sees an original only where a model ran.
+        let rows = try await store.recentDictations(limit: 10)
+        XCTAssertEqual(rows.map(\.rawText), [nil, "Ein ueberarbeitetes Diktat.", nil])
+    }
+
     /// The enhanced flag must not leak into the statistics as an engine or an
     /// app — it is neither.
     func testEnhancedDictationStillCountsNormallyInTheStatistics() async throws {

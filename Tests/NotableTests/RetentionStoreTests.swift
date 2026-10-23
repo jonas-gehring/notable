@@ -65,6 +65,40 @@ final class RetentionStoreTests: XCTestCase {
         XCTAssertGreaterThan(rows[0].wordCount ?? 0, 0)
     }
 
+    /// `recordings.asr_text` (Spec 39) is a third copy of every dictation —
+    /// what the recogniser heard. Retention empties it with the segment text,
+    /// keeps the row, and leaves a newer dictation's copy alone.
+    func testClearingAlsoDropsTheASRText() async throws {
+        let (store, dir) = makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let oldID = try await store.saveDictation(
+            text: "Ein alter Satz.",
+            startedAt: old,
+            duration: 2,
+            asrText: "ein alter satz"
+        )
+        let recentID = try await store.saveDictation(
+            text: "Ein neuer Satz.",
+            startedAt: recent,
+            duration: 2,
+            asrText: "ein neuer satz"
+        )
+        let storedOld = try await store.meeting(id: oldID)?.recording.asrText
+        XCTAssertEqual(storedOld, "ein alter satz")
+
+        try await store.clearSegmentText(olderThan: recent, kind: .dictation)
+
+        let clearedOld = try await store.meeting(id: oldID)
+        XCTAssertNotNil(clearedOld, "die Zeile bleibt")
+        XCTAssertNil(clearedOld?.recording.asrText, "das Gehörte geht mit dem Text")
+        let keptRecent = try await store.meeting(id: recentID)?.recording.asrText
+        XCTAssertEqual(keptRecent, "ein neuer satz")
+
+        let rows = try await store.usageRows(from: .distantPast, to: .distantFuture)
+        XCTAssertEqual(rows.count, 2)
+    }
+
     func testClearingDictationsLeavesMeetingsAlone() async throws {
         let (store, dir) = makeStore()
         defer { try? FileManager.default.removeItem(at: dir) }

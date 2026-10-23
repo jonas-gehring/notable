@@ -302,6 +302,7 @@ final class SQLiteConnection: @unchecked Sendable {
         SQLiteConnection.migration6_textStage,
         SQLiteConnection.migration7_speakerSources,
         SQLiteConnection.migration8_voiceProfiles,
+        SQLiteConnection.migration9_asrText,
     ]
 
     /// Every table in its **current** shape, plus the ADD COLUMNs that lift a
@@ -589,6 +590,20 @@ final class SQLiteConnection: @unchecked Sendable {
             PRIMARY KEY (recording_id, cluster)
         )
         """)
+    }
+
+    /// Spec 39 Stufe 0, the cheapest step: what the recogniser heard, before
+    /// `TextPolisher` touched it.
+    ///
+    /// A new column rather than `raw_text` written always: `raw_text` already
+    /// means "the rule-polished text before a model replaced it", and
+    /// "Letzte Diktate" shows it as the original exactly where it is non-nil.
+    /// Filling it on every row would put that tooltip on every dictation and
+    /// change what it says. Nullable and never backfilled, like every
+    /// measurement column — no earlier row ever kept its ASR output. It holds
+    /// dictated text, so retention empties it together with `segments.text`.
+    private static func migration9_asrText(_ db: SQLiteConnection) throws {
+        try db.addColumn("asr_text", type: "TEXT", to: "recordings")
     }
 
     /// Idempotent `ADD COLUMN`: only "duplicate column name" is ignored.

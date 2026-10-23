@@ -10,6 +10,7 @@ import SwiftUI
 /// to meetings.
 struct SummarizationSection: View {
     @AppStorage(DefaultsKey.summarizationProvider.key) private var providerRaw = DefaultsKey.summarizationProvider.fallback
+    @AppStorage(DefaultsKey.transcriptRefinementEnabled.key) private var refineTranscript = DefaultsKey.transcriptRefinementEnabled.fallback
 
     @State private var apiKeyInput = ""
     @State private var apiKeyStored = false
@@ -91,6 +92,13 @@ struct SummarizationSection: View {
             if provider.isCLI {
                 CLIProviderStatusRow(provider: provider)
             }
+
+            // Off by default (decided 2026-10-21): the transcript leaves the Mac
+            // a second time, and how often it does is the user's call.
+            Toggle("Transkript per KI nachbessern", isOn: $refineTranscript)
+            Text("Korrigiert falsch erkannte Namen, Fachbegriffe und Satzzeichen, mit einer Begriffsliste aus Kalender, Call-Fenster und Wörterbuch. Das Transkript geht dafür ein zweites Mal an denselben Anbieter. Was ursprünglich erkannt wurde, bleibt gespeichert.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         } header: {
             Text("Zusammenfassung")
         } footer: {

@@ -86,6 +86,9 @@ actor RecordingStore {
         /// The label the diarizer minted (Spec 24); `speaker` is what is shown.
         /// nil on segments written before it existed — nothing is estimated.
         var cluster: String? = nil
+        /// What the speech recognition heard, when the AI pass changed `text`
+        /// (`TranscriptRefinement`); nil when it did not.
+        var originalText: String? = nil
     }
 
     /// A name for one cluster, and where it came from (Spec 24).
@@ -299,8 +302,8 @@ actor RecordingStore {
 
     func insert(_ segment: Segment, recordingID: String) throws {
         let sql = """
-        INSERT INTO segments (recording_id, speaker, start_seconds, end_seconds, text, cluster)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO segments (recording_id, speaker, start_seconds, end_seconds, text, cluster, original_text)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         """
         try db().run(sql) { s in
             s.bind(1, recordingID)
@@ -309,6 +312,7 @@ actor RecordingStore {
             s.bind(4, segment.end)
             s.bind(5, segment.text)
             s.bind(6, segment.cluster)
+            s.bind(7, segment.originalText)
         }
     }
 
@@ -676,7 +680,7 @@ actor RecordingStore {
     func segments(for recordingID: String) throws -> [Segment] {
         try db().query(
             """
-            SELECT speaker, start_seconds, end_seconds, text, cluster FROM segments
+            SELECT speaker, start_seconds, end_seconds, text, cluster, original_text FROM segments
             WHERE recording_id = ?1 ORDER BY start_seconds ASC
             """,
             bind: { $0.bind(1, recordingID) },
@@ -686,7 +690,8 @@ actor RecordingStore {
                     start: s.double(1) ?? 0,
                     end: s.double(2),
                     text: s.text(3),
-                    cluster: s.string(4)
+                    cluster: s.string(4),
+                    originalText: s.string(5)
                 )
             }
         )
@@ -1182,14 +1187,16 @@ actor RecordingStore {
     /// Both copies of the text go in one transaction: `recordings.raw_text`
     /// holds the full rule-polished dictation of every *enhanced* run, so
     /// emptying `segments.text` alone left the text sitting in another table —
-    /// where `recentDictations` handed it straight back out.
+    /// where `recentDictations` handed it straight back out. The same goes for
+    /// `segments.original_text`, what the speech recognition heard before the
+    /// AI pass changed a meeting line.
     @discardableResult
     func clearSegmentText(olderThan date: Date, kind: Kind) throws -> Int {
         let connection = try db()
         return try connection.transaction {
             let cleared = try connection.runCounting("""
-            UPDATE segments SET text = ''
-            WHERE text != '' AND recording_id IN (
+            UPDATE segments SET text = '', original_text = NULL
+            WHERE (text != '' OR original_text IS NOT NULL) AND recording_id IN (
                 SELECT id FROM recordings WHERE kind = ?1 AND started_at < ?2
             )
             """) { s in

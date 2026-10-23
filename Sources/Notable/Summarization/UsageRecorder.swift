@@ -20,6 +20,9 @@ enum UsageRecorder {
         /// the device countable. `billed` is false (flat rate), so it never
         /// appears in a spend total.
         case dictationEnhance = "dictation-enhance"
+        /// The AI pass over a finished meeting transcript (`TranscriptRefinement`),
+        /// one row per chunk sent.
+        case transcriptRefine = "transcript-refine"
     }
 
     /// Records one round-trip, if the provider reported anything usable.

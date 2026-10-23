@@ -144,6 +144,20 @@ enum MeetingPipeline {
     ///   `nil` means "let the diarizer decide", which is what a call with no
     ///   calendar event gets. It is a prior, not a promise: someone who never
     ///   speaks costs nothing, and an uninvited joiner still gets a label.
+    /// How meeting segments are polished: the dictation settings, read once
+    /// per meeting rather than once per segment (each read decodes the
+    /// dictionary and the snippets from `UserDefaults`), and **without** Smart
+    /// Replace. A shorthand is an instruction the dictating user gives on
+    /// purpose; in a meeting anyone may say the trigger word, the far side
+    /// included, and the transcript would then carry a whole signature or
+    /// paragraph nobody said, which the summary takes as fact. The personal
+    /// dictionary stays: it corrects names, and that is as right here as there.
+    static func polishOptions(_ dictation: TextPolisher.Options = .fromDefaults()) -> TextPolisher.Options {
+        var options = dictation
+        options.replacements = []
+        return options
+    }
+
     static func process(
         micSamples: [Float],
         systemSamples: [Float],
@@ -217,6 +231,7 @@ enum MeetingPipeline {
         }
 
         let specs = groupedSpecs(orderedSpecs(micSegments: micSegments, systemSegments: systemSegments))
+        let polish = polishOptions()
 
         var transcript: [MeetingTranscriptSegment] = []
         for spec in specs where spec.end - spec.start >= minimumSegmentDuration {
@@ -229,7 +244,7 @@ enum MeetingPipeline {
                 samples: Array(source[startIndex..<endIndex]),
                 sampleRate: sampleRate
             )
-            let text = TextPolisher.polish(raw, options: .fromDefaults())
+            let text = TextPolisher.polish(raw, options: polish)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
 

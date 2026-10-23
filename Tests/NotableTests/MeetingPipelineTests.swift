@@ -1,6 +1,21 @@
 import XCTest
 
 final class MeetingPipelineTests: XCTestCase {
+    /// A snippet trigger said in a call must not expand into the transcript;
+    /// the dictionary still corrects names.
+    func testMeetingPolishLeavesSnippetsOutButKeepsTheDictionary() {
+        var dictation = TextPolisher.Options()
+        dictation.replacements = [SmartReplacement(trigger: "mfg", replacement: "Mit freundlichen Grüßen\nJonas")]
+        dictation.dictionary = ["Gering": "Gehring"]
+
+        let options = MeetingPipeline.polishOptions(dictation)
+
+        XCTAssertTrue(options.replacements.isEmpty)
+        XCTAssertEqual(options.dictionary, ["Gering": "Gehring"])
+        let text = TextPolisher.polish("dann schreib mfg drunter", options: options)
+        XCTAssertFalse(text.contains("freundlichen"), "Textbaustein darf im Meeting nicht expandieren: \(text)")
+    }
+
     func testOrderedSpecsMergesTracksChronologically() {
         let specs = MeetingPipeline.orderedSpecs(
             micSegments: [(start: 5.0, end: 8.0), (start: 20.0, end: 22.0)],

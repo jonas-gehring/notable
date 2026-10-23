@@ -18,11 +18,11 @@ out is text, and only at the points named below.
 ## Dictation
 
 Hold the hotkey, speak, release. A short tap switches to hands-free; the next tap ends it.
-Measured warm: 5 s of audio → ~119 ms, 60 s → ~397 ms. Long dictations decode incrementally
-while you speak, so releasing the key only leaves the tail to finish.
+The whole clip is transcribed when you let go; measured warm, 5 s of audio take ~119 ms and
+60 s ~397 ms.
 
-- **Parakeet TDT v3** (multilingual, default) or **Parakeet Unified** (English, true
-  streaming); Whisper available as a comparison
+- **Parakeet TDT v3** (multilingual, default) or **Parakeet Unified** (English only);
+  Whisper available as a comparison
 - **Offline post-processing** — filler words, numbers and dates, a personal dictionary,
   paragraphs, and the structure you actually spoke ("new line", "bullet", "first…")
 - **Snippets** — spoken shorthands expand to arbitrary, possibly multi-line text

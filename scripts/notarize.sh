@@ -110,6 +110,7 @@ fi
 # and the queue wait — so check here, where the answer is instant.
 echo "==> Verifying signature"
 codesign --verify --deep --strict "$APP"
+"$REPO_ROOT/scripts/check-entitlements.sh" "$APP"
 # Read the AUTHORITY line, not the designated requirement: the DR encodes the
 # certificate kind as OIDs (field.1.2.840.113635.100.6.1.13) and never contains
 # the string "Developer ID Application", so grepping it rejects valid apps.

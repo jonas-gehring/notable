@@ -20,19 +20,19 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Xcode
         run: xcodebuild -version
 
-      - name: xcodegen
-        run: brew install xcodegen && xcodegen generate
-
       # The real file holds a personal Apple Team ID and is gitignored. CI does
       # not sign, so the example's placeholder team is enough to satisfy the
-      # project's include.
+      # project's include, which xcodegen checks.
       - name: Signing placeholder
         run: cp Signing/Local.xcconfig.example Signing/Local.xcconfig
+
+      - name: xcodegen
+        run: brew install xcodegen && xcodegen generate
 
       - name: Cache Swift packages
         uses: actions/cache@v4

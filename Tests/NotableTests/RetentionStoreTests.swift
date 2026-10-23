@@ -88,6 +88,33 @@ final class RetentionStoreTests: XCTestCase {
         XCTAssertEqual(clearedText, "")
     }
 
+    /// A meeting line the AI pass changed keeps what the speech recognition
+    /// heard in `original_text`. That is a second copy of the words, and the
+    /// cleanup has to take it along — the same lesson as `raw_text` above.
+    func testClearingAlsoDropsTheRecognisedOriginal() async throws {
+        let (store, dir) = makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let id = UUID().uuidString
+        try await store.insertMeeting(
+            RecordingStore.Recording(id: id, kind: .meeting, startedAt: old, endedAt: old.addingTimeInterval(600),
+                                     title: "Alt", calendarEventID: nil, markdownPath: nil),
+            segments: [
+                RecordingStore.Segment(speaker: "Ich", start: 0, end: 1, text: "Mit Jana Schultze.",
+                                       originalText: "Mit Jana Schulze."),
+                RecordingStore.Segment(speaker: "Sprecher 1", start: 1, end: 2, text: "Gut."),
+            ]
+        )
+        let stored = try await store.meeting(id: id)?.segments
+        XCTAssertEqual(stored?.map(\.originalText), ["Mit Jana Schulze.", nil])
+
+        let cleared = try await store.clearSegmentText(olderThan: recent, kind: .meeting)
+        XCTAssertEqual(cleared, 2)
+        let after = try await store.meeting(id: id)?.segments
+        XCTAssertEqual(after?.map(\.text), ["", ""])
+        XCTAssertEqual(after?.map(\.originalText), [nil, nil])
+    }
+
     /// Running twice must not report work it did not do — the second pass finds
     /// nothing left to clear.
     func testClearingIsIdempotent() async throws {

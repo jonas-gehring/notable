@@ -161,6 +161,10 @@ targets:
       - path: Sources/Notable/Meeting/EchoFilter.swift
       - path: Sources/Notable/Meeting/MeetingLanguageGuard.swift
       - path: Sources/Notable/Meeting/OwnerVoice.swift
+      # The optional AI pass over a finished transcript. Pure apart from the
+      # provider call it is handed, and the guard deciding which of the model's
+      # lines are corrections is the part that has to be proved.
+      - path: Sources/Notable/Meeting/TranscriptRefinement.swift
       - path: Sources/Notable/Meeting/MeetingDetector.swift
       # MeetingDetector references MeetingIdentityKey; the store + identity mapping
       # are pure, so the unit target compiles them directly (panel/coordinator are

@@ -1336,6 +1336,44 @@ final class MeetingController: ObservableObject {
         )
         log.notice("Sprecherbenennung: \(namingDiagnosis, privacy: .public)")
 
+        // The AI pass over the transcript, off by default: misheard names and
+        // terms, punctuation (`TranscriptRefinement`). After the naming, so the
+        // names found are part of the vocabulary and the prompt's speakers are
+        // people; before the note, so the note, the summary and the chat all
+        // read the result. It never throws — whatever goes wrong leaves the
+        // recognised text, and the recognised text of every changed line is
+        // kept beside it in SQLite.
+        var originalTexts: [String?] = Array(repeating: nil, count: named.count)
+        var refinementDiagnosis: String?
+        if DefaultsKey.transcriptRefinementEnabled.value(), !named.isEmpty {
+            let vocabulary = TranscriptRefinement.vocabulary(
+                names: (event?.attendeeNames ?? []) + participants
+                    + [SpeakerNameResolver.ownerDisplayName].compactMap { $0 }
+                    + labelRecords.compactMap(\.name),
+                dictionary: PersonalDictionary.load().values.sorted()
+            )
+            let refined = await TranscriptRefinement.refine(
+                lines: named.map { TranscriptRefinement.Line(speaker: $0.speaker ?? "Unbekannt", text: $0.text) },
+                vocabulary: vocabulary,
+                title: event?.title,
+                complete: { system, user in
+                    try await SummarizationService.complete(system: system, user: user, providerID: providerID)
+                }
+            )
+            for usage in refined.usages {
+                await UsageRecorder.record(
+                    usage, provider: providerID,
+                    purpose: .transcriptRefine, recordingID: recordingID
+                )
+            }
+            for index in named.indices where refined.texts[index] != named[index].text {
+                originalTexts[index] = named[index].text
+                named[index].text = refined.texts[index]
+            }
+            refinementDiagnosis = refined.summary
+            log.notice("KI-Feinschliff: \(refined.summary, privacy: .public)")
+        }
+
         let duration = Double(max(micSamples.count, systemSamples.count))
             / Double(PCMDownsampler.targetSampleRate)
         // No calendar event ⇒ the title is a fallback ("Meeting") that the model
@@ -1468,8 +1506,11 @@ final class MeetingController: ObservableObject {
         )
         try await RecordingStore.shared.insertMeeting(
             recording,
-            segments: named.map {
-                RecordingStore.Segment(speaker: $0.speaker, start: $0.start, end: $0.end, text: $0.text, cluster: $0.cluster)
+            segments: zip(named, originalTexts).map { segment, original in
+                RecordingStore.Segment(
+                    speaker: segment.speaker, start: segment.start, end: segment.end,
+                    text: segment.text, cluster: segment.cluster, originalText: original
+                )
             },
             labels: labelRecords
         )
@@ -1515,6 +1556,7 @@ final class MeetingController: ObservableObject {
                 $0.titleSource = titleDiagnosis
                 $0.screen = screenDiagnosis
                 $0.cleanup = processed.report.summary
+                $0.refinement = refinementDiagnosis
             }
         }
 

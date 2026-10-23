@@ -91,6 +91,11 @@ enum DefaultsKey {
     /// class of data deserves a deliberate switching-on, even when nothing can
     /// be reconstructed from it and it never leaves the device.
     static let voiceProfilesEnabled = DefaultsEntry(key: "voiceProfilesEnabled", fallback: false)
+    /// A second pass over the meeting transcript through the summarization
+    /// provider: misheard names and terms, punctuation (`TranscriptRefinement`).
+    /// **Off by default, decided 2026-10-21**: the transcript leaves the Mac
+    /// once more, and how often it does is the user's call, not a default's.
+    static let transcriptRefinementEnabled = DefaultsEntry(key: "transcriptRefinementEnabled", fallback: false)
     static let meetingEchoCancellation = DefaultsEntry(key: "meetingEchoCancellation", fallback: false)
     static let meetingUseDictationEngine = DefaultsEntry(key: "meetingUseDictationEngine", fallback: false)
     static let openNotesOnMeetingStart = DefaultsEntry(key: "openNotesOnMeetingStart", fallback: true)

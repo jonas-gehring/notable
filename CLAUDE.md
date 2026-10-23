@@ -109,7 +109,7 @@ scripts/check-entitlements.sh <app>                  # run by install/release/no
 
 Signing needs `Signing/Local.xcconfig` (gitignored): copy `Signing/Local.xcconfig.example` and put your Apple Team ID in it. Without it the build stops at `Signing for "Notable" requires selecting either a development team or a provisioning profile`.
 
-Test-suite notes: `ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `EnglishStreamingTests`, and `LatencyProbeTests` run real models (first run downloads GBs from HuggingFace, then cached; the full suite takes ~9 min). `ClaudeCodeCLIProviderTests` makes one real headless call through the logged-in Claude Code CLI (skipped if absent).
+Test-suite notes: `ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `EnglishStreamingTests`, and `LatencyProbeTests` run real models (first run downloads GBs from HuggingFace, then cached; the full suite takes ~9 min). `ClaudeCodeCLIProviderTests` makes one real headless call through the logged-in Claude Code CLI (skipped if absent). `MeetingPipelineReplayTests` (skipped unless `TEST_RUNNER_NOTABLE_REPLAY=1`) runs whole archived meetings through today's pipeline with the engine named in `TEST_RUNNER_NOTABLE_REPLAY_ENGINE` (`parakeet` or `whisper:<model>`), writes each note to `Application Support/Notable/replay/<engine>/` in the format `scripts/benchmark` reads, and prints numbers only. It is the measurement the meeting-engine decision (Spec 39 §3.4) waits for; the notes hold full transcripts and the folder is meant to be deleted afterwards.
 
 ## Settled decisions
 

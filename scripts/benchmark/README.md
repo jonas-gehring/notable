@@ -36,3 +36,26 @@ Die Regeln sind aus den Swift-Quellen abgeschrieben. Wer dort eine Schwelle änd
 | strays | 0 bis 4 % | 0 % |
 
 Bei 36 % bleibt es im einen Meeting, das nur über das Mikrofon lief. Das löst erst das Diarisieren der Mikrofonspur. Von allen Sätzen, die der Echo-Filter gestrichen hat, waren 99 % laut Wispr wirklich von der Gegenseite.
+
+## Engines vergleichen: Messlauf übers Archiv
+
+`MeetingPipelineReplayTests` schickt archivierte Meetings ein zweites Mal durch die ganze Pipeline, wie sie heute ist, mit der Engine aus der Umgebung. Jede Notiz landet als Markdown in `~/Library/Application Support/Notable/replay/<engine>/<Sitzung>.md`, im Format, das `measure` liest. Ausgegeben werden nur Zahlen: Dauer, Rechenzeit, Wörter, Anteil „Ich", Stimmen, Echo und was die Bereinigung gemacht hat.
+
+```sh
+DD="$TMPDIR/notable"
+# Parakeet v3, wie die App heute
+TEST_RUNNER_NOTABLE_REPLAY=1 TEST_RUNNER_NOTABLE_REPLAY_SESSIONS=1C65,B6 \
+  xcodebuild -project Notable.xcodeproj -scheme Notable -derivedDataPath "$DD" test \
+  -only-testing:NotableTests/MeetingPipelineReplayTests/testReplayWholeMeetings
+
+# dieselben Meetings mit Whisper large-v3-turbo, auf Deutsch festgelegt
+TEST_RUNNER_NOTABLE_REPLAY=1 TEST_RUNNER_NOTABLE_REPLAY_SESSIONS=1C65,B6 \
+TEST_RUNNER_NOTABLE_REPLAY_ENGINE=whisper:large-v3-v20240930_turbo TEST_RUNNER_NOTABLE_REPLAY_LANGUAGES=de \
+  xcodebuild -project Notable.xcodeproj -scheme Notable -derivedDataPath "$DD" test \
+  -only-testing:NotableTests/MeetingPipelineReplayTests/testReplayWholeMeetings
+```
+
+Danach in `pairs.json` dieselbe Wispr-Datei einmal gegen jede Engine eintragen und `measure` laufen lassen. Entscheidend ist `fehlt`: wie viel von Wisprs Inhalt in der Notiz nicht vorkommt. Der Whisper-Download (gut ein Gigabyte) passiert beim ersten Lauf, in denselben Ordner, den die App benutzt.
+
+Die Notizen enthalten die vollen Transkripte. Den Ordner `replay` nach der Messung löschen.
+

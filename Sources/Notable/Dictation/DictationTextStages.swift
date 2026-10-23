@@ -43,6 +43,9 @@ enum DictationTextStages {
         var toPaste: String
         /// The rule-polished text, set whenever a model changed it.
         var rawText: String?
+        /// What the recogniser returned, before the rules (Spec 39 Stufe 0) —
+        /// set on every dictation, unlike `rawText`. Saved, never sent.
+        var asrText: String?
         /// Which stage shaped the text last: "rules", "local" or "cli".
         var polisher = "rules"
         var polishMs: Int?
@@ -83,9 +86,10 @@ enum DictationTextStages {
 
         let trimmed = polished.trimmingCharacters(in: .whitespacesAndNewlines)
         if input.role == .command {
-            return await command(trimmed, selection: input.capture?.selection, isLive: isLive, show: show)
+            return await command(trimmed, heard: transcript, selection: input.capture?.selection, isLive: isLive, show: show)
         }
         var text = Text(toPaste: trimmed, polishedAt: .now)
+        text.asrText = transcript
 
         // On the device, nothing leaves it (Spec 32).
         if LocalPolish.shouldRun(mode: input.localMode, category: input.category, text: trimmed) {
@@ -179,7 +183,10 @@ enum DictationTextStages {
                 enhanced: text.polisher == "cli",
                 rawText: text.rawText,
                 polisher: text.polisher,
-                polishMs: text.polishMs
+                polishMs: text.polishMs,
+                // The recogniser's own words, for telling its mistakes apart
+                // from the rules' (Spec 39). Stays in SQLite like `sourceApp`.
+                asrText: text.asrText
             )
             // Keeps the lifetime counts milestones are measured against in step
             // with what was just written (Spec 37 §3.5) — in memory, because the
@@ -258,6 +265,7 @@ enum DictationTextStages {
     /// Nothing is pasted when the model is missing or its answer is unusable.
     private static func command(
         _ spoken: String,
+        heard: String,
         selection: String?,
         isLive: () -> Bool,
         show: (DictationOverlayController.OverlayState, _ delayed: Bool) -> Void
@@ -271,6 +279,7 @@ enum DictationTextStages {
         guard result.didPolish else { return .failed(.commandFailed) }
         var text = Text(toPaste: result.text, polishedAt: .now)
         text.rawText = spoken
+        text.asrText = heard
         text.polisher = "command"
         text.polishMs = result.milliseconds
         return .produced(text)

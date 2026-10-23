@@ -76,6 +76,12 @@ actor RecordingStore {
         /// Who the call window showed (Spec 24) — separate from `attendees`,
         /// because "invited" and "was there" are different statements.
         var participants: [String] = []
+        /// What the recogniser returned, before `TextPolisher` (Spec 39 Stufe 0).
+        /// Set on every dictation since migration 9, nil on every row before it
+        /// and on meetings. Unlike `rawText` it does not depend on a model stage
+        /// having run, so "what was heard" and "what the rules made of it" can be
+        /// told apart for any dictation. Stays in SQLite, never in a prompt.
+        var asrText: String? = nil
     }
 
     struct Segment: Sendable {
@@ -223,6 +229,7 @@ actor RecordingStore {
     /// error between them left a recording with no text — counted by `usageRows`,
     /// listed by `recentActivity` with an empty snippet, invisible to
     /// `recentDictations`.
+    @discardableResult
     func saveDictation(
         text: String,
         startedAt: Date,
@@ -233,8 +240,9 @@ actor RecordingStore {
         enhanced: Bool = false,
         rawText: String? = nil,
         polisher: String? = nil,
-        polishMs: Int? = nil
-    ) throws {
+        polishMs: Int? = nil,
+        asrText: String? = nil
+    ) throws -> String {
         let recording = Recording(
             id: UUID().uuidString,
             kind: .dictation,
@@ -247,12 +255,14 @@ actor RecordingStore {
             enhanced: enhanced,
             rawText: rawText,
             polisher: polisher,
-            polishMs: polishMs
+            polishMs: polishMs,
+            asrText: asrText
         )
         try db().transaction {
             try insert(recording)
             try insert(Segment(speaker: nil, start: 0, end: duration, text: text), recordingID: recording.id)
         }
+        return recording.id
     }
 
     /// Whitespace-separated token count. Kept local to the store (rather than
@@ -267,8 +277,8 @@ actor RecordingStore {
             (id, kind, started_at, ended_at, title, calendar_event_id, markdown_path,
              summary, subtitle, folder, title_is_auto, user_notes, word_count,
              engine, latency_ms, source_app, enhanced, raw_text, calendar_event_title, attendees,
-             participants, polisher, polish_ms)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+             participants, polisher, polish_ms, asr_text)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)
         """
         try db().run(sql) { s in
             s.bind(1, recording.id)
@@ -294,6 +304,7 @@ actor RecordingStore {
             s.bind(21, recording.participants.isEmpty ? nil : recording.participants.joined(separator: "\n"))
             s.bind(22, recording.polisher)
             s.bind(23, recording.polishMs)
+            s.bind(24, recording.asrText)
         }
     }
 
@@ -622,7 +633,7 @@ actor RecordingStore {
     private static let recordingColumns = """
     id, kind, started_at, ended_at, title, calendar_event_id, markdown_path, summary, \
     subtitle, folder, title_is_auto, user_notes, word_count, engine, latency_ms, \
-    source_app, enhanced, raw_text, calendar_event_title, attendees, participants
+    source_app, enhanced, raw_text, calendar_event_title, attendees, participants, asr_text
     """
 
     private static func readRecording(_ s: SQLiteConnection.Statement) -> Recording {
@@ -647,7 +658,8 @@ actor RecordingStore {
             rawText: s.string(17),
             calendarEventTitle: s.string(18),
             attendees: s.string(19)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? [],
-            participants: s.string(20)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? []
+            participants: s.string(20)?.components(separatedBy: "\n").filter { !$0.isEmpty } ?? [],
+            asrText: s.string(21)
         )
     }
 
@@ -1182,7 +1194,8 @@ actor RecordingStore {
     /// Both copies of the text go in one transaction: `recordings.raw_text`
     /// holds the full rule-polished dictation of every *enhanced* run, so
     /// emptying `segments.text` alone left the text sitting in another table —
-    /// where `recentDictations` handed it straight back out.
+    /// where `recentDictations` handed it straight back out. `asr_text` (Spec 39)
+    /// is a third copy, of every dictation since migration 9, and goes with it.
     @discardableResult
     func clearSegmentText(olderThan date: Date, kind: Kind) throws -> Int {
         let connection = try db()
@@ -1197,8 +1210,8 @@ actor RecordingStore {
                 s.bind(2, date)
             }
             try connection.run("""
-            UPDATE recordings SET raw_text = NULL
-            WHERE raw_text IS NOT NULL AND kind = ?1 AND started_at < ?2
+            UPDATE recordings SET raw_text = NULL, asr_text = NULL
+            WHERE (raw_text IS NOT NULL OR asr_text IS NOT NULL) AND kind = ?1 AND started_at < ?2
             """) { s in
                 s.bind(1, kind.rawValue)
                 s.bind(2, date)

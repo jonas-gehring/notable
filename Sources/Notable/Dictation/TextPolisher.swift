@@ -565,11 +565,15 @@ enum FuzzyDictionary {
         }
     }
 
+    /// A word token, compiled once like `TextPolisher.fillerPatterns`: the
+    /// fuzzy dictionary pass runs it on every polish that has a dictionary,
+    /// and a meeting polishes hundreds of segments.
+    private static let wordPattern = try? NSRegularExpression(pattern: "[\\p{L}\\p{N}']+")
+
     /// Apply `transform` to every word token, preserving all surrounding characters.
     /// Returning nil keeps the original word.
     static func mapWords(in text: String, transform: (String) -> String?) -> String {
-        let pattern = "[\\p{L}\\p{N}']+"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        guard let regex = wordPattern else { return text }
         let ns = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
         guard !matches.isEmpty else { return text }

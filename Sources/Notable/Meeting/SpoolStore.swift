@@ -32,10 +32,13 @@ enum SpoolStore {
         /// language strays, voices on the microphone
         /// (`MeetingPipeline.CleanupReport.summary`). Lenient like the rest.
         var cleanup: String? = nil
+        /// How long the note took from the stop, step by step (`NoteTimings`).
+        /// Lenient like the rest, and lenient inside as well.
+        var timings: NoteTimings? = nil
 
         fileprivate enum CodingKeys: String, CodingKey {
             case startedAt, eventTitle, eventID, diagnostics, startMode, callSource, endReason
-            case naming, titleSource, screen, cleanup
+            case naming, titleSource, screen, cleanup, timings
         }
     }
 
@@ -278,5 +281,6 @@ extension SpoolStore.Meta {
         titleSource = try? container.decodeIfPresent(String.self, forKey: .titleSource)
         screen = try? container.decodeIfPresent(String.self, forKey: .screen)
         cleanup = try? container.decodeIfPresent(String.self, forKey: .cleanup)
+        timings = try? container.decodeIfPresent(NoteTimings.self, forKey: .timings)
     }
 }

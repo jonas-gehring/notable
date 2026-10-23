@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A spoken shorthand and the text it expands to ("meine Adresse" → three lines
 /// of postal address).
@@ -95,7 +96,7 @@ enum SmartReplace {
         // Unicode-safe word boundaries — `\b` misbehaves around umlauts, and
         // "Grüße" is exactly the kind of trigger someone writes.
         let pattern = "(?u)(?<![\\p{L}\\p{N}])(?:" + branches.joined(separator: "|") + ")(?![\\p{L}\\p{N}])"
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        guard let regex = compiled(pattern) else { return text }
 
         let ns = text as NSString
         var out = ""
@@ -113,6 +114,28 @@ enum SmartReplace {
         }
         guard consumed > 0 else { return text }
         return out + ns.substring(from: consumed)
+    }
+
+    /// The last pattern `apply` compiled, and its regex.
+    ///
+    /// The pattern is built from the entries, so it cannot be a `static let`
+    /// like the other patterns in the polish path; but the entries change only
+    /// when the user edits them, and every dictation in between would compile
+    /// the same alternation again. Keyed on the pattern string itself rather
+    /// than on the entries: it already carries every trigger, its case flag and
+    /// the order, so a cache hit is the same regex by construction. One slot is
+    /// enough, since there is one table.
+    private static let cache = OSAllocatedUnfairLock<(pattern: String, regex: NSRegularExpression)?>(initialState: nil)
+
+    static func compiled(_ pattern: String) -> NSRegularExpression? {
+        let hit = cache.withLock { slot -> NSRegularExpression? in
+            guard let entry = slot, entry.pattern == pattern else { return nil }
+            return entry.regex
+        }
+        if let hit { return hit }
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        cache.withLock { $0 = (pattern: pattern, regex: regex) }
+        return regex
     }
 
     /// The closed placeholder list. Deliberately three entries and no format

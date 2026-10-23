@@ -164,11 +164,14 @@ private struct ConsentPromptView: View {
                 Spacer()
                 Button("Aufnehmen", action: onYes)
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.glassProminent)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous))
+        // The same glass as the dictation capsule: both float over whatever
+        // app is in front, and both should read as part of the system.
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 }

@@ -146,8 +146,9 @@ struct LiveNotesView: View {
 
 /// Lifts the notes window above other apps — including a full-screen call —
 /// because a note window you have to hunt for behind Zoom is a note window you
-/// do not use. `Window` scenes gained a SwiftUI `windowLevel` modifier only in
-/// macOS 15; the deployment target is 14.4, so reach for the `NSWindow`.
+/// do not use. SwiftUI's `windowLevel` sets the level but not the collection
+/// behaviour that lets the window join a full-screen space, so reach for the
+/// `NSWindow`.
 private struct FloatingWindowConfigurator: NSViewRepresentable {
     let floating: Bool
 

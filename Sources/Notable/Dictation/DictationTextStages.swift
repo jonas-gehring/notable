@@ -238,7 +238,7 @@ enum DictationTextStages {
     /// Warms the local model when its mode is on, rather than on the first dictation.
     static func prewarmLocalModel() {
         #if canImport(FoundationModels)
-        guard #available(macOS 26, *), LocalPolish.Mode.current() != .off else { return }
+        guard LocalPolish.Mode.current() != .off else { return }
         Task { await LocalPolisher.shared.prewarm() }
         #endif
     }
@@ -246,7 +246,6 @@ enum DictationTextStages {
     /// Nil means the stage does not exist on this system — not that it failed.
     private static func localPolish(_ text: String, category: AppCategory, context: String?) async -> LocalPolishResult? {
         #if canImport(FoundationModels)
-        guard #available(macOS 26, *) else { return nil }
         return await LocalPolisher.shared.polish(text, category: category, context: context)
         #else
         return nil
@@ -266,7 +265,6 @@ enum DictationTextStages {
         let availability = LocalModelAvailability.current
         guard availability.isAvailable else { return .failed(.localModelUnavailable(reason: availability.reason)) }
         #if canImport(FoundationModels)
-        guard #available(macOS 26, *) else { return .failed(.localModelUnavailable(reason: availability.reason)) }
         show(.commanding, false)
         let result = await LocalPolisher.shared.runCommand(spoken, selection: selection)
         guard isLive() else { return .cancelled }

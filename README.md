@@ -87,8 +87,8 @@ making it.
 
 ## Requirements
 
-macOS 14.4 or later, Apple Silicon. Process taps only — there is no ScreenCaptureKit
-fallback. The interface speaks English and German and follows your system language;
+macOS 26 or later, Apple Silicon. Process taps only, no ScreenCaptureKit fallback; the
+interface uses Liquid Glass. The interface speaks English and German and follows your system language;
 you can pin either one in Settings → General. Speech models are downloaded on first launch and cached; a cold cache is carried
 by Whisper Tiny until the real model has arrived, and the app says so while it is.
 

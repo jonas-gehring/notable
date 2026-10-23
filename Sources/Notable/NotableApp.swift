@@ -610,8 +610,8 @@ struct MenuContentView: View {
             meeting.toggle()
         }
         .disabled(meeting.state == .processing)
-        // A measuring tool behind ⌥ (Spec 33 §3.1) — macOS 15 and later; on 14
-        // it stays in Settings → Meetings → Erweitert only.
+        // A measuring tool behind ⌥ (Spec 33 §3.1), and in Settings → Meetings →
+        // Erweitert.
         .optionAlternate {
             Button("Call-Fenster auslesen…") {
                 if !ScreenProbe.probeRunningCall().succeeded { NSSound.beep() }
@@ -673,8 +673,8 @@ struct MenuContentView: View {
         }
             .disabled(history.last == nil)
             // Copying is the same act with a different destination, so it is the
-            // ⌥ face of the same row rather than a row of its own — macOS 15 and
-            // later; on 14 "Letzte Diktate" has a copy button per entry.
+            // ⌥ face of the same row rather than a row of its own; "Letzte
+            // Diktate" also has a copy button per entry.
             .optionAlternate {
                 Button("Letztes Diktat kopieren") { Task { await history.copyLast() } }
                     .disabled(history.last == nil)
@@ -781,13 +781,8 @@ struct MenuContentView: View {
 }
 
 extension View {
-    /// `modifierKeyAlternate(.option)` where it exists (macOS 15), nothing below.
-    @ViewBuilder
+    /// The ⌥ face of a menu row.
     func optionAlternate(@ViewBuilder _ alternate: () -> some View) -> some View {
-        if #available(macOS 15, *) {
-            modifierKeyAlternate(.option, alternate)
-        } else {
-            self
-        }
+        modifierKeyAlternate(.option, alternate)
     }
 }

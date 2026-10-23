@@ -468,15 +468,13 @@ private struct DictationOverlayView: View {
         .padding(.horizontal, 13)
         .padding(.vertical, 8)
         .foregroundStyle(.primary)
-        .background {
-            // One material for every style (Spec 30 §3.1). The fixed black
-            // capsule was a second identity next to the notch strip, and the
-            // only surface in the app that ignored light and dark.
-            Capsule()
-                .fill(.regularMaterial)
-                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
-        }
-        .shadow(color: .black.opacity(0.30), radius: 10, y: 3)
+        // Liquid Glass, the surface the system's own HUDs use since macOS 26.
+        // One surface for every style (Spec 30 §3.1): the fixed black capsule
+        // was a second identity next to the notch strip. Glass brings its own
+        // edge and shadow, and falls back to an opaque fill by itself under
+        // "Reduce transparency", so neither the stroke nor the drop shadow of
+        // the old material capsule is needed any more.
+        .glassEffect(.regular, in: Capsule())
         // The level, made *visible* rather than merely drawn (Spec 37 §3.2):
         // the waveform says what was heard, this says how loudly. Capped at
         // 0,25 — a HUD that glows brightly is a HUD nobody wants twice.
@@ -738,10 +736,10 @@ struct NotchOverlayView: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .background {
-            // Only the strips get a background; the cut-out itself stays
+            // Only the strips get a surface; the cut-out itself stays
             // transparent, which is what makes the notch look intentional.
             if model.notchCutout == nil {
-                NotchShape().fill(.regularMaterial)
+                Color.clear.glassEffect(.regular, in: NotchShape())
             }
         }
         .accessibilityElement(children: .combine)
@@ -754,10 +752,10 @@ struct NotchOverlayView: View {
             .padding(.horizontal, 10)
             .frame(width: width, alignment: .center)
             .background {
-                // Beside a real cut-out each strip carries its own material; the
-                // pill case paints one background for the whole shape instead.
+                // Beside a real cut-out each strip carries its own glass; the
+                // pill case paints one surface for the whole shape instead.
                 if model.notchCutout != nil {
-                    NotchShape().fill(.regularMaterial)
+                    Color.clear.glassEffect(.regular, in: NotchShape())
                 }
             }
     }

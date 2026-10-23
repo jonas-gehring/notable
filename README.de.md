@@ -1,7 +1,7 @@
 # Notable
 
 Lokale Diktat- und Meeting-Transkription für macOS. Menüleisten-App, Apple Silicon,
-macOS 14.4+.
+macOS 26+.
 
 <p align="center">
   <img src="docs/images/dictation.gif" width="640" alt="Die Diktat-Anzeige: eine kleine dunkle Kapsel mit laufender Wellenform, danach „Transkribiere…“">

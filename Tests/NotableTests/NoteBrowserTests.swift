@@ -1,5 +1,4 @@
 import XCTest
-@testable import Notable
 
 /// The notes window: which notes a folder and a search show, and how a
 /// summary and a transcript are laid out.

@@ -42,6 +42,8 @@ final class AudioRecorder: @unchecked Sendable {
 
     /// RMS of the latest audio chunk, for the overlay level meter.
     var level: Float { downsampler.currentLevel }
+    /// The loudest chunk since the last call, for the meeting's silence watch.
+    func takePeakLevel() -> Float { downsampler.takePeakLevel() }
 
     /// Copy of everything captured so far, without stopping the engine.
     func snapshot() -> [Float] { downsampler.snapshot() }

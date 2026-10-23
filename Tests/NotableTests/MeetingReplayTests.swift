@@ -30,7 +30,7 @@ final class MeetingReplayTests: XCTestCase {
             guard let track = files.first(where: { $0.lastPathComponent.hasPrefix("system.") }) else { continue }
             let samples = SpoolAudio.read(track)
             guard samples.count > 16_000 * 30 else { continue }
-            let result = try await MeetingPipeline.diarizeSystemTrack(samples, vad: vad, expectedSpeakers: nil)
+            let result = try await MeetingPipeline.diarizeTrack(samples, vad: vad, expectedSpeakers: nil)
             print("REPLAY \(session.lastPathComponent)")
             print("  vorher:  \(Self.statistics(result.raw))")
             print("  nachher: \(Self.statistics(result.cleaned))")
@@ -79,7 +79,7 @@ final class MeetingReplayTests: XCTestCase {
             guard let track = files.first(where: { $0.lastPathComponent.hasPrefix("system.") }) else { continue }
             let samples = SpoolAudio.read(track)
             guard samples.count > 16_000 * 30 else { continue }
-            let result = try await MeetingPipeline.diarizeSystemTrack(samples, vad: vad, expectedSpeakers: nil)
+            let result = try await MeetingPipeline.diarizeTrack(samples, vad: vad, expectedSpeakers: nil)
             let large = SpeakerClusterCleanup.largeLabels(SpeakerClusterCleanup.totals(result.cleaned))
             let centroids = SpeakerClusterCleanup.centroids(of: result.cleaned)
             for row in rows {

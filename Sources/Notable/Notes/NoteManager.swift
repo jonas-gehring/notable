@@ -160,7 +160,8 @@ final class NoteManager: ObservableObject {
             participants: record.participants,
             segments: segments.map { ($0.speaker, $0.text) },
             summary: record.summary,
-            userNotes: record.userNotes
+            userNotes: record.userNotes,
+            startTimes: segments.map(\.start)
         )
         try MarkdownProjector.render(note).write(to: target, atomically: true, encoding: .utf8)
     }
@@ -188,7 +189,8 @@ final class NoteManager: ObservableObject {
         let duration = (record.endedAt ?? record.startedAt).timeIntervalSince(record.startedAt)
         let context = MeetingContext(
             title: record.title, date: record.startedAt,
-            durationSeconds: duration, userNotes: record.userNotes
+            durationSeconds: duration, userNotes: record.userNotes,
+            ownerName: SpeakerNameResolver.ownerDisplayName
         )
         let summary = try await SummarizationService.summarize(
             transcript: transcript, context: context, providerID: providerID

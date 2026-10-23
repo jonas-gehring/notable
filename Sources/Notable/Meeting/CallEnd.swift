@@ -57,14 +57,30 @@ enum MeetingEndReason: String, Codable, Sendable {
 
 /// The safety net for every recording, with or without a detected call: both
 /// tracks without sound for three minutes → ask; two more minutes without an
-/// answer and without a sound → stop.
+/// answer and without a sound → stop. **Not while the detector still sees the
+/// call**: then the call's end ends the recording (`adoptDetectedCall`), and
+/// the question says that the recording runs on. On 2026-09-21 this watch
+/// stopped a Safari call after ten of its 27 minutes (`endReason=silence`).
+/// Five quiet minutes in a running call are a call on hold, a muted room or a
+/// measurement gone wrong; none of them is its end.
 ///
-/// Two thresholds, like `IdleDetector`: silence starts below `silenceLevel`, and
-/// only a clear sound above `resetLevel` ends it — a level in between keeps the
-/// state it found, so room noise hovering at the edge neither starts nor keeps
-/// resetting the count. The levels are chunk RMS (`PCMDownsampler.currentLevel`)
-/// and **starting values, not measurements**: a live microphone in a quiet room
-/// sits well under 0.005, speech well over 0.015.
+/// Two thresholds with two jobs. Silence is only what stays below
+/// `silenceLevel`, and **any** reading at or above it ends the count: until
+/// 2026-10 a level between the two thresholds kept counting, so a single quiet
+/// reading followed by five minutes of soft speech was enough to stop a
+/// recording. `resetLevel` only decides whether an open question is withdrawn,
+/// so room noise at the edge does not make the notification come and go; the
+/// stop still waits for two unbroken minutes of silence. A room whose noise
+/// reaches `silenceLevel` is therefore never asked about, and its recording ends
+/// by hand or with its call. That is the intended side to err on: a missed stop
+/// costs disk space, a wrong one costs the meeting.
+///
+/// The levels are the loudest chunk RMS of each second
+/// (`PCMDownsampler.takePeakLevel`; until 2026-10 a single chunk, read once a
+/// second) and **starting values, not measurements**: a live microphone in a
+/// quiet room sits well under 0.005, speech well over 0.015. The recording that
+/// prompted the change (2026-09-21) could not be measured, so these are kept
+/// rather than tuned.
 struct MeetingSilenceWatch: Sendable {
     enum Event: Equatable, Sendable {
         /// Silence has lasted long enough to ask.
@@ -88,9 +104,17 @@ struct MeetingSilenceWatch: Sendable {
     private(set) var askedAt: TimeInterval?
     private var askAfter: TimeInterval = Self.askAfter
 
-    /// Feeds one reading per track. `systemLevel` is nil without a system track;
-    /// the microphone then decides alone.
-    mutating func observe(micLevel: Float, systemLevel: Float?, at time: TimeInterval) -> Event? {
+    /// Feeds one reading per track, the loudest chunk of the past second
+    /// (`PCMDownsampler.takePeakLevel`). `systemLevel` is nil without a system
+    /// track; the microphone then decides alone. `callActive`: the detector
+    /// still sees a call. The question is asked all the same, but its two
+    /// minutes only run once the call is gone.
+    mutating func observe(
+        micLevel: Float,
+        systemLevel: Float?,
+        at time: TimeInterval,
+        callActive: Bool = false
+    ) -> Event? {
         let loudest = max(micLevel, systemLevel ?? 0)
         if loudest >= resetLevel {
             silentSince = nil
@@ -98,12 +122,20 @@ struct MeetingSilenceWatch: Sendable {
             askedAt = nil
             return .withdraw
         }
-        if loudest < silenceLevel, silentSince == nil {
-            silentSince = time
+        if loudest >= silenceLevel {
+            // Some sound, not a clear one: the silence is over, an open
+            // question stays.
+            silentSince = nil
+            return nil
         }
-        guard let silentSince else { return nil }
+        let silentSince = self.silentSince ?? time
+        self.silentSince = silentSince
         if let askedAt {
-            return time - askedAt >= Self.stopAfterAsking ? .stop : nil
+            if callActive {
+                self.askedAt = time
+                return nil
+            }
+            return time - max(askedAt, silentSince) >= Self.stopAfterAsking ? .stop : nil
         }
         guard time - silentSince >= askAfter else { return nil }
         askedAt = time

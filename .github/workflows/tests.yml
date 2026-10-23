@@ -1,0 +1,76 @@
+name: Tests
+
+# Builds Notable and runs every test that needs neither a downloaded model nor
+# a voice from `say`. The model tests (Parakeet, Whisper, diarization, the
+# synthetic meetings) pull gigabytes from HuggingFace and take most of the nine
+# minutes a full local run needs; they stay a local job, run before a release.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: xcodebuild -version
+
+      - name: xcodegen
+        run: brew install xcodegen && xcodegen generate
+
+      # The real file holds a personal Apple Team ID and is gitignored. CI does
+      # not sign, so the example's placeholder team is enough to satisfy the
+      # project's include.
+      - name: Signing placeholder
+        run: cp Signing/Local.xcconfig.example Signing/Local.xcconfig
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/notable/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -project Notable.xcodeproj -scheme Notable -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/notable" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            build-for-testing | tail -n 200
+
+      - name: Test
+        run: |
+          xcodebuild -project Notable.xcodeproj -scheme Notable -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/notable" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+            -skip-testing:NotableTests/ParakeetTranscriberTests \
+            -skip-testing:NotableTests/EnglishStreamingTests \
+            -skip-testing:NotableTests/WhisperTranscriberTests \
+            -skip-testing:NotableTests/LatencyProbeTests \
+            -skip-testing:NotableTests/SpeechPausesModelTests \
+            -skip-testing:NotableTests/IncrementalQualityTests \
+            -skip-testing:NotableTests/IncrementalDictationTests/testSessionHeadPlusTailMatchesContent \
+            -skip-testing:NotableTests/MeetingPipelineE2ETests \
+            -skip-testing:NotableTests/MeetingEndToEndTests \
+            -skip-testing:NotableTests/MeetingConversationTests \
+            -skip-testing:NotableTests/MeetingScaleTests \
+            -skip-testing:NotableTests/EchoBleedTests \
+            -skip-testing:NotableTests/MeetingReplayTests \
+            test-without-building > "$RUNNER_TEMP/test.log" 2>&1 && status=0 || status=$?
+          grep -E "error:|failed|Executed|\*\* TEST" "$RUNNER_TEMP/test.log" | tail -n 300 || true
+          exit $status
+
+      - name: Failures
+        if: failure()
+        run: grep -E "error:|XCTAssert|failed" "$RUNNER_TEMP/test.log" | head -n 200 || true

@@ -165,6 +165,9 @@ targets:
       # provider call it is handed, and the guard deciding which of the model's
       # lines are corrections is the part that has to be proved.
       - path: Sources/Notable/Meeting/TranscriptRefinement.swift
+      # Which model transcribes a meeting, and the one language Whisper settles
+      # on for it. The choice reads an older key too, which is worth a test.
+      - path: Sources/Notable/Meeting/MeetingEngine.swift
       - path: Sources/Notable/Meeting/MeetingDetector.swift
       # MeetingDetector references MeetingIdentityKey; the store + identity mapping
       # are pure, so the unit target compiles them directly (panel/coordinator are

@@ -1105,22 +1105,31 @@ final class MeetingController: ObservableObject {
     /// The ASR engine for meeting transcription.
     ///
     /// Default: Parakeet v3 — the most accurate multilingual model here, and shared
-    /// with dictation's cache so only one copy of the weights is resident. When the
-    /// user opts in via `meetingUseDictationEngine`, meetings follow the dictation
-    /// engine picker instead: Parakeet v3 or Whisper. Parakeet **Unified** is
-    /// streaming-only (no batch `transcribe(samples:)`), so it can't do per-segment
-    /// meeting ASR and falls back to Parakeet v3.
-    nonisolated static func meetingTranscriber() async throws -> any TranscriptionEngine {
-        guard DefaultsKey.meetingUseDictationEngine.value() else {
+    /// with dictation's cache so only one copy of the weights is resident. The
+    /// choice is `MeetingEngineChoice`: "like dictation" follows the dictation
+    /// engine picker (Parakeet v3 or Whisper; Parakeet **Unified** is
+    /// streaming-only, has no batch `transcribe(samples:)` and falls back to
+    /// Parakeet v3), and Whisper large-v3-turbo gets the meeting's vocabulary
+    /// as prompt and one language per meeting (`MeetingWhisperTranscriber`).
+    nonisolated static func meetingTranscriber(vocabulary: [String] = []) async throws -> any TranscriptionEngine {
+        switch MeetingEngineChoice.current {
+        case .parakeet:
             return try await ParakeetModelCache.shared.transcriber()
-        }
-        switch ASREngineID.current {
-        case .whisper:
-            let whisper = WhisperTranscriber()
+        case .dictation:
+            switch ASREngineID.current {
+            case .whisper:
+                let whisper = WhisperTranscriber()
+                try await whisper.prepare()
+                return whisper
+            case .parakeetV3, .unifiedEnglish:
+                return try await ParakeetModelCache.shared.transcriber()
+            }
+        case .whisperTurbo:
+            // Loaded fresh for the meeting and released with it: a gigabyte of
+            // weights has no business staying resident between calls.
+            let whisper = WhisperTranscriber(modelName: WhisperTranscriber.meetingModel, vocabulary: vocabulary)
             try await whisper.prepare()
-            return whisper
-        case .parakeetV3, .unifiedEnglish:
-            return try await ParakeetModelCache.shared.transcriber()
+            return MeetingWhisperTranscriber(whisper: whisper, languages: SpokenLanguages.load())
         }
     }
 
@@ -1160,8 +1169,14 @@ final class MeetingController: ObservableObject {
         // `processDetailed`, because the voices have to survive the pipeline:
         // a profile is the centroid of a large cluster (Spec 36 §3.3), and the
         // embeddings exist only for the length of the diarization.
+        // What Whisper is told to listen for, when it transcribes the meeting:
+        // the invitees, the user and the dictionary. Parakeet takes no prompt.
+        let engineVocabulary = TranscriptRefinement.vocabulary(
+            names: (event?.attendeeNames ?? []) + [SpeakerNameResolver.ownerDisplayName].compactMap { $0 },
+            dictionary: PersonalDictionary.load().values.sorted()
+        )
         let processed = try await Task.detached(priority: .userInitiated) {
-            let transcriber = try await meetingTranscriber()
+            let transcriber = try await meetingTranscriber(vocabulary: engineVocabulary)
             return try await MeetingPipeline.processDetailed(
                 micSamples: micSamples,
                 systemSamples: systemSamples,

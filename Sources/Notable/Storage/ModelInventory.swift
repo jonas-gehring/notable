@@ -114,12 +114,15 @@ enum ModelInventory {
             .map { url in
                 let directory = url.lastPathComponent
                 let size = WhisperModelSize.allCases.first { directory == whisperDirectory(for: $0) }
+                // The meetings' model is not a dictation size, but it is known:
+                // listing it as orphaned would offer to delete what a meeting loads.
+                let meeting = directory == meetingWhisperDirectory
                 return Entry(
                     // "Whisper base" is the model's name in every language.
-                    name: size.map { "Whisper \($0.rawValue)" } ?? directory,
+                    name: size.map { "Whisper \($0.rawValue)" } ?? (meeting ? "Whisper large-v3-turbo" : directory),
                     url: url,
                     bytes: SpoolInventory.size(of: url, fileManager: fileManager),
-                    state: size == nil ? .orphaned : (inUse.contains(directory) ? .inUse : .available),
+                    state: size == nil && !meeting ? .orphaned : (inUse.contains(directory) ? .inUse : .available),
                     missing: []
                 )
             }
@@ -255,6 +258,11 @@ enum ModelInventory {
         "openai_whisper-\(size.modelName)"
     }
 
+    /// The Whisper model meetings load when it is chosen for them.
+    static var meetingWhisperDirectory: String {
+        "openai_whisper-\(WhisperTranscriber.meetingModel)"
+    }
+
     /// The models Notable itself asks FluidAudio for. Must be revisited
     /// whenever the package version moves — same rule as the API prices next to
     /// `model` in the summarization provider.
@@ -299,10 +307,11 @@ enum ModelInventory {
 
     /// Everything on disk, both roots. Walks directories, so it belongs on a
     /// background task.
-    static func current(engine: ASREngineID = .current) -> [Entry] {
-        let whisperInUse: Set<String> = engine == .whisper
+    static func current(engine: ASREngineID = .current, meetingEngine: MeetingEngineChoice = .current) -> [Entry] {
+        var whisperInUse: Set<String> = engine == .whisper
             ? [whisperDirectory(for: .current)]
             : []
+        if meetingEngine == .whisperTurbo { whisperInUse.insert(meetingWhisperDirectory) }
         return scan(root: modelsRoot, known: knownModels, inUse: inUseDirectories(engine: engine))
             // With no known names, every directory in the old root comes back
             // orphaned — which is exactly what it is: nothing loads from there.

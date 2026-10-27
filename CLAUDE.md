@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status: v1 shipped and installed
 
-**Everything below describes real, tested code** (1084 test methods as of 2026-10-27, after the Whisper meeting engine — `grep -rhoE 'func test' Tests | wc -l`; skips depend on the machine: model-less, CLI-less and `MeetingReplayTests`, which runs only when asked). The app is installed at `/Applications/Notable.app` and under daily use. The build plan that got here is `PLAN.md` — all phases including Phase 8 (dictation quality) are implemented.
+**Everything below describes real, tested code** (1088 test methods as of 2026-10-27, after the archive replay of whole meetings — `grep -rhoE 'func test' Tests | wc -l`; skips depend on the machine: model-less, CLI-less and `MeetingReplayTests`, which runs only when asked). The app is installed at `/Applications/Notable.app` and under daily use. The build plan that got here is `PLAN.md` — all phases including Phase 8 (dictation quality) are implemented.
 
 Runtime health (measured 2026-09-07 on the running 1.1.0 build, up 2 d 15 h): idle CPU 0.0 %, **RSS 28 MB**. The earlier note here claimed ~120 MB with "ASR models warm-loaded at launch — deliberate"; the number no longer matches. `DictationController.start()` does still call `loadModel()` at launch, so the likely explanation is that macOS paged the weights out over two idle days rather than that the loading changed — but that is a guess, and only the 28 MB is measured. Anyone quoting a baseline here should measure it again shortly after a launch. Leaks were 14 KB of framework XPC-cache noise when last measured (2026-07-12).
 
@@ -109,7 +109,7 @@ scripts/check-entitlements.sh <app>                  # run by install/release/no
 
 Signing needs `Signing/Local.xcconfig` (gitignored): copy `Signing/Local.xcconfig.example` and put your Apple Team ID in it. Without it the build stops at `Signing for "Notable" requires selecting either a development team or a provisioning profile`.
 
-Test-suite notes: `ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `EnglishStreamingTests`, and `LatencyProbeTests` run real models (first run downloads GBs from HuggingFace, then cached; the full suite takes ~9 min). `ClaudeCodeCLIProviderTests` makes one real headless call through the logged-in Claude Code CLI (skipped if absent).
+Test-suite notes: `ParakeetTranscriberTests`, `MeetingPipelineE2ETests`, `EnglishStreamingTests`, and `LatencyProbeTests` run real models (first run downloads GBs from HuggingFace, then cached; the full suite takes ~9 min). `ClaudeCodeCLIProviderTests` makes one real headless call through the logged-in Claude Code CLI (skipped if absent). `MeetingPipelineReplayTests` (skipped unless `TEST_RUNNER_NOTABLE_REPLAY=1`) runs whole archived meetings through today's pipeline with the engine named in `TEST_RUNNER_NOTABLE_REPLAY_ENGINE` (`parakeet` or `whisper:<model>`), writes each note to `Application Support/Notable/replay/<engine>/` in the format `scripts/benchmark` reads, and prints numbers only. It is the measurement the meeting-engine decision (Spec 39 §3.4) waits for; the notes hold full transcripts and the folder is meant to be deleted afterwards.
 
 ## Settled decisions
 

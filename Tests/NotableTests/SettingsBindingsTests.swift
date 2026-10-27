@@ -330,9 +330,14 @@ final class SettingsBindingsTests: XCTestCase {
     ///
     /// Wer die Zahl das nächste Mal anhebt, schreibt hier wieder drei Zeilen —
     /// oder lässt es.
+    ///
+    /// **29 → 30 am 2026-10-23**: „Transkript per KI nachbessern“ (Plan vom
+    /// 2026-10-21). Der Schalter schickt das Meeting-Transkript ein zweites Mal
+    /// an den Anbieter. Wie oft Text den Mac verlässt, kann der Code nicht für
+    /// den Nutzer entscheiden, also ein Schalter, und der steht auf aus.
     func testTheControlCountDoesNotGrowBack() throws {
         let counts = try Self.controlCounts()
-        XCTAssertLessThanOrEqual(counts.toggles, 29, "Ein Schalter mehr in den Einstellungen — war das eine Entscheidung, die der Code nicht treffen kann?")
+        XCTAssertLessThanOrEqual(counts.toggles, 30, "Ein Schalter mehr in den Einstellungen — war das eine Entscheidung, die der Code nicht treffen kann?")
         XCTAssertLessThanOrEqual(counts.pickers, 19, "Ein Picker mehr in den Einstellungen — siehe Spec 38 §3.1")
     }
 

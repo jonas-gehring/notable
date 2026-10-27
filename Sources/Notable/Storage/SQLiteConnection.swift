@@ -302,6 +302,7 @@ final class SQLiteConnection: @unchecked Sendable {
         SQLiteConnection.migration6_textStage,
         SQLiteConnection.migration7_speakerSources,
         SQLiteConnection.migration8_voiceProfiles,
+        SQLiteConnection.migration9_originalText,
     ]
 
     /// Every table in its **current** shape, plus the ADD COLUMNs that lift a
@@ -589,6 +590,16 @@ final class SQLiteConnection: @unchecked Sendable {
             PRIMARY KEY (recording_id, cluster)
         )
         """)
+    }
+
+    /// What the speech recognition heard, kept beside a line the AI pass
+    /// changed (`TranscriptRefinement`). `NULL` wherever nothing was changed —
+    /// which is every row written before this column and every meeting with
+    /// the switch off. Not in the full-text index: search finds what the note
+    /// says, and the note says the refined text. Retention empties it together
+    /// with `text`, or the cleanup would leave a second copy behind.
+    private static func migration9_originalText(_ db: SQLiteConnection) throws {
+        try db.addColumn("original_text", type: "TEXT", to: "segments")
     }
 
     /// Idempotent `ADD COLUMN`: only "duplicate column name" is ignored.

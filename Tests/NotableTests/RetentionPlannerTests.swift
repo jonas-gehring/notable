@@ -157,4 +157,36 @@ final class RetentionPlannerTests: XCTestCase {
         store.set(true, forKey: RetentionPolicy.Key.enabled)
         XCTAssertTrue(RetentionPolicy.isEnabled(store))
     }
+
+    // MARK: - Schedule (2026-11-13)
+
+    func testScheduleIsDueWhenItNeverRan() {
+        XCTAssertTrue(RetentionSchedule.isDue(lastRun: nil, now: now))
+    }
+
+    func testScheduleWaitsADayBetweenRuns() {
+        XCTAssertFalse(RetentionSchedule.isDue(lastRun: now.addingTimeInterval(-3600), now: now))
+        XCTAssertFalse(RetentionSchedule.isDue(lastRun: now.addingTimeInterval(-23 * 3600), now: now))
+        XCTAssertTrue(RetentionSchedule.isDue(lastRun: now.addingTimeInterval(-24 * 3600), now: now))
+        XCTAssertTrue(RetentionSchedule.isDue(lastRun: now.addingTimeInterval(-30 * 24 * 3600), now: now))
+    }
+
+    /// A last run "in the future" means the clock moved back; waiting for it
+    /// would silence the cleanup for however far the clock jumped.
+    func testScheduleRunsWhenTheClockWentBackwards() {
+        XCTAssertTrue(RetentionSchedule.isDue(lastRun: now.addingTimeInterval(3600), now: now))
+    }
+
+    /// The hourly check is what keeps a recording at the wrong moment from
+    /// costing a whole day.
+    func testScheduleChecksMoreOftenThanItRuns() {
+        XCTAssertLessThan(RetentionSchedule.checkEvery, RetentionSchedule.interval)
+    }
+
+    func testScheduleRemembersTheLastRun() {
+        let store = UserDefaults(suiteName: "RetentionSchedule-\(UUID().uuidString)")!
+        XCTAssertNil(RetentionSchedule.lastRun(store))
+        RetentionSchedule.markRun(store, at: now)
+        XCTAssertEqual(RetentionSchedule.lastRun(store), now)
+    }
 }

@@ -257,19 +257,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startRetentionSchedule(container)
     }
 
-    /// Runs the cleanup once at launch and then every 24 h. Never during a
-    /// recording — a meeting in progress owns the disk.
+    /// Looks every hour and runs the cleanup when the last run is a day old
+    /// (`RetentionSchedule`). Never during a recording — a meeting in progress
+    /// owns the disk — but a skipped tick now costs an hour, not a day.
     private func startRetentionSchedule(_ container: AppContainer) {
         retentionTask = Task {
             while !Task.isCancelled {
-                if RetentionPolicy.isEnabled(), !container.meeting.state.isRecording {
-                    let runner = RetentionRunner(store: .shared)
-                    let policy = RetentionPolicy.fromDefaults()
-                    await runner.run(runner.plan(policy: policy))
+                if RetentionPolicy.isEnabled(),
+                   !container.meeting.state.isRecording,
+                   RetentionSchedule.isDue(lastRun: RetentionSchedule.lastRun()) {
+                    await Self.runRetention()
                 }
-                try? await Task.sleep(for: .seconds(24 * 3600))
+                try? await Task.sleep(for: .seconds(RetentionSchedule.checkEvery))
             }
         }
+    }
+
+    /// One automatic sweep. Also called by Settings the moment the switch is
+    /// turned on, so "on" visibly does something.
+    @discardableResult
+    static func runRetention() async -> RetentionRunner.Result {
+        let runner = RetentionRunner(store: .shared)
+        let result = await runner.run(runner.plan(policy: RetentionPolicy.fromDefaults()))
+        RetentionSchedule.markRun()
+        await AppContainer.shared.storageNotice.refresh()
+        return result
     }
 
     /// Quitting must not lose a meeting or a note.
@@ -581,18 +593,17 @@ struct MenuContentView: View {
                 ?? dictation.modelState.label)
         }
         // Today's numbers at a glance, and the way into the window that has the
-        // full picture — the line *is* the entry now, where it used to sit as
-        // disabled text next to a separate "Statistik…".
+        // full picture.
         //
-        // Exactly one of the two is always present. On a day with nothing to
-        // report there is no line (see `UsageMetrics.menuLine`), and with the
-        // line switched off there is none either — and in both cases the
-        // statistics window would otherwise be unreachable from this menu.
+        // "Statistik…" is always there. For a while the usage line *replaced*
+        // it, on the theory that a clickable line is the entry; in use it read
+        // as plain text, and the statistics window looked deleted (reported
+        // 2026-11-13). A line that names numbers and an item that names a
+        // window are two different promises, so both stand.
         if showUsageInMenu, let usageLine = usage.line {
             Button(usageLine) { open("stats") }
-        } else {
-            Button("Statistik…") { open("stats") }
         }
+        Button("Statistik…") { open("stats") }
         // Only above the threshold, and it leads somewhere: the page where the
         // retention rules are switched on. The line is a way to the decision,
         // never a substitute for it.

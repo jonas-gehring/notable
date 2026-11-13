@@ -101,6 +101,36 @@ struct RetentionPolicy: Sendable, Equatable {
     }
 }
 
+/// **When** the automatic cleanup runs. Pure, so the rules are tested.
+///
+/// It used to be "once at launch, then sleep 24 h". Two ways that never ran:
+/// switching it on in Settings did nothing until the next launch or the next
+/// day, and a tick that fell into a recording was skipped for a whole day — on
+/// a machine that records most afternoons, sometimes for several days running.
+/// Now the app looks every hour and runs when the last run is a day old, and
+/// switching it on runs it right away.
+enum RetentionSchedule {
+    static let lastRunKey = "retentionLastRun"
+    static let interval: TimeInterval = 24 * 3600
+    static let checkEvery: TimeInterval = 3600
+
+    /// Due when it never ran, when the last run is `interval` old, or when the
+    /// clock went backwards (a last run "in the future" is not a reason to wait).
+    static func isDue(lastRun: Date?, now: Date = Date()) -> Bool {
+        guard let lastRun else { return true }
+        let elapsed = now.timeIntervalSince(lastRun)
+        return elapsed >= interval || elapsed < 0
+    }
+
+    static func lastRun(_ store: UserDefaults = .standard) -> Date? {
+        store.object(forKey: lastRunKey) as? Date
+    }
+
+    static func markRun(_ store: UserDefaults = .standard, at date: Date = Date()) {
+        store.set(date, forKey: lastRunKey)
+    }
+}
+
 /// Decides **what** gets deleted. Pure: file listings in, URLs out — no
 /// `FileManager`, no SQLite, so every rule is unit-testable.
 enum RetentionPlanner {
@@ -313,6 +343,9 @@ actor RetentionRunner {
                 """)
             } catch {
                 log.error("Aufräumen fehlgeschlagen für \(removal.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                // Into the result as well, or a sweep where every deletion
+                // failed reads as "nothing to clean up" in Settings.
+                result.errors.append("\(removal.url.lastPathComponent): \(error.localizedDescription)")
             }
         }
 

@@ -36,8 +36,22 @@ struct AppCategorySection: View {
                             .frame(width: 18, height: 18)
                             .accessibilityHidden(true)
                     }
-                    Text(row.name)
-                    Spacer()
+                    // Name and hint stacked, the picker on the right. The hint
+                    // used to sit in its own 150-pt column beside a picker that
+                    // refused to shrink, which pushed the row past the sheet's
+                    // edge for any app name longer than a word (reported
+                    // 2026-11-13 as "Einstellungen laufen über").
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(row.name)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(category(for: row).hint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .layoutPriority(1)
+                    Spacer(minLength: Theme.Spacing.s)
                     Picker(row.name, selection: binding(for: row)) {
                         ForEach(AppCategory.assignable, id: \.self) { category in
                             Text(category.label).tag(category)
@@ -45,10 +59,6 @@ struct AppCategorySection: View {
                     }
                     .labelsHidden()
                     .fixedSize()
-                    Text(category(for: row).hint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 150, alignment: .leading)
                     if row.builtIn == nil {
                         Button {
                             overrides.removeValue(forKey: row.bundleID)

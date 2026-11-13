@@ -318,6 +318,8 @@ private struct TextPreparationSheet: View {
             }
             .padding(Theme.Spacing.l)
         }
-        .frame(minWidth: 460, minHeight: 420)
+        // Wide enough for the app list's rows (name, hint, category picker);
+        // at 460 they ran past the sheet's edge.
+        .frame(minWidth: 540, idealWidth: 560, minHeight: 420, idealHeight: 560)
     }
 }

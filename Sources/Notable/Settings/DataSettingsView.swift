@@ -34,6 +34,7 @@ struct DataSettingsView: View {
     @State private var pending: RetentionPlanner.Plan?
     @State private var lastResult: RetentionRunner.Result?
     @State private var isWorking = false
+    @State private var lastAutomaticRun: Date?
     @State private var confirmClearApps = false
     @State private var clearedApps: Int?
 
@@ -103,10 +104,41 @@ struct DataSettingsView: View {
                 }
             }
             .disabled(!enabled)
+            if enabled {
+                Text(lastAutomaticRunText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         } header: {
             Text("Aufbewahrung")
         } footer: {
             Text("Gilt nur für rohes Audio. Notizen, Transkripte, Statistik und KI-Kosten werden nie automatisch gelöscht.")
+        }
+        // Switching it on used to do nothing until the next launch or the
+        // next day — indistinguishable from a switch that does not work
+        // (reported 2026-11-13). The switch is the consent; acting on it right
+        // away is what makes it believable.
+        .onChange(of: enabled) { _, isOn in
+            if isOn { runAutomaticNow() }
+        }
+    }
+
+    private var lastAutomaticRunText: String {
+        guard let date = lastAutomaticRun ?? RetentionSchedule.lastRun() else {
+            return String(localized: "Läuft gleich zum ersten Mal, danach einmal am Tag.")
+        }
+        let when = date.formatted(date: .abbreviated, time: .shortened)
+        return String(localized: "Zuletzt automatisch aufgeräumt: \(when). Läuft einmal am Tag.")
+    }
+
+    private func runAutomaticNow() {
+        guard !AppContainer.shared.meeting.state.isRecording else { return }
+        isWorking = true
+        Task {
+            lastResult = await AppDelegate.runRetention()
+            lastAutomaticRun = RetentionSchedule.lastRun()
+            await measure()
+            isWorking = false
         }
     }
 

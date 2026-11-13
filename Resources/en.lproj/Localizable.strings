@@ -1020,3 +1020,7 @@
 "Nimmt das Modell aus den Diktat-Einstellungen." = "Uses the model from the dictation settings.";
 "Langsamer als Parakeet. Bekommt Namen aus Kalender und Wörterbuch als Hinweis und legt die Sprache nach der ersten Minute Sprache fest. Lädt beim Auswählen einmal gut ein Gigabyte herunter." = "Slower than Parakeet. Gets names from the calendar and the dictionary as a hint and settles on one language after the first minute of speech. Downloads a little over a gigabyte once when selected.";
 "Gerade: %@" = "Currently: %@";
+
+/* Retention: when the automatic cleanup runs (2026-11-13) */
+"Läuft gleich zum ersten Mal, danach einmal am Tag." = "Runs for the first time now, then once a day.";
+"Zuletzt automatisch aufgeräumt: %@. Läuft einmal am Tag." = "Last cleaned up automatically: %@. Runs once a day.";
